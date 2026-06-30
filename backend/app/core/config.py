@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     SMTP_USE_TLS: bool = True
     SENDGRID_API_KEY: str | None = None
 
+    # Twilio (SMS OTP delivery)
+    TWILIO_ACCOUNT_SID: str = ""
+    TWILIO_AUTH_TOKEN: str = ""
+    TWILIO_FROM_NUMBER: str = ""
+
     # Frontend
     NEXT_PUBLIC_API_URL: str = "http://localhost:8000"
 
