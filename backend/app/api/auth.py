@@ -15,7 +15,7 @@ from app.core.security import (
     hash_password,
     verify_password,
 )
-from app.db.session import get_db
+from app.db.session import get_async_db
 from app.models.user import KYCStatus, User, UserRole
 from app.models.wallet import Wallet, WalletCurrency
 from app.schemas.user import CurrentUser, UserRegisterRequest, UserRegisterResponse
@@ -53,7 +53,7 @@ class VerifyOTPRequest(BaseModel):
 async def register(
     body: UserRegisterRequest,
     background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     result = await db.execute(
         select(User).where(or_(User.email == body.email, User.phone == body.phone))
@@ -109,7 +109,7 @@ async def register(
 async def login(
     request: Request,
     body: LoginRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     await check_rate_limit(request, key_prefix="login", max_requests=5, window_seconds=60)
 
@@ -188,15 +188,16 @@ async def send_otp(
     request: Request,
     body: SendOTPRequest,
     current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
 ):
-    await check_rate_limit(
-        request,
-        key_prefix="send_otp",
-        max_requests=3,
-        window_seconds=300,
-    )
-    await generate_and_store_otp(body.user_id)
+    await check_rate_limit(request, key_prefix="send_otp", max_requests=3, window_seconds=300)
 
+    result = await db.execute(select(User).where(User.id == body.user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    await generate_and_store_otp(body.user_id, phone_number=user.phone)
     return {"message": f"OTP sent to user {body.user_id}"}
 
 
@@ -221,4 +222,4 @@ async def verify_otp(
             detail="Invalid or expired OTP",
         )
 
-    return {"message": "OTP verified"}
+    return {"message": "OTP verified successfully"}
