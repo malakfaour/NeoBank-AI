@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.api.dependencies import get_current_user
+from app.core.cache_utils import cache_balance, get_cached_balance
 from app.db.session import get_db
 from app.models.user import KYCStatus, User
 from app.models.wallet import Wallet
@@ -28,23 +29,38 @@ async def create_account(user_id: int, db: AsyncSession = Depends(get_db)):
 
 @router.get("/balance")
 async def get_balance(user_id: int, db: AsyncSession = Depends(get_db)):
-    """Get all wallet balances for a user - reads fresh from DB"""
+    """
+    Get all wallet balances for a user. Cached in Redis for 30s
+    (NBL-403) -- cache is invalidated on every debit/credit by the
+    transactions service via app.core.cache_utils.invalidate_balance_cache.
+    """
+    cached = await get_cached_balance(user_id)
+    if cached is not None:
+        return cached
+
     result = await db.execute(
         select(Wallet).where(Wallet.user_id == user_id)
     )
     wallets = result.scalars().all()
     if not wallets:
         raise HTTPException(status_code=404, detail="No wallets found for this user")
-    return {
+
+    response = {
         "user_id": user_id,
         "balances": [
             {
-                "currency": w.currency,
-                "balance": float(w.balance)
+                "currency": w.currency.value,
+                "balance": float(w.balance),
+                "account_number": w.account_number,
+                "iban": w.iban,
             }
             for w in wallets
         ]
     }
+
+    await cache_balance(user_id, response)
+
+    return response
 
 
 @router.get("/validate-recipient")
