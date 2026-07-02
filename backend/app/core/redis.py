@@ -77,3 +77,39 @@ async def revoke_all_user_tokens(user_id: str, current_refresh_jti: str) -> None
     pipe.setex(f"blacklist:{current_refresh_jti}", ttl, "1")
     pipe.delete(_user_refresh_key(user_id))
     await pipe.execute()
+# ── Passcode action token (short-lived token for high-value actions) ──────────
+
+async def store_action_token(user_id: str, token: str, ttl: int = 300) -> None:
+    """Store a short-lived action token (5 min TTL) for high-value actions."""
+    await redis_client.set(f"action_token:{user_id}", token, ex=ttl)
+
+
+async def get_action_token(user_id: str) -> str | None:
+    """Retrieve the action token for a user."""
+    return await redis_client.get(f"action_token:{user_id}")
+
+
+# ── Passcode attempt locking ───────────────────────────────────────────────────
+
+def _passcode_attempts_key(user_id: str) -> str:
+    return f"passcode_attempts:{user_id}"
+
+
+async def increment_passcode_attempts(user_id: str) -> int:
+    """Increment failed passcode attempts. Returns current count."""
+    key = _passcode_attempts_key(user_id)
+    count = await redis_client.incr(key)
+    if count == 1:
+        await redis_client.expire(key, 600)  # 10 min window
+    return count
+
+
+async def is_passcode_locked(user_id: str) -> bool:
+    """Returns True if user has 3+ failed passcode attempts."""
+    count = await redis_client.get(_passcode_attempts_key(user_id))
+    return int(count) >= 3 if count else False
+
+
+async def reset_passcode_attempts(user_id: str) -> None:
+    """Reset failed attempts after successful passcode verification."""
+    await redis_client.delete(_passcode_attempts_key(user_id))

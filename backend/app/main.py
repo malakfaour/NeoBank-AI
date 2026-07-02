@@ -2,6 +2,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.auth import router as auth_router
+from app.api.passcode import router as passcode_router
 from app.api.chatbot import router as chatbot_router
 from app.api.kyc import router as kyc_router
 from app.api.v1.endpoints.exchange import router as exchange_router
@@ -30,6 +31,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router, prefix="/auth", tags=["auth"])
+app.include_router(passcode_router, prefix="/auth/passcode", tags=["passcode"])
 app.include_router(kyc_router, prefix="/kyc", tags=["kyc"])
 app.include_router(chatbot_router, prefix="/chatbot", tags=["chatbot"])
 app.include_router(exchange_router)

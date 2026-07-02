@@ -30,6 +30,7 @@ class User(Base):
     kyc_status = Column(SAEnum(KYCStatus), nullable=False, default=KYCStatus.pending)
     role = Column(SAEnum(UserRole), nullable=False, default=UserRole.customer)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    passcode_hash = Column(String(255), nullable=True)
 
     kyc_records = relationship("KYCRecord", back_populates="user")
     wallets = relationship("Wallet", back_populates="user", cascade="all, delete-orphan")
