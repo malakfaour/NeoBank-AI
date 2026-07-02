@@ -17,10 +17,10 @@ from app.schemas.user import CurrentUser
 from app.services.audit_log import append_audit
 from app.tasks.transaction_tasks import score_transaction
 
-from datetime import date
+from datetime import date, timedelta
 
 from fastapi import Query
-from sqlalchemy import and_, extract, func, or_
+from sqlalchemy import and_, func, or_
 
 from app.models.transaction_audit_log import TransactionAuditLog
 from app.models.user import User
@@ -234,6 +234,9 @@ async def get_transaction_summary(
 
     sender_id = int(current_user.id)
 
+    month_start = date(year, month_num, 1)
+    month_end = date(year + 1, 1, 1) if month_num == 12 else date(year, month_num + 1, 1)
+
     result = await db.execute(
         select(
             Transaction.category,
@@ -242,11 +245,10 @@ async def get_transaction_summary(
             func.count(Transaction.id).label("transaction_count"),
         )
         .where(Transaction.sender_id == sender_id)
-        .where(extract("year", Transaction.created_at) == year)
-        .where(extract("month", Transaction.created_at) == month_num)
+        .where(Transaction.created_at >= month_start)
+        .where(Transaction.created_at < month_end)
         .group_by(Transaction.category, Transaction.currency)
     )
-
     summary_items = [
         CategorySummaryItem(
             category=row.category,
@@ -363,9 +365,9 @@ async def list_transactions(
         filters.append(Transaction.receiver_id == user_id)
 
     if start_date is not None:
-        filters.append(func.date(Transaction.created_at) >= start_date)
+        filters.append(Transaction.created_at >= start_date)
     if end_date is not None:
-        filters.append(func.date(Transaction.created_at) <= end_date)
+        filters.append(Transaction.created_at < end_date + timedelta(days=1))
     if category is not None:
         filters.append(Transaction.category == category)
     if currency_enum is not None:
