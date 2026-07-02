@@ -1,6 +1,8 @@
+import asyncio
 import json
 from decimal import Decimal
 
+import httpx
 import redis
 
 from app.celery_app import celery_app
@@ -8,29 +10,62 @@ from app.core.config import settings
 from app.services.exchange_cache import EXCHANGE_RATES_CACHE_KEY
 
 
-STUB_RATES = {
-    ("USD", "LBP"): Decimal("89500"),
-    ("EUR", "USD"): Decimal("1.08"),
-    ("USD", "EUR"): Decimal("0.92"),
-}
+EXCHANGE_API_URL = "https://open.er-api.com/v6/latest/USD"
 
 
 def decimal_to_str_rates(rates: dict[tuple[str, str], Decimal]) -> dict[str, str]:
     return {f"{base}:{target}": str(rate) for (base, target), rate in rates.items()}
 
 
-@celery_app.task(name="app.tasks.exchange_tasks.poll_exchange_rates")
-def poll_exchange_rates():
+async def fetch_exchange_rates() -> dict[tuple[str, str], Decimal]:
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.get(EXCHANGE_API_URL)
+        response.raise_for_status()
+
+    data = response.json()
+
+    if data.get("result") != "success":
+        raise RuntimeError("Exchange rate provider returned an unsuccessful response")
+
+    provider_rates = data.get("rates", {})
+
+    usd_to_lbp = provider_rates.get("LBP")
+    usd_to_eur = provider_rates.get("EUR")
+
+    if usd_to_lbp is None:
+        raise RuntimeError("LBP rate was not found in provider response")
+
+    rates: dict[tuple[str, str], Decimal] = {
+        ("USD", "LBP"): Decimal(str(usd_to_lbp)),
+        ("LBP", "USD"): Decimal("1") / Decimal(str(usd_to_lbp)),
+    }
+
+    if usd_to_eur is not None:
+        rates[("USD", "EUR")] = Decimal(str(usd_to_eur))
+        rates[("EUR", "USD")] = Decimal("1") / Decimal(str(usd_to_eur))
+
+    return rates
+
+
+async def refresh_exchange_rates_cache() -> dict[str, object]:
+    rates = await fetch_exchange_rates()
+
     redis_client = redis.Redis.from_url(settings.REDIS_URL, decode_responses=True)
 
     redis_client.setex(
         EXCHANGE_RATES_CACHE_KEY,
         300,
-        json.dumps(decimal_to_str_rates(STUB_RATES)),
+        json.dumps(decimal_to_str_rates(rates)),
     )
 
     return {
         "status": "ok",
-        "message": "Exchange rates cache refreshed",
-        "rates_count": len(STUB_RATES),
+        "message": "Exchange rates cache refreshed from real provider",
+        "rates_count": len(rates),
+        "provider": "open.er-api.com",
     }
+
+
+@celery_app.task(name="app.tasks.exchange_tasks.poll_exchange_rates")
+def poll_exchange_rates():
+    return asyncio.run(refresh_exchange_rates_cache())
