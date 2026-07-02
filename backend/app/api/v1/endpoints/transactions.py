@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+﻿from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -131,6 +131,7 @@ async def send_money(
     try:
         score_result = score_transaction(transaction.id)
         transaction.fraud_score = score_result["score"]
+        transaction.scoring_model = score_result.get("model")
         transaction.status = (
             TransactionStatus.flagged
             if score_result["score"] >= FRAUD_FLAG_THRESHOLD
