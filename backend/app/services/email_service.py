@@ -1,6 +1,9 @@
 import logging
 import smtplib
 from email.message import EmailMessage
+from email.utils import parseaddr
+
+import httpx
 
 from app.core.config import settings
 
@@ -33,14 +36,15 @@ def send_email(
         return
 
     if provider == "sendgrid":
-        logger.info("SendGrid provider configured. Week 1 behavior: console log only.")
-        logger.info("To: %s", to_email)
-        logger.info("From: %s", settings.EMAIL_FROM)
-        logger.info("Subject: %s", subject)
-        logger.info("Body: %s", body)
+        _send_email_sendgrid(
+            to_email=to_email,
+            subject=subject,
+            body=body,
+            html_body=html_body,
+        )
         return
 
-    logger.warning("Unknown EMAIL_PROVIDER=%s. Email was not sent.", provider)
+    raise ValueError(f"Unsupported EMAIL_PROVIDER: {settings.EMAIL_PROVIDER}")
 
 
 def _send_email_smtp(
@@ -70,6 +74,59 @@ def _send_email_smtp(
             server.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD)
 
         server.send_message(message)
+
+
+def _send_email_sendgrid(
+    to_email: str,
+    subject: str,
+    body: str,
+    html_body: str | None = None,
+) -> None:
+    if not settings.SENDGRID_API_KEY:
+        raise ValueError("SENDGRID_API_KEY is required when EMAIL_PROVIDER=sendgrid")
+
+    from_name, from_email = parseaddr(settings.EMAIL_FROM)
+
+    if not from_email:
+        from_email = "no-reply@neobank.local"
+
+    payload = {
+        "personalizations": [
+            {
+                "to": [{"email": to_email}],
+            }
+        ],
+        "from": {
+            "email": from_email,
+            "name": from_name or "NeoBank Lebanon",
+        },
+        "subject": subject,
+        "content": [
+            {
+                "type": "text/plain",
+                "value": body,
+            }
+        ],
+    }
+
+    if html_body:
+        payload["content"].append(
+            {
+                "type": "text/html",
+                "value": html_body,
+            }
+        )
+
+    response = httpx.post(
+        "https://api.sendgrid.com/v3/mail/send",
+        headers={
+            "Authorization": f"Bearer {settings.SENDGRID_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+        timeout=10,
+    )
+    response.raise_for_status()
 
 
 def send_welcome_email(to_email: str, full_name: str | None = None) -> None:
