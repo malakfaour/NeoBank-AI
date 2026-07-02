@@ -1,12 +1,13 @@
 ﻿from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_current_user
 from app.db.session import get_db
 from app.models.user import KYCStatus, User
 from app.models.wallet import Wallet
 from app.schemas.user import CurrentUser
+from app.schemas.wallet import CardTopUpRequest, CardTopUpResponse
 from app.services.account_service import create_wallets_for_user
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
@@ -20,7 +21,7 @@ async def create_account(user_id: int, db: AsyncSession = Depends(get_db)):
         return {
             "message": "Wallets created successfully",
             "user_id": user_id,
-            "wallets_created": len(wallets)
+            "wallets_created": len(wallets),
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -29,21 +30,60 @@ async def create_account(user_id: int, db: AsyncSession = Depends(get_db)):
 @router.get("/balance")
 async def get_balance(user_id: int, db: AsyncSession = Depends(get_db)):
     """Get all wallet balances for a user - reads fresh from DB"""
-    result = await db.execute(
-        select(Wallet).where(Wallet.user_id == user_id)
-    )
+    result = await db.execute(select(Wallet).where(Wallet.user_id == user_id))
     wallets = result.scalars().all()
+
     if not wallets:
         raise HTTPException(status_code=404, detail="No wallets found for this user")
+
     return {
         "user_id": user_id,
         "balances": [
             {
                 "currency": w.currency,
-                "balance": float(w.balance)
+                "balance": float(w.balance),
             }
             for w in wallets
-        ]
+        ],
+    }
+
+
+@router.post("/top-up", response_model=CardTopUpResponse)
+async def card_top_up(
+    payload: CardTopUpRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Tokenized card top-up endpoint.
+
+    This endpoint does not accept or store real card numbers.
+    It only accepts a tokenized card reference such as tok_visa_test_123.
+    """
+
+    if not payload.card_token.startswith("tok_"):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid card token. Use a tokenized card reference.",
+        )
+
+    result = await db.execute(select(Wallet).where(Wallet.id == payload.wallet_id))
+    wallet = result.scalar_one_or_none()
+
+    if wallet is None:
+        raise HTTPException(status_code=404, detail="Wallet not found")
+
+    wallet.balance = wallet.balance + payload.amount
+
+    await db.commit()
+    await db.refresh(wallet)
+
+    return {
+        "wallet_id": wallet.id,
+        "currency": wallet.currency.value if hasattr(wallet.currency, "value") else str(wallet.currency),
+        "top_up_amount": payload.amount,
+        "new_balance": wallet.balance,
+        "status": "success",
+        "message": "Card top-up completed successfully",
     }
 
 
@@ -61,7 +101,8 @@ async def validate_recipient(
     """
     if not phone and not iban:
         raise HTTPException(
-            status_code=400, detail="Provide either phone or iban query param"
+            status_code=400,
+            detail="Provide either phone or iban query param",
         )
 
     user = None
@@ -88,8 +129,6 @@ async def validate_recipient(
     return {
         "exists": True,
         "display_name": user.full_name,
-        # Placeholder: no real account-type concept exists in the schema
-        # yet. Hardcoded until product defines individual/business etc.
         "account_type": "individual",
         "kyc_approved": user.kyc_status == KYCStatus.approved,
     }
