@@ -33,4 +33,5 @@ class User(Base):
     passcode_hash = Column(String(255), nullable=True)
 
     kyc_records = relationship("KYCRecord", back_populates="user")
+    sessions = relationship("UserSession", back_populates="user", cascade="all, delete-orphan")
     wallets = relationship("Wallet", back_populates="user", cascade="all, delete-orphan")

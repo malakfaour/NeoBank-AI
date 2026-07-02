@@ -27,6 +27,7 @@ from app.models.user import KYCStatus, User, UserRole
 from app.models.wallet import Wallet, WalletCurrency
 from app.schemas.user import CurrentUser, UserRegisterRequest, UserRegisterResponse
 from app.services.email_service import send_welcome_email
+from app.api.sessions import create_session
 from app.services.otp import generate_and_store_otp, verify_and_consume_otp
 from app.services.rate_limiter import check_rate_limit
 
@@ -133,6 +134,7 @@ async def login(
     access_token, _ = create_access_token(str(user.id), role=user.role.value)
     refresh_token, refresh_jti = create_refresh_token(str(user.id), role=user.role.value)
     await store_refresh_jti(str(user.id), refresh_jti)
+    await create_session(user_id=user.id, request=request, db=db)
 
     return {
         "access_token": access_token,
