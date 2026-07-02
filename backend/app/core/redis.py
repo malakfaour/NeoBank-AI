@@ -1,3 +1,6 @@
+import hashlib
+import json
+
 import redis.asyncio as aioredis
 from app.core.config import settings
 
@@ -14,3 +17,40 @@ async def blacklist_token(jti: str, expire_minutes: int = None) -> None:
 async def is_blacklisted(jti: str) -> bool:
     result = await redis_client.get(f"blacklist:{jti}")
     return result is not None
+
+
+# --- DEVATTECH-72: send-money idempotency ---
+
+IDEMPOTENCY_TTL_SECONDS = 24 * 60 * 60  # 24h
+
+
+def hash_idempotency_key(user_id: int, raw_key: str) -> str:
+    """
+    Scope the client-supplied X-Idempotency-Key to the requesting user, so
+    two different users coincidentally sending the same header value don't
+    collide. Also used as Transaction.idempotency_key in the DB (unique
+    constraint acts as the final safety net if a Redis race lets two
+    identical requests both fall through).
+    """
+    return hashlib.sha256(f"{user_id}:{raw_key}".encode()).hexdigest()
+
+
+async def get_cached_idempotent_response(user_id: int, raw_key: str) -> dict | None:
+    cached = await redis_client.get(f"idem:{hash_idempotency_key(user_id, raw_key)}")
+    if cached is None:
+        return None
+    return json.loads(cached)
+
+
+async def cache_idempotent_response(user_id: int, raw_key: str, response: dict) -> None:
+    # NOTE: naive check-then-set. Two identical requests arriving within the
+    # same few milliseconds could both miss this cache and both proceed to
+    # execute — the DB's unique constraint on Transaction.idempotency_key is
+    # the actual safety net for that race (see app/api/transactions.py).
+    # A SETNX-based lock would close the Redis-level race too, if this
+    # becomes a real problem under load.
+    await redis_client.setex(
+        f"idem:{hash_idempotency_key(user_id, raw_key)}",
+        IDEMPOTENCY_TTL_SECONDS,
+        json.dumps(response),
+    )
