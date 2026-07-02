@@ -1,8 +1,11 @@
 from decimal import Decimal
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.session import get_db
+from app.models.exchange_audit_log import ExchangeAuditLog
 from app.schemas.exchange import (
     ConvertCurrencyResponse,
     ExchangeExecutionRequest,
@@ -107,7 +110,10 @@ async def convert_currency(
 
 
 @router.post("/execute", response_model=ExchangeExecutionResponse)
-async def execute_exchange(payload: ExchangeExecutionRequest):
+async def execute_exchange(
+    payload: ExchangeExecutionRequest,
+    db: AsyncSession = Depends(get_db),
+):
     from_currency = payload.from_currency.upper()
     to_currency = payload.to_currency.upper()
 
@@ -136,10 +142,25 @@ async def execute_exchange(payload: ExchangeExecutionRequest):
             detail=f"Exchange pair {from_currency}->{to_currency} is not supported",
         )
 
+    exchange_id = uuid4()
     converted_amount = payload.amount * rate
 
+    audit_log = ExchangeAuditLog(
+        exchange_id=str(exchange_id),
+        from_currency=from_currency,
+        to_currency=to_currency,
+        amount=payload.amount,
+        rate=rate,
+        converted_amount=converted_amount,
+        status="executed",
+        provider="open.er-api.com/redis-cache",
+    )
+
+    db.add(audit_log)
+    await db.commit()
+
     return {
-        "exchange_id": uuid4(),
+        "exchange_id": exchange_id,
         "status": "executed",
         "from_currency": from_currency,
         "to_currency": to_currency,
