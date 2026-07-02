@@ -7,7 +7,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_current_user
 from app.core.config import settings
-from app.core.redis import blacklist_token, is_blacklisted
+from app.core.redis import (
+    blacklist_token,
+    is_blacklisted,
+    refresh_jti_exists,
+    revoke_all_user_tokens,
+    rotate_refresh_jti,
+    store_refresh_jti,
+)
 from app.core.security import (
     create_access_token,
     create_refresh_token,
@@ -38,6 +45,7 @@ class RefreshRequest(BaseModel):
 
 class LogoutRequest(BaseModel):
     access_token: str
+    refresh_token: str
 
 
 class SendOTPRequest(BaseModel):
@@ -59,7 +67,6 @@ async def register(
         select(User).where(or_(User.email == body.email, User.phone == body.phone))
     )
     existing_user = result.scalar_one_or_none()
-
     if existing_user:
         detail = (
             "Email already exists"
@@ -96,7 +103,8 @@ async def register(
     )
 
     access_token, _ = create_access_token(str(user.id), role=user.role.value)
-    refresh_token, _ = create_refresh_token(str(user.id), role=user.role.value)
+    refresh_token, refresh_jti = create_refresh_token(str(user.id), role=user.role.value)
+    await store_refresh_jti(str(user.id), refresh_jti)
 
     return UserRegisterResponse(
         access_token=access_token,
@@ -123,7 +131,8 @@ async def login(
         )
 
     access_token, _ = create_access_token(str(user.id), role=user.role.value)
-    refresh_token, _ = create_refresh_token(str(user.id), role=user.role.value)
+    refresh_token, refresh_jti = create_refresh_token(str(user.id), role=user.role.value)
+    await store_refresh_jti(str(user.id), refresh_jti)
 
     return {
         "access_token": access_token,
@@ -149,36 +158,60 @@ async def refresh(body: RefreshRequest):
         )
 
     jti = payload.get("jti")
+    user_id = payload.get("sub")
+    role = payload.get("role")
 
+    # Check if already blacklisted
     if await is_blacklisted(jti):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token already revoked",
         )
 
-    await blacklist_token(jti, expire_minutes=settings.JWT_REFRESH_EXPIRE_DAYS * 24 * 60)
+    # Check if JTI exists in registry — if not, replay attack detected
+    if not await refresh_jti_exists(jti):
+        # Replay attack — revoke everything for this user
+        await revoke_all_user_tokens(user_id, jti)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token already used. All sessions revoked.",
+        )
 
-    access_token, _ = create_access_token(payload["sub"], role=payload.get("role"))
-    refresh_token, _ = create_refresh_token(payload["sub"], role=payload.get("role"))
+    # Issue new tokens and atomically rotate
+    new_access_token, _ = create_access_token(user_id, role=role)
+    new_refresh_token, new_refresh_jti = create_refresh_token(user_id, role=role)
+    await rotate_refresh_jti(user_id, old_jti=jti, new_jti=new_refresh_jti)
 
     return {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
+        "access_token": new_access_token,
+        "refresh_token": new_refresh_token,
         "token_type": "bearer",
     }
 
 
-@router.post("/logout", summary="Logout and blacklist token")
+@router.post("/logout", summary="Logout and blacklist both tokens")
 async def logout(body: LogoutRequest):
     try:
-        payload = decode_token(body.access_token)
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token",
-        ) from exc
+        access_payload = decode_token(body.access_token)
+    except Exception:
+        access_payload = None
 
-    await blacklist_token(payload["jti"])
+    try:
+        refresh_payload = decode_token(body.refresh_token)
+    except Exception:
+        refresh_payload = None
+
+    if access_payload:
+        await blacklist_token(access_payload["jti"])
+
+    if refresh_payload:
+        refresh_jti = refresh_payload["jti"]
+        user_id = refresh_payload.get("sub")
+        await blacklist_token(
+            refresh_jti,
+            expire_minutes=settings.JWT_REFRESH_EXPIRE_DAYS * 24 * 60,
+        )
+        await revoke_all_user_tokens(user_id, refresh_jti)
 
     return {"message": "Logged out successfully"}
 
