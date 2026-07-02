@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 from uuid import UUID
@@ -37,3 +37,16 @@ class ExchangeExecutionResponse(BaseModel):
     rate: Decimal
     converted_amount: Decimal
     message: str
+
+
+class ExchangeForecastPoint(BaseModel):
+    date: date
+    predicted_rate: Decimal
+
+
+class ExchangeForecastResponse(BaseModel):
+    base_currency: str
+    target_currency: str
+    days: int
+    model: str
+    predictions: list[ExchangeForecastPoint]

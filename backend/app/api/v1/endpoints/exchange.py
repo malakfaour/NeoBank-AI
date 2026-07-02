@@ -3,6 +3,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.concurrency import run_in_threadpool
 
 from app.db.session import get_db
 from app.models.exchange_audit_log import ExchangeAuditLog
@@ -10,12 +11,14 @@ from app.schemas.exchange import (
     ConvertCurrencyResponse,
     ExchangeExecutionRequest,
     ExchangeExecutionResponse,
+    ExchangeForecastResponse,
     ExchangeRateResponse,
 )
 from app.services.exchange_cache import (
     get_cached_exchange_rates,
     set_cached_exchange_rates,
 )
+from app.services.exchange_forecast import train_and_forecast_usd_lbp
 from app.services.market_hours import get_market_status, is_market_open
 from app.tasks.exchange_tasks import fetch_exchange_rates
 
@@ -168,4 +171,31 @@ async def execute_exchange(
         "rate": rate,
         "converted_amount": converted_amount,
         "message": "Exchange executed successfully",
+    }
+
+
+@router.get("/forecast", response_model=ExchangeForecastResponse)
+async def forecast_exchange_rate(days: int = Query(7, ge=1, le=7)):
+    rates = await get_rates_from_cache_or_provider()
+
+    latest_rate = rates.get(("USD", "LBP"))
+
+    if latest_rate is None:
+        raise HTTPException(
+            status_code=400,
+            detail="USD to LBP rate is not available for forecasting",
+        )
+
+    predictions = await run_in_threadpool(
+        train_and_forecast_usd_lbp,
+        latest_rate,
+        days,
+    )
+
+    return {
+        "base_currency": "USD",
+        "target_currency": "LBP",
+        "days": days,
+        "model": "LightGBM",
+        "predictions": predictions,
     }
