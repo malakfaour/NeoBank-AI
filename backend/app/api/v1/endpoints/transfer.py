@@ -181,6 +181,15 @@ async def transfer_by_iban(
 
     receiver_wallet, receiver = row
 
+    if payload.currency != receiver_wallet.currency.value:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Currency mismatch: requested {payload.currency}, "
+                f"but this IBAN's wallet is {receiver_wallet.currency.value}"
+            ),
+        )
+
     return await _execute_transfer(
         sender_id=sender_id,
         receiver=receiver,
