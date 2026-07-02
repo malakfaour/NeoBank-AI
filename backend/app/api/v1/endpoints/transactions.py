@@ -101,7 +101,7 @@ async def send_money(
         sender_id=sender_id,
         receiver_id=receiver_id,
         amount=payload.amount,
-        currency=TransactionCurrency(payload.currency),
+        currency=TransactionCurrency(wallet_currency.value),
         status=TransactionStatus.pending,
         idempotency_key=hash_idempotency_key(sender_id, x_idempotency_key),
     )
@@ -128,15 +128,19 @@ async def send_money(
     # inline synchronous call must be replaced with a callback/webhook that
     # updates the transaction status once the Celery task actually
     # completes, instead of deciding status synchronously in this request.
-    score_result = score_transaction(transaction.id)  # sync in-process call — stub only
-    score_transaction.delay(transaction.id)  # also enqueue on the real async pipeline
+    try:
+        score_result = score_transaction(transaction.id)
+        transaction.fraud_score = score_result["score"]
+        transaction.status = (
+            TransactionStatus.flagged
+            if score_result["score"] >= FRAUD_FLAG_THRESHOLD
+            else TransactionStatus.completed
+        )
+    except Exception:
+        # Scoring failed after money already moved — don't silently leave
+        # this as `pending`. Flag it for manual review instead.
+        transaction.status = TransactionStatus.flagged
 
-    transaction.fraud_score = score_result["score"]
-    transaction.status = (
-        TransactionStatus.flagged
-        if score_result["score"] >= FRAUD_FLAG_THRESHOLD
-        else TransactionStatus.completed
-    )
     await db.commit()
     await db.refresh(transaction)
 
