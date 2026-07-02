@@ -192,7 +192,7 @@ async def send_otp(
 ):
     await check_rate_limit(request, key_prefix="send_otp", max_requests=3, window_seconds=300)
 
-    result = await db.execute(select(User).where(User.id == body.user_id))
+    result = await db.execute(select(User).where(User.id == int(body.user_id)))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")

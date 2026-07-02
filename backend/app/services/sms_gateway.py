@@ -51,6 +51,7 @@ async def send_sms(to_number: str, body: str) -> str:
 
             if response.status_code >= 400:
                 logger.error(f"Twilio rejected request: {response.status_code} {response.text}")
+                print(f"TWILIO ERROR: {response.status_code} - {response.text}", flush=True)
                 raise HTTPException(
                     status_code=status.HTTP_502_BAD_GATEWAY,
                     detail="SMS gateway rejected the request",
