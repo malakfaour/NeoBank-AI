@@ -17,6 +17,23 @@ from app.schemas.user import CurrentUser
 from app.services.audit_log import append_audit
 from app.tasks.transaction_tasks import score_transaction
 
+from datetime import date
+
+from fastapi import Query
+from sqlalchemy import and_, extract, func, or_
+
+from app.models.transaction_audit_log import TransactionAuditLog
+from app.models.user import User
+from app.schemas.transaction import (
+    CategorySummaryItem,
+    TransactionAuditLogItem,
+    TransactionDetailResponse,
+    TransactionListItem,
+    TransactionListResponse,
+    TransactionSummaryResponse,
+)
+from app.utils.transaction_query_utils import compute_total_pages, parse_summary_month
+
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
 # Fraud score threshold: at/above this, the transaction is held for review
@@ -179,23 +196,6 @@ async def send_money(
 # original import block above — Python resolves names inside a function
 # body at call time, not at definition time, so module-level imports placed
 # after a function's def are still valid before any request is served.
-
-from datetime import date
-
-from fastapi import Query
-from sqlalchemy import and_, extract, func, or_
-
-from app.models.transaction_audit_log import TransactionAuditLog
-from app.models.user import User
-from app.schemas.transaction import (
-    CategorySummaryItem,
-    TransactionAuditLogItem,
-    TransactionDetailResponse,
-    TransactionListItem,
-    TransactionListResponse,
-    TransactionSummaryResponse,
-)
-from app.utils.transaction_query_utils import compute_total_pages, parse_summary_month
 
 # Route registration order matters here: "/summary" is registered before
 # "/{transaction_id}" so a request to GET /transactions/summary doesn't get
