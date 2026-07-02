@@ -170,3 +170,255 @@ async def send_money(
     await cache_idempotent_response(sender_id, x_idempotency_key, response.model_dump(mode="json"))
 
     return response
+
+# --- DEVATTECH-73: transaction history / detail / summary ---
+#
+# Everything below this line is new. send_money() above is byte-for-byte
+# unchanged from the base file. New imports needed only for the endpoints
+# below are also placed here (after send_money), rather than added into the
+# original import block above — Python resolves names inside a function
+# body at call time, not at definition time, so module-level imports placed
+# after a function's def are still valid before any request is served.
+
+from datetime import date
+
+from fastapi import Query
+from sqlalchemy import and_, extract, func, or_
+
+from app.models.transaction_audit_log import TransactionAuditLog
+from app.models.user import User
+from app.schemas.transaction import (
+    CategorySummaryItem,
+    TransactionAuditLogItem,
+    TransactionDetailResponse,
+    TransactionListItem,
+    TransactionListResponse,
+    TransactionSummaryResponse,
+)
+from app.utils.transaction_query_utils import compute_total_pages, parse_summary_month
+
+# Route registration order matters here: "/summary" is registered before
+# "/{transaction_id}" so a request to GET /transactions/summary doesn't get
+# swallowed by the {transaction_id} path parameter.
+
+# The `transactions` table only models peer-to-peer transfers
+# (sender_id/receiver_id). topup/bill/exchange belong to other features
+# (bill payments, exchange execution) that don't write to this table yet.
+# These values are accepted as valid filters (so the endpoint doesn't 400
+# on a legitimate future value) but currently match zero rows.
+VALID_TRANSACTION_TYPES = {"send", "receive", "topup", "bill", "exchange"}
+TYPES_NOT_YET_SUPPORTED = {"topup", "bill", "exchange"}
+
+
+@router.get("/summary", response_model=TransactionSummaryResponse)
+async def get_transaction_summary(
+    month: str = Query(..., description="Format YYYY-MM, e.g. 2026-07"),
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Total amount spent (outgoing only — current user as sender) per
+    category, for the given month. Used by the dashboard spending chart.
+
+    Grouped by (category, currency), not category alone — summing amounts
+    across different currencies (USD/LBP/USDT) into one total would be
+    financially meaningless. currency is included in each row as a result.
+    """
+    try:
+        year, month_num = parse_summary_month(month)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="month must be in YYYY-MM format",
+        )
+
+    sender_id = int(current_user.id)
+
+    result = await db.execute(
+        select(
+            Transaction.category,
+            Transaction.currency,
+            func.sum(Transaction.amount).label("total_amount"),
+            func.count(Transaction.id).label("transaction_count"),
+        )
+        .where(Transaction.sender_id == sender_id)
+        .where(extract("year", Transaction.created_at) == year)
+        .where(extract("month", Transaction.created_at) == month_num)
+        .group_by(Transaction.category, Transaction.currency)
+    )
+
+    summary_items = [
+        CategorySummaryItem(
+            category=row.category,
+            currency=row.currency.value,
+            total_amount=row.total_amount,
+            transaction_count=row.transaction_count,
+        )
+        for row in result.all()
+    ]
+
+    return TransactionSummaryResponse(month=month, summary=summary_items)
+
+
+@router.get("/{transaction_id}", response_model=TransactionDetailResponse)
+async def get_transaction_detail(
+    transaction_id: int,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    NOTE: restricted to transactions the authenticated user is a party to
+    (sender or receiver) — not explicit in the ticket text, but returning
+    any user's transaction + audit trail to anyone with a guessable id
+    would be a data leak. Added as a security default.
+    """
+    user_id = int(current_user.id)
+
+    result = await db.execute(select(Transaction).where(Transaction.id == transaction_id))
+    transaction = result.scalar_one_or_none()
+
+    if transaction is None or user_id not in (transaction.sender_id, transaction.receiver_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transaction not found")
+
+    is_sender = transaction.sender_id == user_id
+    counterparty_id = transaction.receiver_id if is_sender else transaction.sender_id
+
+    counterparty_result = await db.execute(select(User).where(User.id == counterparty_id))
+    counterparty = counterparty_result.scalar_one_or_none()
+
+    audit_result = await db.execute(
+        select(TransactionAuditLog)
+        .where(TransactionAuditLog.transaction_id == transaction_id)
+        .order_by(TransactionAuditLog.timestamp.asc())
+    )
+    audit_logs = audit_result.scalars().all()
+
+    return TransactionDetailResponse(
+        id=transaction.id,
+        sender_id=transaction.sender_id,
+        receiver_id=transaction.receiver_id,
+        type="send" if is_sender else "receive",
+        amount=transaction.amount,
+        currency=transaction.currency.value,
+        counterparty_name=counterparty.full_name if counterparty else None,
+        category=transaction.category,
+        fraud_score=transaction.fraud_score,
+        rule_triggered=None,  # fraud_flags table doesn't exist yet — see DEVATTECH-73 notes
+        status=transaction.status.value,
+        flagged=transaction.status == TransactionStatus.flagged,
+        created_at=transaction.created_at,
+        audit_logs=[
+            TransactionAuditLogItem(
+                id=log.id,
+                action=log.action,
+                actor_id=log.actor_id,
+                timestamp=log.timestamp,
+                metadata=log.event_metadata,
+            )
+            for log in audit_logs
+        ],
+    )
+
+
+@router.get("", response_model=TransactionListResponse)
+async def list_transactions(
+    start_date: date | None = None,
+    end_date: date | None = None,
+    type: str | None = Query(default=None),
+    category: str | None = None,
+    currency: str | None = None,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    user_id = int(current_user.id)
+
+    if type is not None and type not in VALID_TRANSACTION_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"type must be one of {sorted(VALID_TRANSACTION_TYPES)}",
+        )
+
+    # topup/bill/exchange can't be produced by this table yet (see notes
+    # above) — return a correctly-shaped empty page instead of querying.
+    if type in TYPES_NOT_YET_SUPPORTED:
+        return TransactionListResponse(items=[], page=page, page_size=page_size, total=0, total_pages=0)
+
+    currency_enum = None
+    if currency is not None:
+        try:
+            currency_enum = TransactionCurrency(currency)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unsupported currency: {currency}",
+            )
+
+    filters = [or_(Transaction.sender_id == user_id, Transaction.receiver_id == user_id)]
+
+    if type == "send":
+        filters.append(Transaction.sender_id == user_id)
+    elif type == "receive":
+        filters.append(Transaction.receiver_id == user_id)
+
+    if start_date is not None:
+        filters.append(func.date(Transaction.created_at) >= start_date)
+    if end_date is not None:
+        filters.append(func.date(Transaction.created_at) <= end_date)
+    if category is not None:
+        filters.append(Transaction.category == category)
+    if currency_enum is not None:
+        filters.append(Transaction.currency == currency_enum)
+
+    count_result = await db.execute(select(func.count(Transaction.id)).where(and_(*filters)))
+    total = count_result.scalar_one()
+
+    result = await db.execute(
+        select(Transaction)
+        .where(and_(*filters))
+        .order_by(Transaction.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    transactions = result.scalars().all()
+
+    # Batch-resolve counterparty names in one query, instead of one query
+    # per row.
+    counterparty_ids = {
+        (tx.receiver_id if tx.sender_id == user_id else tx.sender_id) for tx in transactions
+    }
+    users_by_id = {}
+    if counterparty_ids:
+        users_result = await db.execute(select(User).where(User.id.in_(counterparty_ids)))
+        users_by_id = {u.id: u for u in users_result.scalars().all()}
+
+    items = []
+    for tx in transactions:
+        is_sender = tx.sender_id == user_id
+        counterparty_id = tx.receiver_id if is_sender else tx.sender_id
+        counterparty = users_by_id.get(counterparty_id)
+
+        items.append(
+            TransactionListItem(
+                id=tx.id,
+                type="send" if is_sender else "receive",
+                amount=tx.amount,
+                currency=tx.currency.value,
+                counterparty_name=counterparty.full_name if counterparty else None,
+                category=tx.category,
+                fraud_score=tx.fraud_score,
+                rule_triggered=None,  # fraud_flags table doesn't exist yet
+                status=tx.status.value,
+                flagged=tx.status == TransactionStatus.flagged,
+                created_at=tx.created_at,
+            )
+        )
+
+    return TransactionListResponse(
+        items=items,
+        page=page,
+        page_size=page_size,
+        total=total,
+        total_pages=compute_total_pages(total, page_size),
+    )
