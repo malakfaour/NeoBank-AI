@@ -17,3 +17,9 @@ class TransferReceipt(BaseModel):
     receiver_display_name: str
     sender_new_balance: Decimal
     timestamp: datetime
+
+
+class TransferByIbanRequest(BaseModel):
+    receiver_iban: str
+    amount: Decimal = Field(..., gt=0)
+    currency: str  # "USD" | "LBP" | "USDT"

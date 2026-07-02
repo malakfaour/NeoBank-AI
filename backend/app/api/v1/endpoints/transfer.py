@@ -1,4 +1,6 @@
-﻿from fastapi import APIRouter, Depends, Header, HTTPException, status
+﻿import re
+
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,30 +11,34 @@ from app.models.transaction import Transaction
 from app.models.user import KYCStatus, User
 from app.models.wallet import Wallet, WalletCurrency
 from app.schemas.transaction import SendMoneyRequest
-from app.schemas.transfer import TransferByMobileRequest, TransferReceipt
+from app.schemas.transfer import (
+    TransferByIbanRequest,
+    TransferByMobileRequest,
+    TransferReceipt,
+)
 from app.schemas.user import CurrentUser
 
 router = APIRouter(prefix="/transfer/neo", tags=["transfers"])
 
+LEBANESE_IBAN_PATTERN = re.compile(r"^LB[A-Za-z0-9]{26}$")
 
-@router.post("/mobile", response_model=TransferReceipt)
-async def transfer_by_mobile(
-    payload: TransferByMobileRequest,
-    x_idempotency_key: str = Header(..., alias="X-Idempotency-Key"),
-    current_user: CurrentUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    sender_id = int(current_user.id)
 
-    result = await db.execute(select(User).where(User.phone == payload.receiver_phone))
-    receiver = result.scalar_one_or_none()
-
-    if receiver is None:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={"error": "receiver_not_found"},
-        )
-
+async def _execute_transfer(
+    *,
+    sender_id: int,
+    receiver: User,
+    amount,
+    currency: str,
+    x_idempotency_key: str,
+    current_user: CurrentUser,
+    db: AsyncSession,
+) -> TransferReceipt:
+    """
+    Shared post-lookup transfer logic for both mobile- and IBAN-based
+    transfers (DEVATTECH-80 / DEVATTECH-82). Everything after "we know who
+    the receiver is" is identical between the two entry points, so it lives
+    here once instead of being duplicated per lookup method.
+    """
     if receiver.kyc_status != KYCStatus.approved:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -46,11 +52,11 @@ async def transfer_by_mobile(
         )
 
     try:
-        wallet_currency = WalletCurrency(payload.currency)
+        wallet_currency = WalletCurrency(currency)
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unsupported currency: {payload.currency}",
+            detail=f"Unsupported currency: {currency}",
         )
 
     result = await db.execute(
@@ -64,39 +70,34 @@ async def transfer_by_mobile(
     if sender_wallet is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"You have no {payload.currency} wallet",
+            detail=f"You have no {currency} wallet",
         )
 
-    if sender_wallet.balance < payload.amount:
+    if sender_wallet.balance < amount:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={
                 "error": "insufficient_balance",
                 "available": str(sender_wallet.balance),
-                "requested": str(payload.amount),
+                "requested": str(amount),
             },
         )
 
     send_result = await send_money(
         payload=SendMoneyRequest(
             receiver_id=str(receiver.id),
-            amount=payload.amount,
-            currency=payload.currency,
+            amount=amount,
+            currency=currency,
         ),
         x_idempotency_key=x_idempotency_key,
         current_user=current_user,
         db=db,
     )
 
-    # NOTE (DEVATTECH-80 vs NBL-106 stub): the ticket asks us to enqueue a
-    # fraud-scoring Celery task post-commit. send_money() above already
-    # scores the transaction synchronously in-process before returning (see
-    # app/api/v1/endpoints/transactions.py), against the same DEVATTECH-36
-    # stub. Enqueuing score_transaction a second time here would double-
-    # score against a no-op stub, so it is intentionally NOT enqueued again.
-    # Revisit once DEVATTECH-75 makes scoring genuinely async - at that
-    # point send_money's inline call likely goes away and this becomes the
-    # real enqueue point. Flagged to M1 / lead.
+    # NOTE (DEVATTECH-80/82 vs NBL-106 stub): see transactions.py TODO re:
+    # DEVATTECH-75. send_money() already scores synchronously in-process;
+    # not enqueuing score_transaction again here to avoid double-scoring
+    # against the stub. Revisit when DEVATTECH-75 lands the real model.
 
     result = await db.execute(
         select(Wallet).where(
@@ -118,4 +119,74 @@ async def transfer_by_mobile(
         receiver_display_name=receiver.full_name,
         sender_new_balance=sender_wallet.balance,
         timestamp=transaction.created_at,
+    )
+
+
+@router.post("/mobile", response_model=TransferReceipt)
+async def transfer_by_mobile(
+    payload: TransferByMobileRequest,
+    x_idempotency_key: str = Header(..., alias="X-Idempotency-Key"),
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    sender_id = int(current_user.id)
+
+    result = await db.execute(select(User).where(User.phone == payload.receiver_phone))
+    receiver = result.scalar_one_or_none()
+
+    if receiver is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"error": "receiver_not_found"},
+        )
+
+    return await _execute_transfer(
+        sender_id=sender_id,
+        receiver=receiver,
+        amount=payload.amount,
+        currency=payload.currency,
+        x_idempotency_key=x_idempotency_key,
+        current_user=current_user,
+        db=db,
+    )
+
+
+@router.post("/iban", response_model=TransferReceipt)
+async def transfer_by_iban(
+    payload: TransferByIbanRequest,
+    x_idempotency_key: str = Header(..., alias="X-Idempotency-Key"),
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    sender_id = int(current_user.id)
+
+    if not LEBANESE_IBAN_PATTERN.match(payload.receiver_iban):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid Lebanese IBAN format (expected LB + 26 alphanumeric characters)",
+        )
+
+    result = await db.execute(
+        select(Wallet, User)
+        .join(User, User.id == Wallet.user_id)
+        .where(Wallet.iban == payload.receiver_iban)
+    )
+    row = result.first()
+
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"error": "receiver_not_found"},
+        )
+
+    receiver_wallet, receiver = row
+
+    return await _execute_transfer(
+        sender_id=sender_id,
+        receiver=receiver,
+        amount=payload.amount,
+        currency=receiver_wallet.currency.value,
+        x_idempotency_key=x_idempotency_key,
+        current_user=current_user,
+        db=db,
     )
