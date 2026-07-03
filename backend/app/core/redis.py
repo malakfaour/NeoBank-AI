@@ -54,3 +54,16 @@ async def cache_idempotent_response(user_id: int, raw_key: str, response: dict) 
         IDEMPOTENCY_TTL_SECONDS,
         json.dumps(response),
     )
+# ── Idempotency cache (prevent duplicate transactions) ────────────────────────
+
+async def cache_idempotent_response(key: str, response: dict, ttl: int = 86400) -> None:
+    """Cache a response for idempotency checking (default 24h TTL)."""
+    import json
+    await redis_client.set(f"idempotent:{key}", json.dumps(response), ex=ttl)
+
+
+async def get_idempotent_response(key: str) -> dict | None:
+    """Retrieve a cached idempotent response if it exists."""
+    import json
+    result = await redis_client.get(f"idempotent:{key}")
+    return json.loads(result) if result else None
