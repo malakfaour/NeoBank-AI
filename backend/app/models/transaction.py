@@ -1,4 +1,4 @@
-import enum
+﻿import enum
 
 from sqlalchemy import Column, DateTime, Enum as SAEnum, Float, ForeignKey, Integer, Numeric, String
 from sqlalchemy.orm import relationship
@@ -34,6 +34,9 @@ class Transaction(Base):
     category = Column(String(50), nullable=True)
     # Populated by the fraud-scoring Celery job (DEVATTECH-41 / DEVATTECH-75).
     fraud_score = Column(Float, nullable=True)
+    # Which model produced fraud_score: 'isolation_forest' (cold-start,
+    # < 5 prior transactions) or 'xgboost' (DEVATTECH-84 / NBL-109).
+    scoring_model = Column(String(50), nullable=True)
     status = Column(SAEnum(TransactionStatus), nullable=False, default=TransactionStatus.pending)
     idempotency_key = Column(String(100), unique=True, nullable=False, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
