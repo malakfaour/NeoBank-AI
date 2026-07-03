@@ -115,3 +115,7 @@ async def get_idempotent_response(key: str) -> dict | None:
     """Retrieve a cached idempotent response if it exists."""
     result = await redis_client.get(f"idempotent:{key}")
     return json.loads(result) if result else None
+
+
+# Alias for backward compatibility
+get_cached_idempotent_response = get_idempotent_response
