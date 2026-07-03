@@ -1,23 +1,21 @@
-import Sidebar from "@/components/layout/Sidebar";
-import BottomNav from "@/components/layout/BottomNav";
-import Header from "@/components/layout/Header";
+import type { Metadata } from "next";
+import type { ReactNode } from "react";
+import "./globals.css";
 
-export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+export const metadata: Metadata = {
+  title: { default: "NeoBank Lebanon", template: "%s | NeoBank Lebanon" },
+  description: "AI-powered digital banking for Lebanon. Manage your USD and LBP accounts, send money, exchange currency, and more.",
+  keywords: ["neobank", "lebanon", "banking", "fintech", "USD", "LBP"],
+  viewport: "width=device-width, initial-scale=1",
+  robots: "index, follow",
+};
+
+export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
-    <div className="min-h-screen bg-gray-950 flex">
-      {/* Sidebar — desktop only */}
-      <Sidebar />
-
-      {/* Main content */}
-      <div className="flex-1 flex flex-col min-h-screen lg:ml-64">
-        <Header />
-        <main className="flex-1 px-4 py-6 lg:px-8 pb-24 lg:pb-8">
-          {children}
-        </main>
-      </div>
-
-      {/* Bottom nav — mobile only */}
-      <BottomNav />
-    </div>
+    <html lang="en">
+      <body style={{ margin: 0, padding: 0, backgroundColor: "#F5F5F5" }}>
+        {children}
+      </body>
+    </html>
   );
 }
