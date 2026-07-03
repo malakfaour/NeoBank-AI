@@ -1,4 +1,7 @@
+import json
+
 import redis.asyncio as aioredis
+
 from app.core.config import settings
 
 redis_client = aioredis.from_url(
@@ -24,7 +27,7 @@ async def is_blacklisted(jti: str) -> bool:
     return result is not None
 
 
-# ── Refresh token registry (valid JTIs that can be rotated) ───────────────────
+# ── Refresh token registry ─────────────────────────────────────────────────────
 
 def _refresh_key(jti: str) -> str:
     return f"refresh:{jti}"
@@ -99,3 +102,16 @@ async def is_passcode_locked(user_id: str) -> bool:
 
 async def reset_passcode_attempts(user_id: str) -> None:
     await redis_client.delete(_passcode_attempts_key(user_id))
+
+
+# ── Idempotency cache (prevent duplicate transactions) ────────────────────────
+
+async def cache_idempotent_response(key: str, response: dict, ttl: int = 86400) -> None:
+    """Cache a response for idempotency checking (default 24h TTL)."""
+    await redis_client.set(f"idempotent:{key}", json.dumps(response), ex=ttl)
+
+
+async def get_idempotent_response(key: str) -> dict | None:
+    """Retrieve a cached idempotent response if it exists."""
+    result = await redis_client.get(f"idempotent:{key}")
+    return json.loads(result) if result else None
