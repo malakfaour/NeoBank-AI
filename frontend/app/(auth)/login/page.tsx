@@ -1,8 +1,7 @@
-"use client";
+﻿"use client";
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import api from "@/lib/axios";
 import { useAuthStore } from "@/store/authStore";
 
@@ -51,7 +50,6 @@ export default function LoginPage() {
 
       <div style={{ width: "100%", maxWidth: "380px", backgroundColor: "#fff", borderRadius: "24px", padding: "28px", boxShadow: "0 2px 20px rgba(0,0,0,0.08)" }}>
         <h2 style={{ fontSize: "22px", fontWeight: "700", color: "#000", marginBottom: "4px" }}>Welcome back</h2>
-        <p style={{ color: "#999", fontSize: "14px", marginBottom: "24px" }}>Sign in to your account</p>
 
         {errors.general && (
           <div style={{ backgroundColor: "#FEF2F2", border: "1px solid #FECACA", borderRadius: "12px", padding: "12px 16px", color: "#DC2626", fontSize: "13px", marginBottom: "16px" }}>
@@ -62,7 +60,7 @@ export default function LoginPage() {
         <div style={{ marginBottom: "16px" }}>
           <label style={{ display: "block", fontSize: "13px", fontWeight: "600", color: "#333", marginBottom: "8px" }}>Mobile number</label>
           <div style={{ display: "flex", alignItems: "center", border: `1.5px solid ${errors.phone ? "#EF4444" : "#E5E7EB"}`, borderRadius: "14px", padding: "12px 16px", gap: "10px", backgroundColor: "#fff" }}>
-            <span style={{ fontSize: "13px", color: "#666", whiteSpace: "nowrap" }}>🇱🇧 +961</span>
+            <span style={{ fontSize: "13px", color: "#666", whiteSpace: "nowrap" }}>ðŸ‡±ðŸ‡§ +961</span>
             <div style={{ width: "1px", height: "16px", backgroundColor: "#E5E7EB" }} />
             <input
               type="tel"
@@ -79,7 +77,7 @@ export default function LoginPage() {
           <label style={{ display: "block", fontSize: "13px", fontWeight: "600", color: "#333", marginBottom: "8px" }}>Passcode</label>
           <input
             type="password"
-            placeholder="••••••"
+            placeholder="â€¢â€¢â€¢â€¢â€¢â€¢"
             value={form.passcode}
             onChange={(e) => setForm({ ...form, passcode: e.target.value })}
             onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
@@ -96,11 +94,7 @@ export default function LoginPage() {
           {loading ? "Signing in..." : "Sign in"}
         </button>
       </div>
-
-      <p style={{ color: "#999", fontSize: "13px", marginTop: "20px" }}>
-        No account?{" "}
-        <Link href="/register" style={{ color: "#00C853", fontWeight: "600", textDecoration: "none" }}>Create one</Link>
-      </p>
     </div>
   );
 }
+
