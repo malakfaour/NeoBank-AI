@@ -1,6 +1,5 @@
 import pytest
-import time
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import patch, MagicMock
 from httpx import AsyncClient, ASGITransport
 from app.main import app
 
@@ -18,7 +17,6 @@ async def test_rate_limit_boundary(client):
     Confirm boundary: exactly max_requests allowed, next one returns 429.
     Tests /auth/login with sliding window limit of 5/min.
     """
-    from app.services import rate_limiter as rl_module
     import fakeredis.aioredis
 
     fake = fakeredis.aioredis.FakeRedis()
@@ -49,7 +47,7 @@ async def test_ip_ban_after_10_consecutive_429s():
     """After 10 consecutive 429s from same IP, IP gets banned for 1 hour."""
     import fakeredis.aioredis
     from fastapi import Request
-    from app.services.rate_limiter import check_rate_limit, _ban_key
+    from app.services.rate_limiter import _ban_key
 
     fake = fakeredis.aioredis.FakeRedis()
 
@@ -74,8 +72,6 @@ async def test_ip_ban_after_10_consecutive_429s():
 async def test_retry_after_header_present():
     """429 response must include Retry-After header."""
     import fakeredis.aioredis
-    from fastapi import Request
-    from app.services.rate_limiter import check_rate_limit
 
     fake = fakeredis.aioredis.FakeRedis()
 

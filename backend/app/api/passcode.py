@@ -8,9 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_current_user
 from app.core.redis import (
-    get_action_token,
     increment_passcode_attempts,
-    is_blacklisted,
     is_passcode_locked,
     redis_client,
     reset_passcode_attempts,

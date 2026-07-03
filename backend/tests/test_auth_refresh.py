@@ -43,7 +43,6 @@ async def test_refresh_happy_path(client, auth_tokens):
 async def test_refresh_replay_attack(client, auth_tokens):
     """Replay attack: using same refresh token twice returns 401."""
     from app.core.security import create_refresh_token
-    from app.core.config import settings
 
     # Create a fresh token and mock Redis to simulate it being already used
     refresh_token, jti = create_refresh_token("test-user-999", role="customer")

@@ -1,15 +1,13 @@
 import logging
 import uuid
-from user_agents import parse as parse_ua
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from user_agents import parse as parse_ua
 
 from app.api.dependencies import get_current_user
-from app.core.redis import blacklist_token
-from app.core.config import settings
 from app.db.session import get_async_db
 from app.models.session import UserSession
 from app.schemas.user import CurrentUser
@@ -63,7 +61,7 @@ async def list_sessions(
     result = await db.execute(
         select(UserSession).where(
             UserSession.user_id == int(current_user.id),
-            UserSession.is_active == True,
+            UserSession.is_active.is_(True),
         )
     )
     sessions = result.scalars().all()
@@ -90,7 +88,7 @@ async def delete_session(
         select(UserSession).where(
             UserSession.session_id == uuid.UUID(session_id),
             UserSession.user_id == int(current_user.id),
-            UserSession.is_active == True,
+            UserSession.is_active.is_(True),
         )
     )
     session = result.scalar_one_or_none()

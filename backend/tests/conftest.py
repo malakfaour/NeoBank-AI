@@ -34,10 +34,9 @@ os.environ["TWILIO_ACCOUNT_SID"] = "test_sid"
 os.environ["TWILIO_AUTH_TOKEN"] = "test_token"
 os.environ["TWILIO_FROM_NUMBER"] = "+15555555555"
 
-from app.db.base import Base
-from app.db.session import engine
-from app.main import app
-
+from app.db.base import Base  # noqa: E402
+from app.db.session import engine  # noqa: E402
+from app.main import app  # noqa: E402
 
 @pytest.fixture(scope="session")
 def anyio_backend():
@@ -47,8 +46,6 @@ def anyio_backend():
 @pytest_asyncio.fixture(scope="session", autouse=True)
 async def create_tables():
     """Create only the tables needed for auth tests."""
-    from app.models.user import User
-    from app.models.wallet import Wallet
 
     tables = [
         Base.metadata.tables["users"],

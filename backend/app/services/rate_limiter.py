@@ -79,8 +79,6 @@ async def check_rate_limit(
     results = await pipe.execute()
 
     count = results[2]
-    remaining = max(0, max_requests - count)
-
     if count > max_requests:
         await _track_consecutive_429(ip)
         oldest = await redis_client.zrange(key, 0, 0, withscores=True)
