@@ -1,18 +1,153 @@
+﻿"use client";
+
+import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
+import api from "@/lib/axios";
+import { useAuthStore } from "@/store/authStore";
+
+interface Wallet {
+  currency: string;
+  balance: number;
+  account_number: string | null;
+  iban: string | null;
+}
+interface Transaction {
+  id: number; type: "send" | "receive"; amount: number;
+  currency: string; counterparty_name: string | null;
+  category: string | null; status: string; created_at: string;
+}
+interface ExchangeRate {
+  base_currency: string; target_currency: string;
+  rate: number; provider: string; last_updated_at: string | null;
+}
+
+function timeAgo(dateStr: string): string {
+  const diff = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
+  if (diff < 60) return `${diff}s ago`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
+}
+
+const categoryIcons: Record<string, string> = {
+  Food: "🍽️", Transport: "🚗", Bills: "🧾", Entertainment: "🎬",
+  Transfer: "💸", TopUp: "➕", Exchange: "💱", Other: "📦",
+};
+
+const pageStyle: React.CSSProperties = {
+  display: "flex", flexDirection: "column", gap: "20px",
+  backgroundColor: "#F5F5F5", minHeight: "100vh",
+  padding: "20px", paddingBottom: "80px",
+};
+
 export default function DashboardPage() {
+  const router = useRouter();
+  const user = useAuthStore((s) => s.user);
+  const [wallets, setWallets] = useState<Wallet[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [exchangeRate, setExchangeRate] = useState<ExchangeRate | null>(null);
+  const [rateAge, setRateAge] = useState<string>("");
+  const [loading, setLoading] = useState(true);
+  const [copied, setCopied] = useState<string | null>(null);
+
+  const fetchAll = useCallback(async () => {
+    try {
+      const [balanceRes, txRes, rateRes] = await Promise.allSettled([
+        api.get("/accounts/balance"),
+        api.get("/transactions?page_size=5"),
+        api.get("/exchange/rates/live"),
+      ]);
+      if (balanceRes.status === "fulfilled") setWallets(balanceRes.value.data.balances ?? []);
+      if (txRes.status === "fulfilled") setTransactions(txRes.value.data.items ?? []);
+      if (rateRes.status === "fulfilled") {
+        const rates: ExchangeRate[] = rateRes.value.data;
+        const r = Array.isArray(rates)
+          ? rates.find((x) => x.base_currency === "USD" && x.target_currency === "LBP") ?? null
+          : null;
+        setExchangeRate(r);
+        if (r?.last_updated_at) setRateAge(timeAgo(r.last_updated_at));
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchAll();
+    const interval = setInterval(fetchAll, 30000);
+    return () => clearInterval(interval);
+  }, [fetchAll]);
+
+  const copyIBAN = (iban: string) => {
+    navigator.clipboard.writeText(iban).then(() => {
+      setCopied(iban);
+      setTimeout(() => setCopied(null), 2000);
+    });
+  };
+
+  const usdWallet = wallets.find((w) => w.currency === "USD");
+  const lbpWallet = wallets.find((w) => w.currency === "LBP");
+
+  if (loading) return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh", backgroundColor: "#F5F5F5" }}>
+      <div style={{ textAlign: "center" }}>
+        <div style={{ width: "36px", height: "36px", borderRadius: "50%", border: "3px solid #00C853", borderTopColor: "transparent", margin: "0 auto 12px" }} className="spinner" />
+        <p style={{ color: "#aaa", fontSize: "13px" }}>Loading your dashboard...</p>
+      </div>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}.spinner{animation:spin 0.8s linear infinite}`}</style>
+    </div>
+  );
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "20px", backgroundColor: "#F5F5F5", minHeight: "100vh", padding: "20px" }}>
-      
+    <div style={pageStyle}>
+
+      {/* KYC banner */}
+      {user?.kyc_status && user.kyc_status !== "approved" && (
+        <div style={{ borderRadius: "16px", padding: "14px 16px", backgroundColor: user.kyc_status === "pending" ? "#FFFBEB" : "#FEF2F2", border: `1px solid ${user.kyc_status === "pending" ? "#FCD34D" : "#FECACA"}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <p style={{ fontSize: "13px", fontWeight: "700", color: user.kyc_status === "pending" ? "#92400E" : "#991B1B" }}>
+            {user.kyc_status === "pending" ? "⏳ Identity verification pending" : "⚠️ KYC flagged or rejected"}
+          </p>
+          {(user.kyc_status === "flagged" || user.kyc_status === "rejected") && (
+            <button onClick={() => router.push("/kyc")} style={{ fontSize: "12px", fontWeight: "600", color: "#991B1B", background: "none", border: "1px solid #FECACA", borderRadius: "8px", padding: "4px 10px", cursor: "pointer" }}>
+              Re-upload
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Balance cards */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-        <div style={{ borderRadius: "20px", backgroundColor: "#00C853", padding: "20px" }}>
-          <p style={{ color: "rgba(255,255,255,0.8)", fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "12px" }}>Fresh USD</p>
-          <p style={{ color: "#fff", fontSize: "28px", fontWeight: "800" }}>$0.00</p>
-          <p style={{ color: "rgba(255,255,255,0.7)", fontSize: "11px", marginTop: "4px" }}>Available balance</p>
-        </div>
-        <div style={{ borderRadius: "20px", backgroundColor: "#fff", border: "1px solid #F0F0F0", padding: "20px" }}>
-          <p style={{ color: "#aaa", fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "12px" }}>Cash LBP</p>
-          <p style={{ color: "#000", fontSize: "28px", fontWeight: "800" }}>0 ل.ل</p>
-          <p style={{ color: "#aaa", fontSize: "11px", marginTop: "4px" }}>Available balance</p>
+        {[usdWallet, lbpWallet].map((w) => !w ? null : (
+          <div key={w.currency} style={{ borderRadius: "20px", padding: "20px", backgroundColor: w.currency === "USD" ? "#00C853" : "#fff", border: w.currency === "LBP" ? "1px solid #F0F0F0" : "none" }}>
+            <p style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px", color: w.currency === "USD" ? "rgba(255,255,255,0.8)" : "#aaa", marginBottom: "6px" }}>
+              {w.currency === "USD" ? "Fresh USD" : "Cash LBP"}
+            </p>
+            <p style={{ fontSize: "24px", fontWeight: "800", color: w.currency === "USD" ? "#fff" : "#000", marginBottom: "4px" }}>
+              {w.currency === "USD" ? `$${w.balance.toFixed(2)}` : `${w.balance.toLocaleString()} ل.ل`}
+            </p>
+            <p style={{ fontSize: "11px", color: w.currency === "USD" ? "rgba(255,255,255,0.7)" : "#aaa", marginBottom: "8px" }}>Available balance</p>
+            {w.iban && (
+              <button onClick={() => copyIBAN(w.iban!)} style={{ fontSize: "11px", color: w.currency === "USD" ? "rgba(255,255,255,0.9)" : "#666", background: "none", border: `1px solid ${w.currency === "USD" ? "rgba(255,255,255,0.4)" : "#E5E7EB"}`, borderRadius: "8px", padding: "4px 10px", cursor: "pointer" }}>
+                {copied === w.iban ? "✓ Copied!" : `Copy IBAN`}
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Exchange rate */}
+      <div style={{ backgroundColor: "#fff", borderRadius: "20px", border: "1px solid #F0F0F0", padding: "16px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <p style={{ color: "#aaa", fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "4px" }}>Exchange rate</p>
+            <p style={{ fontSize: "16px", fontWeight: "700", color: "#000" }}>
+              {exchangeRate ? `1 USD = ${exchangeRate.rate.toLocaleString()} LBP` : "—"}
+            </p>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            {rateAge && <p style={{ color: "#aaa", fontSize: "11px" }}>Refreshed {rateAge}</p>}
+            <p style={{ color: "#00C853", fontSize: "11px", fontWeight: "600" }}>● Live</p>
+          </div>
         </div>
       </div>
 
@@ -21,11 +156,11 @@ export default function DashboardPage() {
         <p style={{ color: "#aaa", fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "12px" }}>Quick actions</p>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px" }}>
           {[
-            { label: "Transfer", svg: <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M5 12h14M13 6l6 6-6 6" stroke="#00C853" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg> },
-            { label: "Add Money", svg: <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="#00C853" strokeWidth="2" strokeLinecap="round"/></svg> },
-            { label: "Exchange", svg: <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4" stroke="#00C853" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg> },
-          ].map(({ label, svg }) => (
-            <button key={label} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "8px", backgroundColor: "#fff", border: "1px solid #F0F0F0", borderRadius: "20px", padding: "16px 8px", cursor: "pointer" }}>
+            { label: "Transfer", path: "/transfer", svg: <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M5 12h14M13 6l6 6-6 6" stroke="#00C853" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg> },
+            { label: "Add Money", path: "/add-money", svg: <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="#00C853" strokeWidth="2" strokeLinecap="round"/></svg> },
+            { label: "Exchange", path: "/exchange", svg: <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4" stroke="#00C853" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg> },
+          ].map(({ label, path, svg }) => (
+            <button key={label} onClick={() => router.push(path)} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "8px", backgroundColor: "#fff", border: "1px solid #F0F0F0", borderRadius: "20px", padding: "16px 8px", cursor: "pointer" }}>
               {svg}
               <span style={{ color: "#333", fontSize: "11px", fontWeight: "600" }}>{label}</span>
             </button>
@@ -37,16 +172,24 @@ export default function DashboardPage() {
       <div>
         <p style={{ color: "#aaa", fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "12px" }}>Recent transactions</p>
         <div style={{ backgroundColor: "#fff", borderRadius: "20px", border: "1px solid #F0F0F0", overflow: "hidden" }}>
-          {["Placeholder transaction 1", "Placeholder transaction 2", "Placeholder transaction 3"].map((t, i) => (
-            <div key={t} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "14px 16px", borderBottom: i < 2 ? "1px solid #F5F5F5" : "none" }}>
-              <div style={{ width: "36px", height: "36px", borderRadius: "12px", backgroundColor: "#F0FDF4", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="2" y="5" width="20" height="14" rx="2" stroke="#00C853" strokeWidth="2"/><path d="M2 10h20" stroke="#00C853" strokeWidth="2"/></svg>
+          {transactions.length === 0 ? (
+            <div style={{ padding: "32px", textAlign: "center" }}>
+              <p style={{ color: "#aaa", fontSize: "14px" }}>No transactions yet</p>
+            </div>
+          ) : transactions.map((tx, i) => (
+            <div key={tx.id} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "14px 16px", borderBottom: i < transactions.length - 1 ? "1px solid #F5F5F5" : "none" }}>
+              <div style={{ width: "36px", height: "36px", borderRadius: "12px", backgroundColor: "#F0FDF4", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "16px", flexShrink: 0 }}>
+                {categoryIcons[tx.category ?? "Other"] ?? "📦"}
               </div>
-              <div style={{ flex: 1 }}>
-                <p style={{ color: "#000", fontSize: "14px", fontWeight: "500" }}>{t}</p>
-                <p style={{ color: "#aaa", fontSize: "12px" }}>Today</p>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{ color: "#000", fontSize: "14px", fontWeight: "500", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {tx.counterparty_name ?? (tx.type === "send" ? "Sent" : "Received")}
+                </p>
+                <p style={{ color: "#aaa", fontSize: "12px" }}>{timeAgo(tx.created_at)}</p>
               </div>
-              <p style={{ color: "#333", fontSize: "14px", fontWeight: "600" }}>$0.00</p>
+              <p style={{ fontSize: "14px", fontWeight: "700", color: tx.type === "receive" ? "#00C853" : "#000", flexShrink: 0 }}>
+                {tx.type === "receive" ? "+" : "-"}{tx.amount} {tx.currency}
+              </p>
             </div>
           ))}
         </div>

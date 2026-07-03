@@ -1,15 +1,15 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/authStore";
 
 const links = [
-  { href: "/dashboard", label: "Dashboard", icon: "🏠" },
-  { href: "/transfer", label: "Transfer", icon: "💸" },
-  { href: "/exchange", label: "Exchange", icon: "💱" },
-  { href: "/transactions", label: "Transactions", icon: "📋" },
-  { href: "/profile", label: "Profile", icon: "👤" },
+  { href: "/dashboard", label: "Dashboard", svg: <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1H5a1 1 0 01-1-1V9.5z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg> },
+  { href: "/transfer", label: "Transfer", svg: <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg> },
+  { href: "/exchange", label: "Exchange", svg: <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg> },
+  { href: "/transactions", label: "Transactions", svg: <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg> },
+  { href: "/profile", label: "Profile", svg: <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2M12 11a4 4 0 100-8 4 4 0 000 8z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg> },
 ];
 
 export default function Sidebar() {
@@ -18,14 +18,14 @@ export default function Sidebar() {
   const router = useRouter();
 
   return (
-    <aside style={{ display: "none", position: "fixed", left: 0, top: 0, height: "100%", width: "240px", backgroundColor: "#fff", borderRight: "1px solid #F0F0F0", padding: "24px 16px", flexDirection: "column", zIndex: 20 }}
+    <aside style={{ position: "fixed", left: 0, top: 0, height: "100%", width: "240px", backgroundColor: "#fff", borderRight: "1px solid #F0F0F0", padding: "24px 16px", flexDirection: "column", zIndex: 20 }}
       className="lg-sidebar">
       <div style={{ marginBottom: "32px", paddingLeft: "8px" }}>
         <div style={{ fontSize: "24px", fontWeight: "800", color: "#000" }}>neo<span style={{ color: "#00C853" }}>.</span></div>
         <div style={{ color: "#aaa", fontSize: "12px", marginTop: "2px" }}>NeoBank Lebanon</div>
       </div>
       <nav style={{ display: "flex", flexDirection: "column", gap: "4px", flex: 1 }}>
-        {links.map(({ href, label, icon }) => {
+        {links.map(({ href, label, svg }) => {
           const active = pathname === href;
           return (
             <Link key={href} href={href} style={{
@@ -34,7 +34,7 @@ export default function Sidebar() {
               backgroundColor: active ? "#F0FDF4" : "transparent",
               color: active ? "#00C853" : "#666",
             }}>
-              <span style={{ fontSize: "18px" }}>{icon}</span>
+              {svg}
               {label}
             </Link>
           );
@@ -42,8 +42,12 @@ export default function Sidebar() {
       </nav>
       <button onClick={() => { logout(); router.push("/login"); }}
         style={{ display: "flex", alignItems: "center", gap: "12px", padding: "10px 12px", borderRadius: "14px", border: "none", backgroundColor: "transparent", fontSize: "14px", fontWeight: "600", color: "#aaa", cursor: "pointer" }}>
-        <span style={{ fontSize: "18px" }}>🚪</span>Sign out
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h6a2 2 0 012 2v1" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>Sign out
       </button>
     </aside>
   );
 }
+
+
+
+
