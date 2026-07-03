@@ -37,6 +37,10 @@ os.environ["TWILIO_FROM_NUMBER"] = "+15555555555"
 from app.db.base import Base  # noqa: E402
 from app.db.session import engine  # noqa: E402
 from app.main import app  # noqa: E402
+from app.models.user import User  # noqa: E402, F401
+from app.models.wallet import Wallet  # noqa: E402, F401
+from app.models.session import UserSession  # noqa: E402, F401
+
 
 @pytest.fixture(scope="session")
 def anyio_backend():
@@ -45,11 +49,11 @@ def anyio_backend():
 
 @pytest_asyncio.fixture(scope="session", autouse=True)
 async def create_tables():
-    """Create only the tables needed for auth tests."""
-
+    """Create tables needed for auth tests."""
     tables = [
         Base.metadata.tables["users"],
         Base.metadata.tables["wallets"],
+        Base.metadata.tables["user_sessions"],
     ]
     async with engine.begin() as conn:
         for table in tables:
