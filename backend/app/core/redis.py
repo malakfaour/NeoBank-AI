@@ -119,3 +119,8 @@ async def get_idempotent_response(key: str) -> dict | None:
 
 # Alias for backward compatibility
 get_cached_idempotent_response = get_idempotent_response
+def hash_idempotency_key(user_id: str, endpoint: str, payload: str) -> str:
+    """Generate a unique idempotency key from user, endpoint, and payload."""
+    import hashlib
+    raw = f"{user_id}:{endpoint}:{payload}"
+    return hashlib.sha256(raw.encode()).hexdigest()
