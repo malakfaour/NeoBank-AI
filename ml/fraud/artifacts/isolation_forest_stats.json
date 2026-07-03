@@ -1,0 +1,13 @@
+{
+  "amount_mean": 156.23214441373514,
+  "amount_std": 711.9438890321907,
+  "feature_order": [
+    "amount_zscore",
+    "hour_of_day",
+    "is_new_recipient",
+    "currency_flag"
+  ],
+  "trained_on_rows": 2000,
+  "contamination": 0.05,
+  "random_seed": 42
+}
