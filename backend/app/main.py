@@ -10,6 +10,7 @@ from app.api.v1.endpoints.notifications import router as notifications_router
 from app.api.v1.endpoints.transactions import router as transactions_router
 from app.api.v1.endpoints.transfer import router as transfer_router
 from app.api.v1.endpoints.beneficiaries import router as beneficiaries_router
+from app.api.v1.endpoints.admin import router as admin_router
 from app.core.config import settings
 from app.core.redis import redis_client
 
@@ -40,6 +41,7 @@ app.include_router(transactions_router)
 app.include_router(transfer_router)
 app.include_router(accounts_router, prefix="/api/v1")
 app.include_router(beneficiaries_router)
+app.include_router(admin_router)
 
 
 @app.get("/health")

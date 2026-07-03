@@ -139,6 +139,22 @@ async def send_money(
 
     await db.refresh(transaction)
 
+    # --- DEVATTECH-74: audit trail — "created" fires first, right after the
+    # transaction row exists, before fraud scoring runs. fraud_score is
+    # intentionally omitted here (not known yet) — it's recorded on the
+    # "fraud_scored" event below instead.
+    await append_audit(
+        db,
+        transaction_id=transaction.id,
+        action="created",
+        actor_id=sender_id,
+        metadata={
+            "amount": str(payload.amount),
+            "currency": payload.currency,
+            "receiver_id": receiver_id,
+        },
+    )
+
     # --- fraud scoring ---
     # TODO(Sprint 3 / DEVATTECH-75): once real scoring is genuinely
     # asynchronous (calls an external model service, not instant), this
@@ -159,21 +175,36 @@ async def send_money(
         # this as `pending`. Flag it for manual review instead.
         transaction.status = TransactionStatus.flagged
 
-    await db.commit()
-    await db.refresh(transaction)
+    # --- DEVATTECH-74: audit trail continued — fraud_scored, then
+    # status_changed, then the terminal flagged/completed event. Each is a
+    # separate append_audit() call/commit, per the existing append_audit()
+    # behavior (unchanged).
+    await append_audit(
+        db,
+        transaction_id=transaction.id,
+        action="fraud_scored",
+        actor_id=sender_id,
+        metadata={"fraud_score": transaction.fraud_score},
+    )
 
     await append_audit(
         db,
         transaction_id=transaction.id,
-        action="created",
+        action="status_changed",
         actor_id=sender_id,
-        metadata={
-            "amount": str(payload.amount),
-            "currency": payload.currency,
-            "receiver_id": receiver_id,
-            "fraud_score": transaction.fraud_score,
-        },
+        metadata={"from": TransactionStatus.pending.value, "to": transaction.status.value},
     )
+
+    await append_audit(
+        db,
+        transaction_id=transaction.id,
+        action=transaction.status.value,  # "flagged" or "completed"
+        actor_id=sender_id,
+        metadata={"fraud_score": transaction.fraud_score},
+    )
+
+    await db.commit()
+    await db.refresh(transaction)
 
     response = SendMoneyResponse(
         transaction_id=transaction.id,
