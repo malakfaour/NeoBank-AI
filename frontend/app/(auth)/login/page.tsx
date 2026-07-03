@@ -60,7 +60,7 @@ export default function LoginPage() {
         <div style={{ marginBottom: "16px" }}>
           <label style={{ display: "block", fontSize: "13px", fontWeight: "600", color: "#333", marginBottom: "8px" }}>Mobile number</label>
           <div style={{ display: "flex", alignItems: "center", border: `1.5px solid ${errors.phone ? "#EF4444" : "#E5E7EB"}`, borderRadius: "14px", padding: "12px 16px", gap: "10px", backgroundColor: "#fff" }}>
-            <span style={{ fontSize: "13px", color: "#666", whiteSpace: "nowrap" }}>ðŸ‡±ðŸ‡§ +961</span>
+            <span style={{ fontSize: "13px", color: "#666", whiteSpace: "nowrap" }}>🇱🇧 +961</span>
             <div style={{ width: "1px", height: "16px", backgroundColor: "#E5E7EB" }} />
             <input
               type="tel"
@@ -77,7 +77,7 @@ export default function LoginPage() {
           <label style={{ display: "block", fontSize: "13px", fontWeight: "600", color: "#333", marginBottom: "8px" }}>Passcode</label>
           <input
             type="password"
-            placeholder="â€¢â€¢â€¢â€¢â€¢â€¢"
+            placeholder="••••••"
             value={form.passcode}
             onChange={(e) => setForm({ ...form, passcode: e.target.value })}
             onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
@@ -97,4 +97,6 @@ export default function LoginPage() {
     </div>
   );
 }
+
+
 
