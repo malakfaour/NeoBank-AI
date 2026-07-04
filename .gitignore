@@ -223,3 +223,5 @@ __marimo__/
 
 # ML training artifacts (regenerate via train_isolation_forest.py)
 ml/fraud/artifacts/
+test_neobank.db
+*.db
