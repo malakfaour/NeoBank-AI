@@ -2,7 +2,7 @@ import enum
 from datetime import datetime, timezone
 
 from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, Text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 
@@ -37,3 +37,5 @@ class Notification(Base):
         nullable=False,
         default=lambda: datetime.now(timezone.utc),
     )
+
+    user: Mapped['User'] = relationship('User', back_populates='notifications')
