@@ -16,7 +16,7 @@ from app.schemas.transaction import SendMoneyRequest, SendMoneyResponse
 from app.schemas.user import CurrentUser
 from app.core.cache_utils import invalidate_balance_cache
 from app.services.audit_log import append_audit
-from app.services.fraud_rules import CurrencyMismatchError, check_currency_match, check_fraud_rules
+from app.services.fraud_rules import CurrencyMismatchError, check_currency_match
 from app.tasks.transaction_tasks import score_transaction
 
 from datetime import date, timedelta
@@ -171,46 +171,23 @@ async def send_money(
         },
     )
 
-    # --- fraud scoring ---
-    # TODO(Sprint 3 / DEVATTECH-75): once real scoring is genuinely
-    # asynchronous (calls an external model service, not instant), this
-    # inline synchronous call must be replaced with a callback/webhook that
-    # updates the transaction status once the Celery task actually
-    # completes, instead of deciding status synchronously in this request.
-    rule_result = None
-    try:
-        score_result = score_transaction(transaction.id)
-        transaction.fraud_score = score_result["score"]
-        transaction.scoring_model = score_result.get("model")
+  # --- fraud scoring (async) ---
+    # DEVATTECH-48: fraud scoring is now dispatched as a background Celery
+    # task. The transfer completes immediately; the worker flags/holds after.
+    transaction.status = TransactionStatus.completed
+    await db.commit()
+    await db.refresh(transaction)
 
-        # DEVATTECH-87: deterministic rule check, runs regardless of ML
-        # score. Both signals are independent -- a transaction can be
-        # ML-flagged, rule-flagged, both, or neither.
-        rule_result = await check_fraud_rules(db, transaction)
-        transaction.rule_triggered = rule_result.triggered
+    # Dispatch fraud scoring asynchronously AFTER commit so the worker
+    # can find the transaction row by id.
+    score_transaction.delay(transaction.id)
 
-        transaction.status = (
-            TransactionStatus.flagged
-            if score_result["score"] >= FRAUD_FLAG_THRESHOLD or rule_result.triggered
-            else TransactionStatus.completed
-        )
-    except Exception:
-        # Scoring failed after money already moved — don't silently leave
-        # this as `pending`. Flag it for manual review instead.
-        transaction.status = TransactionStatus.flagged
-
-    # --- DEVATTECH-74: audit trail continued — fraud_scored, then
-    # status_changed, then the terminal flagged/completed event.
     await append_audit(
         db,
         transaction_id=transaction.id,
-        action="fraud_scored",
+        action="fraud_scoring_queued",
         actor_id=sender_id,
-        metadata={
-            "fraud_score": transaction.fraud_score,
-            "rule_triggered": transaction.rule_triggered,
-            "rule_name": rule_result.rule_name if rule_result else None,
-        },
+        metadata={"fraud_status": "pending"},
     )
 
     await append_audit(
@@ -218,7 +195,10 @@ async def send_money(
         transaction_id=transaction.id,
         action="status_changed",
         actor_id=sender_id,
-        metadata={"from": TransactionStatus.pending.value, "to": transaction.status.value},
+        metadata={
+            "from": TransactionStatus.pending.value,
+            "to": transaction.status.value,
+        },
     )
 
     await append_audit(
@@ -226,15 +206,12 @@ async def send_money(
         transaction_id=transaction.id,
         action=transaction.status.value,
         actor_id=sender_id,
-        metadata={
-            "fraud_score": transaction.fraud_score,
-            "rule_triggered": transaction.rule_triggered,
-            "rule_name": rule_result.rule_name if rule_result else None,
-        },
+        metadata={"fraud_status": "pending"},
     )
 
     await db.commit()
     await db.refresh(transaction)
+
     response = SendMoneyResponse(
         transaction_id=transaction.id,
         status=transaction.status.value,
@@ -242,13 +219,12 @@ async def send_money(
         currency=transaction.currency.value,
         sender_id=sender_id,
         receiver_id=receiver_id,
-        fraud_score=transaction.fraud_score,
+        fraud_score=None,
     )
 
     await cache_idempotent_response(sender_id, x_idempotency_key, response.model_dump(mode="json"))
 
     return response
-
 
 # --- DEVATTECH-73: transaction history / detail / summary ---
 #
