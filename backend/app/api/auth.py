@@ -24,8 +24,8 @@ from app.core.security import (
 )
 from app.db.session import get_async_db
 from app.models.user import KYCStatus, User, UserRole
-from app.models.wallet import Wallet, WalletCurrency
 from app.schemas.user import CurrentUser, UserRegisterRequest, UserRegisterResponse
+from app.services.account_service import create_wallets_for_user
 from app.services.email_service import send_welcome_email
 from app.api.sessions import create_session
 from app.services.otp import generate_and_store_otp, verify_and_consume_otp
@@ -87,14 +87,10 @@ async def register(
     db.add(user)
     await db.flush()
 
-    db.add_all(
-        [
-            Wallet(user_id=user.id, currency=WalletCurrency.USD, balance=0.0),
-            Wallet(user_id=user.id, currency=WalletCurrency.LBP, balance=0.0),
-            Wallet(user_id=user.id, currency=WalletCurrency.USDT, balance=0.0),
-        ]
-    )
-    await db.commit()
+    # Provision wallets through the accounts service so every wallet gets
+    # an account number and IBAN — required for transfer-by-IBAN to
+    # resolve recipients. (Commits the session.)
+    await create_wallets_for_user(user.id, db)
     await db.refresh(user)
 
     background_tasks.add_task(

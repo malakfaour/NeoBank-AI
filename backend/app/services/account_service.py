@@ -25,6 +25,12 @@ async def create_wallets_for_user(user_id: int, db: AsyncSession):
             )
             db.add(wallet)
             wallets.append(wallet)
+        elif existing.account_number is None or existing.iban is None:
+            # Backfill wallets created by the old register() path, which
+            # inserted rows without account identifiers — those users could
+            # never receive transfers by IBAN.
+            existing.account_number = existing.account_number or generate_account_number()
+            existing.iban = existing.iban or generate_iban(existing.account_number)
 
     await db.commit()
     return wallets
