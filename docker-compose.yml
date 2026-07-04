@@ -1,9 +1,47 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: neobank
+      POSTGRES_PASSWORD: neobank
+      POSTGRES_DB: neobank
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U neobank -d neobank"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
     restart: unless-stopped
+
+  api:
+    build: ./backend
+    volumes:
+      - ./backend:/app
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://neobank:neobank@postgres:5432/neobank
+      DATABASE_URL_DIRECT: postgresql+asyncpg://neobank:neobank@postgres:5432/neobank
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    ports:
+      - "8000:8000"
+    command: >
+      sh -c "alembic upgrade head &&
+      uvicorn app.main:app --host 0.0.0.0 --port 8000"
 
   celery-worker:
     build: ./backend
@@ -11,6 +49,16 @@ services:
       - ./backend:/app
     env_file:
       - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://neobank:neobank@postgres:5432/neobank
+      DATABASE_URL_DIRECT: postgresql+asyncpg://neobank:neobank@postgres:5432/neobank
+      REDIS_URL: redis://redis:6379
     depends_on:
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
     command: celery -A app.celery_app:celery_app worker --loglevel=info
+
+volumes:
+  postgres_data:

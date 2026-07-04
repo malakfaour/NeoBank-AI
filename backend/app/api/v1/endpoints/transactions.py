@@ -1,4 +1,4 @@
-﻿from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,7 +16,7 @@ from app.schemas.transaction import SendMoneyRequest, SendMoneyResponse
 from app.schemas.user import CurrentUser
 from app.core.cache_utils import invalidate_balance_cache
 from app.services.audit_log import append_audit
-from app.services.fraud_rules import CurrencyMismatchError, check_currency_match, check_fraud_rules
+from app.services.fraud_rules import CurrencyMismatchError, check_currency_match
 from app.tasks.transaction_tasks import score_transaction
 
 from datetime import date, timedelta
@@ -37,11 +37,6 @@ from app.schemas.transaction import (
 from app.utils.transaction_query_utils import compute_total_pages, parse_summary_month
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
-
-# Fraud score threshold: at/above this, the transaction is held for review
-# instead of completing automatically. Stub score is always 0.0 (never
-# flagged) until the real model lands in Sprint 3 (DEVATTECH-75).
-FRAUD_FLAG_THRESHOLD = 0.75
 
 
 @router.post("/send", response_model=SendMoneyResponse)
@@ -171,46 +166,22 @@ async def send_money(
         },
     )
 
-    # --- fraud scoring ---
-    # TODO(Sprint 3 / DEVATTECH-75): once real scoring is genuinely
-    # asynchronous (calls an external model service, not instant), this
-    # inline synchronous call must be replaced with a callback/webhook that
-    # updates the transaction status once the Celery task actually
-    # completes, instead of deciding status synchronously in this request.
-    rule_result = None
-    try:
-        score_result = score_transaction(transaction.id)
-        transaction.fraud_score = score_result["score"]
-        transaction.scoring_model = score_result.get("model")
+    # --- fraud scoring (async) ---
+    # DEVATTECH-48: fraud scoring is now dispatched as a background Celery
+    # task. The transfer completes immediately; the worker flags/holds
+    # after write-back.
+    transaction.status = TransactionStatus.completed
+    await db.commit()
+    await db.refresh(transaction)
 
-        # DEVATTECH-87: deterministic rule check, runs regardless of ML
-        # score. Both signals are independent -- a transaction can be
-        # ML-flagged, rule-flagged, both, or neither.
-        rule_result = await check_fraud_rules(db, transaction)
-        transaction.rule_triggered = rule_result.triggered
+    score_transaction.delay(transaction.id)
 
-        transaction.status = (
-            TransactionStatus.flagged
-            if score_result["score"] >= FRAUD_FLAG_THRESHOLD or rule_result.triggered
-            else TransactionStatus.completed
-        )
-    except Exception:
-        # Scoring failed after money already moved — don't silently leave
-        # this as `pending`. Flag it for manual review instead.
-        transaction.status = TransactionStatus.flagged
-
-    # --- DEVATTECH-74: audit trail continued — fraud_scored, then
-    # status_changed, then the terminal flagged/completed event.
     await append_audit(
         db,
         transaction_id=transaction.id,
-        action="fraud_scored",
+        action="fraud_scoring_queued",
         actor_id=sender_id,
-        metadata={
-            "fraud_score": transaction.fraud_score,
-            "rule_triggered": transaction.rule_triggered,
-            "rule_name": rule_result.rule_name if rule_result else None,
-        },
+        metadata={"fraud_status": "pending"},
     )
 
     await append_audit(
@@ -218,7 +189,10 @@ async def send_money(
         transaction_id=transaction.id,
         action="status_changed",
         actor_id=sender_id,
-        metadata={"from": TransactionStatus.pending.value, "to": transaction.status.value},
+        metadata={
+            "from": TransactionStatus.pending.value,
+            "to": transaction.status.value,
+        },
     )
 
     await append_audit(
@@ -226,15 +200,12 @@ async def send_money(
         transaction_id=transaction.id,
         action=transaction.status.value,
         actor_id=sender_id,
-        metadata={
-            "fraud_score": transaction.fraud_score,
-            "rule_triggered": transaction.rule_triggered,
-            "rule_name": rule_result.rule_name if rule_result else None,
-        },
+        metadata={"fraud_status": "pending"},
     )
 
     await db.commit()
     await db.refresh(transaction)
+
     response = SendMoneyResponse(
         transaction_id=transaction.id,
         status=transaction.status.value,
@@ -242,7 +213,7 @@ async def send_money(
         currency=transaction.currency.value,
         sender_id=sender_id,
         receiver_id=receiver_id,
-        fraud_score=transaction.fraud_score,
+        fraud_score=None,
     )
 
     await cache_idempotent_response(sender_id, x_idempotency_key, response.model_dump(mode="json"))
@@ -367,7 +338,7 @@ async def get_transaction_detail(
         counterparty_name=counterparty.full_name if counterparty else None,
         category=transaction.category,
         fraud_score=transaction.fraud_score,
-        rule_triggered=None,  # fraud_flags table doesn't exist yet — see DEVATTECH-73 notes
+        rule_triggered=None,
         status=transaction.status.value,
         flagged=transaction.status == TransactionStatus.flagged,
         created_at=transaction.created_at,
@@ -404,8 +375,6 @@ async def list_transactions(
             detail=f"type must be one of {sorted(VALID_TRANSACTION_TYPES)}",
         )
 
-    # topup/bill/exchange can't be produced by this table yet (see notes
-    # above) — return a correctly-shaped empty page instead of querying.
     if type in TYPES_NOT_YET_SUPPORTED:
         return TransactionListResponse(items=[], page=page, page_size=page_size, total=0, total_pages=0)
 
@@ -447,8 +416,6 @@ async def list_transactions(
     )
     transactions = result.scalars().all()
 
-    # Batch-resolve counterparty names in one query, instead of one query
-    # per row.
     counterparty_ids = {
         (tx.receiver_id if tx.sender_id == user_id else tx.sender_id) for tx in transactions
     }
@@ -472,7 +439,7 @@ async def list_transactions(
                 counterparty_name=counterparty.full_name if counterparty else None,
                 category=tx.category,
                 fraud_score=tx.fraud_score,
-                rule_triggered=None,  # fraud_flags table doesn't exist yet
+                rule_triggered=None,
                 status=tx.status.value,
                 flagged=tx.status == TransactionStatus.flagged,
                 created_at=tx.created_at,

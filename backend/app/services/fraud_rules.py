@@ -23,6 +23,7 @@ from decimal import Decimal
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.models.transaction import Transaction
 from app.models.wallet import Wallet
@@ -158,6 +159,73 @@ async def check_fraud_rules(db: AsyncSession, transaction: Transaction) -> RuleC
 
     # Rule 3 -- new recipient AND amount > $500
     is_new = await _is_new_recipient(
+        db, transaction.sender_id, transaction.receiver_id, transaction.id
+    )
+    if is_new and transaction.amount > NEW_RECIPIENT_AMOUNT_THRESHOLD:
+        return RuleCheckResult(triggered=True, rule_name="new_recipient_high_amount")
+
+    return RuleCheckResult(triggered=False, rule_name=None)
+
+
+def _get_rolling_average_spend_sync(
+    db: Session, sender_id: int, now: datetime
+) -> Decimal:
+    window_start = now - timedelta(days=ROLLING_WINDOW_DAYS)
+    result = db.execute(
+        select(func.avg(Transaction.amount)).where(
+            Transaction.sender_id == sender_id,
+            Transaction.created_at >= window_start,
+            Transaction.created_at < now,
+        )
+    )
+    avg = result.scalar_one_or_none()
+    return Decimal(str(avg)) if avg is not None else Decimal("0")
+
+
+def _count_distinct_recipients_recent_sync(
+    db: Session, sender_id: int, now: datetime
+) -> int:
+    window_start = now - timedelta(minutes=MULTI_RECIPIENT_WINDOW_MINUTES)
+    result = db.execute(
+        select(func.count(func.distinct(Transaction.receiver_id))).where(
+            Transaction.sender_id == sender_id,
+            Transaction.created_at >= window_start,
+            Transaction.created_at < now,
+        )
+    )
+    return result.scalar_one() or 0
+
+
+def _is_new_recipient_sync(
+    db: Session, sender_id: int, receiver_id: int, exclude_transaction_id: int
+) -> bool:
+    result = db.execute(
+        select(func.count())
+        .select_from(Transaction)
+        .where(
+            Transaction.sender_id == sender_id,
+            Transaction.receiver_id == receiver_id,
+            Transaction.id != exclude_transaction_id,
+        )
+    )
+    return (result.scalar_one() or 0) == 0
+
+
+def check_fraud_rules_sync(db: Session, transaction: Transaction) -> RuleCheckResult:
+    """Sync equivalent of check_fraud_rules() for Celery task sessions."""
+    now = transaction.created_at or datetime.utcnow()
+
+    rolling_avg = _get_rolling_average_spend_sync(db, transaction.sender_id, now)
+    if rolling_avg > 0 and transaction.amount > (rolling_avg * ROLLING_MULTIPLIER):
+        return RuleCheckResult(triggered=True, rule_name="excessive_amount_vs_average")
+
+    prior_recipient_count = _count_distinct_recipients_recent_sync(
+        db, transaction.sender_id, now
+    )
+    if prior_recipient_count >= MULTI_RECIPIENT_THRESHOLD - 1:
+        return RuleCheckResult(triggered=True, rule_name="rapid_multi_recipient")
+
+    is_new = _is_new_recipient_sync(
         db, transaction.sender_id, transaction.receiver_id, transaction.id
     )
     if is_new and transaction.amount > NEW_RECIPIENT_AMOUNT_THRESHOLD:
