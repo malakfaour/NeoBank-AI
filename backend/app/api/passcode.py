@@ -10,10 +10,10 @@ from app.api.dependencies import get_current_user
 from app.core.redis import (
     increment_passcode_attempts,
     is_passcode_locked,
-    redis_client,
     reset_passcode_attempts,
     store_action_token,
 )
+from app.services.otp import verify_and_consume_otp
 from app.core.security import hash_password, verify_password
 from app.db.session import get_async_db
 from app.models.user import User
@@ -46,17 +46,6 @@ async def _get_user(user_id: str, db: AsyncSession) -> User:
     return user
 
 
-async def _verify_otp(user_id: str, otp_code: str) -> None:
-    """Verify OTP stored in Redis for the user."""
-    stored = await redis_client.get(f"otp:{user_id}")
-    if not stored or stored != otp_code:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired OTP",
-        )
-    await redis_client.delete(f"otp:{user_id}")
-
-
 @router.post("/set", summary="Set passcode for the first time")
 async def set_passcode(
     body: SetPasscodeRequest,
@@ -72,7 +61,11 @@ async def set_passcode(
             detail="Passcode already set. Use /passcode/change to update it.",
         )
 
-    await _verify_otp(current_user.id, body.otp_code)
+    if not await verify_and_consume_otp(current_user.id, body.otp_code):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired OTP",
+        )
 
     user.passcode_hash = hash_password(body.passcode)
     await db.commit()
@@ -101,7 +94,11 @@ async def change_passcode(
             detail="Current passcode is incorrect",
         )
 
-    await _verify_otp(current_user.id, body.otp_code)
+    if not await verify_and_consume_otp(current_user.id, body.otp_code):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired OTP",
+        )
 
     user.passcode_hash = hash_password(body.new_passcode)
     await db.commit()
