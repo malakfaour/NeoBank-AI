@@ -26,14 +26,14 @@ async def test_rate_limit_boundary(client):
 
         # Make 5 requests — all should pass
         for i in range(5):
-            response = await client.post("/auth/login", json={
+            response = await client.post("/api/v1/auth/login", json={
                 "email": f"test{i}@neobank.com",
                 "password": "wrongpass",
             })
             assert response.status_code != 429, f"Request {i+1} was rate limited unexpectedly"
 
         # 6th request — should be 429
-        response = await client.post("/auth/login", json={
+        response = await client.post("/api/v1/auth/login", json={
             "email": "test6@neobank.com",
             "password": "wrongpass",
         })
@@ -82,7 +82,7 @@ async def test_retry_after_header_present():
              patch("app.core.redis.redis_client", fake):
 
             for _ in range(6):
-                response = await client.post("/auth/login", json={
+                response = await client.post("/api/v1/auth/login", json={
                     "email": "test@test.com",
                     "password": "wrong",
                 })
