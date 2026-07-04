@@ -14,6 +14,7 @@ from app.models.transaction import Transaction, TransactionCurrency, Transaction
 from app.models.wallet import Wallet, WalletCurrency
 from app.schemas.transaction import SendMoneyRequest, SendMoneyResponse
 from app.schemas.user import CurrentUser
+from app.core.cache_utils import invalidate_balance_cache
 from app.services.audit_log import append_audit
 from app.tasks.transaction_tasks import score_transaction
 
@@ -138,6 +139,12 @@ async def send_money(
         )
 
     await db.refresh(transaction)
+
+    # Invalidate cached balances (NBL-403) now that the debit/credit has
+    # landed, so the next GET /accounts/balance for either party reads
+    # fresh data instead of a stale pre-transfer value.
+    await invalidate_balance_cache(sender_id)
+    await invalidate_balance_cache(receiver_id)
 
     # --- DEVATTECH-74: audit trail — "created" fires first, right after the
     # transaction row exists, before fraud scoring runs. fraud_score is
