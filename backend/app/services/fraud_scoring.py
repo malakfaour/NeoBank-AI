@@ -165,7 +165,6 @@ def score_with_isolation_forest(db: Session, transaction: Transaction) -> float:
     fraud_score = max(0.0, min(1.0, 0.5 - raw_score))
     return fraud_score
 
-
 def _compute_xgb_features(db: Session, transaction: Transaction) -> list[float]:
     """
     DEVATTECH-75: feature vector for the XGBoost model. Separate from the
