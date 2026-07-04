@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -14,7 +14,7 @@ const links = [
 export default function BottomNav() {
   const pathname = usePathname();
   return (
-    <nav style={{ position: "fixed", bottom: 0, left: 0, right: 0, backgroundColor: "#fff", borderTop: "1px solid #F0F0F0", zIndex: 20 }}>
+    <nav className="mobile-bottom-nav" style={{ position: "fixed", bottom: 0, left: 0, right: 0, backgroundColor: "#fff", borderTop: "1px solid #F0F0F0", zIndex: 20 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-around", padding: "8px 8px" }}>
         {links.map(({ href, label, svg }) => {
           const active = pathname === href;
