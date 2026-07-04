@@ -13,7 +13,7 @@ class Settings(BaseSettings):
 
     # Database
     DATABASE_URL: str
-    DATABASE_URL_DIRECT: str
+    DATABASE_URL_DIRECT: str = ""
 
     # Redis
     REDIS_URL: str = "redis://localhost:6379"
@@ -21,11 +21,16 @@ class Settings(BaseSettings):
     # JWT
     JWT_SECRET: str
     JWT_ALGORITHM: str = "HS256"
-    JWT_EXPIRE_MINUTES: int = 30
+    JWT_EXPIRE_MINUTES: int = 60
     JWT_REFRESH_EXPIRE_DAYS: int = 7
+
+    # OTP
+    OTP_EXPIRE_MINUTES: int = 5
 
     # App
     APP_ENV: str = "development"
+
+    # ML
     DEEPFACE_MODEL: str = "ArcFace"
     GROQ_API_KEY: str = ""
 
@@ -47,6 +52,11 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str | None = None
     SMTP_USE_TLS: bool = True
     SENDGRID_API_KEY: str | None = None
+
+    # Twilio (SMS OTP delivery)
+    TWILIO_ACCOUNT_SID: str = ""
+    TWILIO_AUTH_TOKEN: str = ""
+    TWILIO_FROM_NUMBER: str = ""
 
     # Frontend
     NEXT_PUBLIC_API_URL: str = "http://localhost:8000"
