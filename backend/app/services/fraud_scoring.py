@@ -35,6 +35,7 @@ _xgb_pipeline = None
 _xgb_stats = None
 
 logger = logging.getLogger(__name__)
+FRAUD_FLAG_THRESHOLD = 0.75
 
 
 def _load_isolation_forest():

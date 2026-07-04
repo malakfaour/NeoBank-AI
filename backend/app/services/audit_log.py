@@ -1,4 +1,5 @@
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.models.transaction_audit_log import TransactionAuditLog
 
@@ -30,4 +31,25 @@ async def append_audit(
     db.add(audit_entry)
     await db.commit()
     await db.refresh(audit_entry)
+    return audit_entry
+
+
+def append_audit_sync(
+    db: Session,
+    *,
+    transaction_id: int,
+    action: str,
+    actor_id: int | None,
+    metadata: dict | None = None,
+) -> TransactionAuditLog:
+    """Sync equivalent of append_audit() for Celery task code paths."""
+    audit_entry = TransactionAuditLog(
+        transaction_id=transaction_id,
+        action=action,
+        actor_id=actor_id,
+        event_metadata=metadata,
+    )
+    db.add(audit_entry)
+    db.commit()
+    db.refresh(audit_entry)
     return audit_entry

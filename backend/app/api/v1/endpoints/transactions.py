@@ -1,4 +1,4 @@
-﻿from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,11 +37,6 @@ from app.schemas.transaction import (
 from app.utils.transaction_query_utils import compute_total_pages, parse_summary_month
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
-
-# Fraud score threshold: at/above this, the transaction is held for review
-# instead of completing automatically. Stub score is always 0.0 (never
-# flagged) until the real model lands in Sprint 3 (DEVATTECH-75).
-FRAUD_FLAG_THRESHOLD = 0.75
 
 
 @router.post("/send", response_model=SendMoneyResponse)
@@ -171,15 +166,14 @@ async def send_money(
         },
     )
 
-  # --- fraud scoring (async) ---
+    # --- fraud scoring (async) ---
     # DEVATTECH-48: fraud scoring is now dispatched as a background Celery
-    # task. The transfer completes immediately; the worker flags/holds after.
+    # task. The transfer completes immediately; the worker flags/holds
+    # after write-back.
     transaction.status = TransactionStatus.completed
     await db.commit()
     await db.refresh(transaction)
 
-    # Dispatch fraud scoring asynchronously AFTER commit so the worker
-    # can find the transaction row by id.
     score_transaction.delay(transaction.id)
 
     await append_audit(
@@ -225,6 +219,7 @@ async def send_money(
     await cache_idempotent_response(sender_id, x_idempotency_key, response.model_dump(mode="json"))
 
     return response
+
 
 # --- DEVATTECH-73: transaction history / detail / summary ---
 #
@@ -343,7 +338,7 @@ async def get_transaction_detail(
         counterparty_name=counterparty.full_name if counterparty else None,
         category=transaction.category,
         fraud_score=transaction.fraud_score,
-        rule_triggered=None,  # fraud_flags table doesn't exist yet — see DEVATTECH-73 notes
+        rule_triggered=None,
         status=transaction.status.value,
         flagged=transaction.status == TransactionStatus.flagged,
         created_at=transaction.created_at,
@@ -380,8 +375,6 @@ async def list_transactions(
             detail=f"type must be one of {sorted(VALID_TRANSACTION_TYPES)}",
         )
 
-    # topup/bill/exchange can't be produced by this table yet (see notes
-    # above) — return a correctly-shaped empty page instead of querying.
     if type in TYPES_NOT_YET_SUPPORTED:
         return TransactionListResponse(items=[], page=page, page_size=page_size, total=0, total_pages=0)
 
@@ -423,8 +416,6 @@ async def list_transactions(
     )
     transactions = result.scalars().all()
 
-    # Batch-resolve counterparty names in one query, instead of one query
-    # per row.
     counterparty_ids = {
         (tx.receiver_id if tx.sender_id == user_id else tx.sender_id) for tx in transactions
     }
@@ -448,7 +439,7 @@ async def list_transactions(
                 counterparty_name=counterparty.full_name if counterparty else None,
                 category=tx.category,
                 fraud_score=tx.fraud_score,
-                rule_triggered=None,  # fraud_flags table doesn't exist yet
+                rule_triggered=None,
                 status=tx.status.value,
                 flagged=tx.status == TransactionStatus.flagged,
                 created_at=tx.created_at,
