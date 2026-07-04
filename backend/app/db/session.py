@@ -10,6 +10,14 @@ DATABASE_URL = settings.DATABASE_URL
 if DATABASE_URL.startswith("postgresql://"):
     DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
 
+# asyncpg uses ssl=require, not sslmode=require
+DATABASE_URL = DATABASE_URL.replace("sslmode=require", "ssl=require")
+
+# asyncpg does not support channel_binding in the URL
+DATABASE_URL = DATABASE_URL.replace("&channel_binding=require", "")
+DATABASE_URL = DATABASE_URL.replace("?channel_binding=require&", "?")
+DATABASE_URL = DATABASE_URL.replace("?channel_binding=require", "")
+
 
 engine = create_async_engine(
     DATABASE_URL,
