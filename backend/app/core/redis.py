@@ -1,3 +1,4 @@
+import hashlib
 import json
 
 import redis.asyncio as aioredis
@@ -10,12 +11,12 @@ redis_client = aioredis.from_url(
     decode_responses=True,
 )
 
+IDEMPOTENCY_TTL_SECONDS = 24 * 60 * 60
+
 
 def get_redis_client():
     return redis_client
 
-
-# ── Blacklist (access + refresh tokens revoked on logout) ─────────────────────
 
 async def blacklist_token(jti: str, expire_minutes: int = None) -> None:
     ttl = (expire_minutes or settings.JWT_EXPIRE_MINUTES) * 60
@@ -26,8 +27,6 @@ async def is_blacklisted(jti: str) -> bool:
     result = await redis_client.get(f"blacklist:{jti}")
     return result is not None
 
-
-# ── Refresh token registry ─────────────────────────────────────────────────────
 
 def _refresh_key(jti: str) -> str:
     return f"refresh:{jti}"
@@ -71,8 +70,6 @@ async def revoke_all_user_tokens(user_id: str, current_refresh_jti: str) -> None
     await pipe.execute()
 
 
-# ── Passcode action token ──────────────────────────────────────────────────────
-
 async def store_action_token(user_id: str, token: str, ttl: int = 300) -> None:
     await redis_client.set(f"action_token:{user_id}", token, ex=ttl)
 
@@ -80,8 +77,6 @@ async def store_action_token(user_id: str, token: str, ttl: int = 300) -> None:
 async def get_action_token(user_id: str) -> str | None:
     return await redis_client.get(f"action_token:{user_id}")
 
-
-# ── Passcode attempt locking ───────────────────────────────────────────────────
 
 def _passcode_attempts_key(user_id: str) -> str:
     return f"passcode_attempts:{user_id}"
@@ -104,24 +99,41 @@ async def reset_passcode_attempts(user_id: str) -> None:
     await redis_client.delete(_passcode_attempts_key(user_id))
 
 
-# ── Idempotency cache (prevent duplicate transactions) ────────────────────────
-
-async def cache_idempotent_response(key: str, response: dict, ttl: int = 86400) -> None:
-    """Cache a response for idempotency checking (default 24h TTL)."""
-    await redis_client.set(f"idempotent:{key}", json.dumps(response), ex=ttl)
-
-
-async def get_idempotent_response(key: str) -> dict | None:
-    """Retrieve a cached idempotent response if it exists."""
-    result = await redis_client.get(f"idempotent:{key}")
-    return json.loads(result) if result else None
-
-
-# Alias for backward compatibility
-get_cached_idempotent_response = get_idempotent_response
-def hash_idempotency_key(user_id: int, raw_key: str | None = None, endpoint: str | None = None, payload: str | None = None) -> str:
+def hash_idempotency_key(
+    user_id: int,
+    raw_key: str | None = None,
+    endpoint: str | None = None,
+    payload: str | None = None,
+) -> str:
     """Generate a unique idempotency key scoped per user."""
-    import hashlib
     base = raw_key or f"{endpoint}:{payload}"
     value = f"{user_id}:{base}"
     return hashlib.sha256(value.encode()).hexdigest()
+
+
+async def get_cached_idempotent_response(user_id: int, raw_key: str) -> dict | None:
+    cached = await redis_client.get(f"idem:{hash_idempotency_key(user_id, raw_key)}")
+    if cached is None:
+        return None
+    return json.loads(cached)
+
+
+async def cache_idempotent_response(
+    user_id: int,
+    raw_key: str,
+    response: dict,
+    ttl: int = IDEMPOTENCY_TTL_SECONDS,
+) -> None:
+    # The DB unique constraint on Transaction.idempotency_key remains the
+    # final safety net if two identical requests race past Redis.
+    await redis_client.setex(
+        f"idem:{hash_idempotency_key(user_id, raw_key)}",
+        ttl,
+        json.dumps(response),
+    )
+
+
+async def get_idempotent_response(key: str) -> dict | None:
+    """Legacy raw-key cache accessor kept for backward compatibility."""
+    result = await redis_client.get(f"idempotent:{key}")
+    return json.loads(result) if result else None
