@@ -15,6 +15,7 @@ from app.models.wallet import Wallet, WalletCurrency
 from app.schemas.transaction import SendMoneyRequest, SendMoneyResponse
 from app.schemas.user import CurrentUser
 from app.services.audit_log import append_audit
+from app.services.fraud_rules import CurrencyMismatchError, check_currency_match, check_fraud_rules
 from app.tasks.transaction_tasks import score_transaction
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
@@ -87,6 +88,14 @@ async def send_money(
             detail=f"Sender or receiver has no {payload.currency} wallet",
         )
 
+    try:
+        check_currency_match(payload.currency, sender_wallet)
+    except CurrencyMismatchError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"error": "currency_mismatch", "detail": str(e)},
+        )
+
     if sender_wallet.balance < payload.amount:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -128,20 +137,27 @@ async def send_money(
     # inline synchronous call must be replaced with a callback/webhook that
     # updates the transaction status once the Celery task actually
     # completes, instead of deciding status synchronously in this request.
+    rule_result = None
     try:
         score_result = score_transaction(transaction.id)
         transaction.fraud_score = score_result["score"]
         transaction.scoring_model = score_result.get("model")
+
+        # DEVATTECH-87: deterministic rule check, runs regardless of ML
+        # score. Both signals are independent -- a transaction can be
+        # ML-flagged, rule-flagged, both, or neither.
+        rule_result = check_fraud_rules(db, transaction)
+        transaction.rule_triggered = rule_result.triggered
+
         transaction.status = (
             TransactionStatus.flagged
-            if score_result["score"] >= FRAUD_FLAG_THRESHOLD
+            if score_result["score"] >= FRAUD_FLAG_THRESHOLD or rule_result.triggered
             else TransactionStatus.completed
         )
     except Exception:
         # Scoring failed after money already moved — don't silently leave
         # this as `pending`. Flag it for manual review instead.
         transaction.status = TransactionStatus.flagged
-
     await db.commit()
     await db.refresh(transaction)
 
@@ -155,9 +171,10 @@ async def send_money(
             "currency": payload.currency,
             "receiver_id": receiver_id,
             "fraud_score": transaction.fraud_score,
+            "rule_triggered": transaction.rule_triggered,
+            "rule_name": rule_result.rule_name if rule_result else None,
         },
     )
-
     response = SendMoneyResponse(
         transaction_id=transaction.id,
         status=transaction.status.value,
@@ -171,3 +188,5 @@ async def send_money(
     await cache_idempotent_response(sender_id, x_idempotency_key, response.model_dump(mode="json"))
 
     return response
+
+

@@ -105,7 +105,9 @@ def score_with_isolation_forest(db: Session, transaction: Transaction) -> float:
     fraud_score = max(0.0, min(1.0, 0.5 - raw_score))
     return fraud_score
 
-
 def score_with_xgboost(db: Session, transaction: Transaction) -> float:
-    """Placeholder until M1's NBL-109 lands. See module docstring."""
-    return 0.0
+    """
+    DEVATTECH-75: real XGBoost inference, replacing the previous stub.
+    ...
+    """
+    pipeline, _ = _load_xgb_model()

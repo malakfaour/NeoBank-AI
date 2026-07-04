@@ -1,6 +1,6 @@
 ﻿import enum
 
-from sqlalchemy import Column, DateTime, Enum as SAEnum, Float, ForeignKey, Integer, Numeric, String
+from sqlalchemy import Boolean, Column, DateTime, Enum as SAEnum, Float, ForeignKey, Integer, Numeric, String
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -38,6 +38,9 @@ class Transaction(Base):
     # < 5 prior transactions) or 'xgboost' (DEVATTECH-84 / NBL-109).
     scoring_model = Column(String(50), nullable=True)
     status = Column(SAEnum(TransactionStatus), nullable=False, default=TransactionStatus.pending)
+    # DEVATTECH-87: set True if any deterministic fraud rule (1-3) fired.
+    # Independent of fraud_score/scoring_model -- see fraud_rules.py.
+    rule_triggered = Column(Boolean, nullable=False, default=False)
     idempotency_key = Column(String(100), unique=True, nullable=False, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
@@ -46,3 +49,4 @@ class Transaction(Base):
     # with matching back_populates if/when that's wired up.
     sender = relationship("User", foreign_keys=[sender_id])
     receiver = relationship("User", foreign_keys=[receiver_id])
+
