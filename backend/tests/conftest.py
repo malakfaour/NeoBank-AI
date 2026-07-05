@@ -1,18 +1,22 @@
 import os
 import sys
-import pytest
-import pytest_asyncio
-import fakeredis.aioredis
 from pathlib import Path
 from unittest.mock import patch
-from httpx import AsyncClient, ASGITransport
+
+import fakeredis.aioredis
+import pytest
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
+TEST_DB_PATH = BACKEND_DIR / "test_neobank.db"
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///./test_neobank.db"
-os.environ["DATABASE_URL_DIRECT"] = "sqlite+aiosqlite:///./test_neobank.db"
+TEST_DB_URL = f"sqlite+aiosqlite:///{TEST_DB_PATH.resolve().as_posix()}"
+
+os.environ["DATABASE_URL"] = TEST_DB_URL
+os.environ["DATABASE_URL_DIRECT"] = TEST_DB_URL
 os.environ["REDIS_URL"] = "redis://localhost:6379"
 os.environ["JWT_SECRET"] = "test_secret_key_that_is_long_enough_32chars"
 os.environ["JWT_ALGORITHM"] = "HS256"
@@ -26,9 +30,10 @@ os.environ["AWS_ACCESS_KEY_ID"] = "test_access_key"
 os.environ["AWS_SECRET_ACCESS_KEY"] = "test_secret_key"
 os.environ["AWS_BUCKET_NAME"] = "test-bucket"
 os.environ["AWS_REGION"] = "eu-central-1"
+os.environ["EMAIL_PROVIDER"] = "console"
 os.environ["SMTP_HOST"] = "smtp.gmail.com"
 os.environ["SMTP_PORT"] = "587"
-os.environ["SMTP_USER"] = "test@example.com"
+os.environ["SMTP_USERNAME"] = "test@example.com"
 os.environ["SMTP_PASSWORD"] = "test_password"
 os.environ["TWILIO_ACCOUNT_SID"] = "test_sid"
 os.environ["TWILIO_AUTH_TOKEN"] = "test_token"
@@ -37,9 +42,7 @@ os.environ["TWILIO_FROM_NUMBER"] = "+15555555555"
 from app.db.base import Base  # noqa: E402
 from app.db.session import engine  # noqa: E402
 from app.main import app  # noqa: E402
-from app.models.user import User  # noqa: E402, F401
-from app.models.wallet import Wallet  # noqa: E402, F401
-from app.models.session import UserSession  # noqa: E402, F401
+import app.models as app_models  # noqa: E402, F401
 
 
 @pytest.fixture(scope="session")
@@ -49,13 +52,19 @@ def anyio_backend():
 
 @pytest_asyncio.fixture(scope="session", autouse=True)
 async def create_tables():
-    """Create tables needed for auth tests."""
+    """Create the SQLite-compatible tables exercised by the test suite."""
     tables = [
         Base.metadata.tables["users"],
         Base.metadata.tables["wallets"],
         Base.metadata.tables["user_sessions"],
+        Base.metadata.tables["transactions"],
+        Base.metadata.tables["transaction_audit_logs"],
+        Base.metadata.tables["beneficiaries"],
+        Base.metadata.tables["notifications"],
     ]
     async with engine.begin() as conn:
+        for table in reversed(tables):
+            await conn.run_sync(table.drop, checkfirst=True)
         for table in tables:
             await conn.run_sync(table.create, checkfirst=True)
     yield
@@ -66,9 +75,12 @@ async def create_tables():
 
 @pytest.fixture(autouse=True)
 async def mock_redis():
-    """Replace Redis with fakeredis for all tests — no real connection needed."""
     fake = fakeredis.aioredis.FakeRedis()
     with patch("app.core.redis.redis_client", fake), \
+         patch("app.core.cache_utils.redis_client", fake), \
+         patch("app.main.redis_client", fake), \
+         patch("app.services.exchange_cache.redis_client", fake), \
+         patch("app.services.otp.redis_client", fake), \
          patch("app.services.rate_limiter.redis_client", fake):
         yield fake
 

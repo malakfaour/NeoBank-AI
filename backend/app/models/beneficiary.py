@@ -1,10 +1,16 @@
+from __future__ import annotations
+
 import enum
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+
+if TYPE_CHECKING:
+    from app.models.user import User
 
 
 class BeneficiaryType(str, enum.Enum):
@@ -44,4 +50,4 @@ class Beneficiary(Base):
         nullable=True,
     )
 
-    user: Mapped['User'] = relationship('User', back_populates='beneficiaries')
+    user: Mapped[User] = relationship("User", back_populates="beneficiaries")
