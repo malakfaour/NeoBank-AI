@@ -1,4 +1,5 @@
 from app.models.beneficiary import Beneficiary, BeneficiaryType
+from app.models.chatbot_log import ChatbotLog
 from app.models.exchange_audit_log import ExchangeAuditLog
 from app.models.exchange_rate import ExchangeRate
 from app.models.kyc_record import KYCRecord
@@ -12,6 +13,7 @@ from app.models.wallet import Wallet
 __all__ = [
     "Beneficiary",
     "BeneficiaryType",
+    "ChatbotLog",
     "ExchangeAuditLog",
     "ExchangeRate",
     "KYCRecord",
