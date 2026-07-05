@@ -10,7 +10,7 @@ from app.api.dependencies import get_current_user, require_role
 from app.core.storage import get_presigned_url, upload_file
 from app.db.session import get_async_db
 from app.models.kyc_record import KYCRecord, KYCRecordStatus
-from app.models.user import User, UserRole
+from app.models.user import KYCStatus, User, UserRole
 from app.schemas.kyc import (
     KYCDocumentAccessResponse,
     KYCStatusResponse,
@@ -18,11 +18,11 @@ from app.schemas.kyc import (
     KYCUploadResponse,
 )
 from app.schemas.user import CurrentUser
+from app.tasks.kyc_tasks import process_kyc
 
 router = APIRouter()
 
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/jpg"}
-KYC_BUCKET_NAME = "neobank-kyc"
 SSE_S3_EXTRA_ARGS = {"ServerSideEncryption": "AES256"}
 
 
@@ -56,6 +56,7 @@ async def get_kyc_status(
 @router.post(
     "/upload",
     response_model=KYCUploadResponse,
+    status_code=status.HTTP_202_ACCEPTED,
     summary="Upload KYC verification documents",
 )
 async def upload_kyc_documents(
@@ -89,7 +90,6 @@ async def upload_kyc_documents(
             upload_file,
             selfie_bytes,
             selfie_key,
-            bucket_name=KYC_BUCKET_NAME,
             extra_args={**SSE_S3_EXTRA_ARGS, "ContentType": selfie.content_type},
         ),
     )
@@ -99,7 +99,6 @@ async def upload_kyc_documents(
             upload_file,
             id_photo_bytes,
             id_photo_key,
-            bucket_name=KYC_BUCKET_NAME,
             extra_args={**SSE_S3_EXTRA_ARGS, "ContentType": id_photo.content_type},
         ),
     )
@@ -112,11 +111,15 @@ async def upload_kyc_documents(
     kyc_record.selfie_url = selfie_key
     kyc_record.id_photo_url = id_photo_key
     kyc_record.match_score = None
+    kyc_record.liveness_score = None
     kyc_record.status = KYCRecordStatus.pending
+    kyc_record.rejection_reason = None
     kyc_record.reviewed_at = None
-
+    kyc_record.reviewed_by = None
+    user.kyc_status = KYCStatus.pending
     await db.commit()
     await db.refresh(kyc_record)
+    process_kyc.delay(kyc_record.id)
 
     return KYCUploadResponse(
         kyc_record_id=kyc_record.id,

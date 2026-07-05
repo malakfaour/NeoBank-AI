@@ -12,6 +12,7 @@ celery_app = Celery(
 
 celery_app.conf.imports = (
     "app.tasks.exchange_tasks",
+    "app.tasks.kyc_tasks",
     "app.tasks.transaction_tasks",
 )
 

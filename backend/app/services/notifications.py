@@ -3,6 +3,7 @@ from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.models.notification import Notification, NotificationType
 from app.models.user import User
@@ -172,6 +173,27 @@ async def _notify_with_session(
     await db.commit()
 
     return notification_id
+
+
+def notify_sync(
+    db: Session,
+    user_id: int,
+    notification_type: NotificationType | str,
+    metadata: dict[str, Any],
+) -> int:
+    stored_type = _coerce_notification_type(notification_type)
+    message, _, _, _ = _build_template(notification_type, metadata)
+
+    notification = Notification(
+        user_id=user_id,
+        type=stored_type,
+        message=message,
+        read=False,
+    )
+    db.add(notification)
+    db.commit()
+    db.refresh(notification)
+    return int(notification.id)
 
 
 async def notify(

@@ -86,6 +86,17 @@ def upload_file(
     return destination_key
 
 
+def download_file(
+    source_key: str,
+    destination_path: str,
+    bucket_name: str | None = None,
+) -> str:
+    client = _require_storage_client()
+    resolved_bucket = bucket_name or _get_bucket_name()
+    client.download_file(resolved_bucket, source_key, destination_path)
+    return destination_path
+
+
 def get_presigned_url(s3_key: str, ttl_seconds: int = 3600) -> str:
     client = _require_storage_client()
     return client.generate_presigned_url(

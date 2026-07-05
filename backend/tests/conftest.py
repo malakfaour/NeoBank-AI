@@ -62,6 +62,7 @@ async def create_tables():
         Base.metadata.tables["transactions"],
         Base.metadata.tables["transaction_audit_logs"],
         Base.metadata.tables["beneficiaries"],
+        Base.metadata.tables["kyc_records"],
         Base.metadata.tables["notifications"],
     ]
     async with engine.begin() as conn:
