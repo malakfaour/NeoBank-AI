@@ -15,7 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from ml.kyc.face_verification import verify_face
+from ml.kyc.face_verification import verify_face  # noqa: E402
 
 logger = logging.getLogger(__name__)
 

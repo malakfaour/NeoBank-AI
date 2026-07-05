@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import get_current_user, require_action_token
+from app.api.dependencies import require_action_token
 from app.api.v1.endpoints.transactions import send_money
 from app.db.session import get_db
 from app.models.transaction import Transaction
