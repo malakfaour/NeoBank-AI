@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -26,6 +26,6 @@ class TransactionAuditLog(Base):
     timestamp = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     # Column is named "metadata" in the DB; "metadata" can't be used as the
     # Python attribute name since it's reserved by Base.metadata.
-    event_metadata = Column("metadata", JSONB, nullable=True)
+    event_metadata = Column("metadata", JSONB().with_variant(JSON, "sqlite"), nullable=True)
 
     transaction = relationship("Transaction")
