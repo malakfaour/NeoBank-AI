@@ -5,6 +5,7 @@ import pytest
 from sqlalchemy import select
 
 from app.db.session import AsyncSessionLocal
+from app.models.transaction import Transaction
 from app.models.transaction_audit_log import TransactionAuditLog
 from app.models.user import User
 from app.models.wallet import Wallet, WalletCurrency
@@ -378,3 +379,33 @@ async def test_top_up_exceeding_daily_limit_returns_422(client):
     assert Decimal(body["already_topped_up_today"]) == Decimal("600.00")
     assert Decimal(body["requested"]) == Decimal("500.00")
     assert await _get_wallet_balance(user.id, WalletCurrency.USD) == Decimal("600.0000")
+
+
+@pytest.mark.anyio
+async def test_top_up_success_creates_transaction_row(client):
+    """
+    NBL-411: a successful top-up must insert a traceable Transaction row
+    (sender_id == receiver_id == the user, category='TopUp', status=completed) --
+    not just mutate the wallet balance in place.
+    """
+    tokens = await _register_user(client, "topup-txrow")
+    user, wallet = await _get_user_and_wallet(tokens["email"], WalletCurrency.USD)
+
+    response = await _top_up_wallet_raw(client, tokens["access_token"], wallet.id, "42.00")
+    assert response.status_code == 200, response.text
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Transaction).where(
+                Transaction.sender_id == user.id,
+                Transaction.receiver_id == user.id,
+                Transaction.category == "TopUp",
+            )
+        )
+        transactions = result.scalars().all()
+
+    assert len(transactions) == 1
+    tx = transactions[0]
+    assert Decimal(tx.amount) == Decimal("42.00")
+    assert tx.status.value == "completed"
+    assert tx.currency.value == "USD"

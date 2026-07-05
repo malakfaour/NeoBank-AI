@@ -15,6 +15,10 @@ from app.schemas.user import CurrentUser
 from app.schemas.wallet import CardTopUpRequest, CardTopUpResponse
 from app.services.account_service import create_wallets_for_user
 from app.core.redis import TOPUP_DAILY_LIMIT, get_topup_daily_total, increment_topup_daily
+from uuid import uuid4
+from app.models.transaction import Transaction, TransactionCurrency, TransactionStatus
+from app.services.audit_log import append_audit
+
 router = APIRouter(prefix="/accounts", tags=["accounts"])
 
 
@@ -153,13 +157,63 @@ async def card_top_up(
     if gateway_response.status_code >= 500:
         raise HTTPException(status_code=502, detail="Payment gateway unavailable")
 
+    # Row-locked re-fetch right before the mutation (NBL-411). Deliberately
+    # NOT locked earlier: the gateway call above can take up to ~22s
+    # worst-case (10s timeout + 2s retry pause + 10s retry), and holding a
+    # SELECT FOR UPDATE across that entire external call would block every
+    # other operation on this wallet for the duration. Locking only here
+    # matches the pattern in transactions.send_money.
+    result = await db.execute(
+        select(Wallet).where(Wallet.id == wallet.id).with_for_update()
+    )
+    wallet = result.scalar_one()
+
     wallet.balance = wallet.balance + payload.amount
+
+    # NBL-411: top-ups are modeled as sender_id == receiver_id == the
+    # topping-up user, since Transaction.sender_id is NOT NULL and this
+    # table has no separate type/direction column -- category='TopUp'
+    # is the discriminator (see transactions.py list/detail/summary,
+    # which key off this same category value). This intentionally does
+    # NOT go through fraud scoring (score_transaction is only dispatched
+    # from send_money) since a self-top-up has no fraud-relevant
+    # sender/receiver relationship to score.
+    #
+    # idempotency_key: CardTopUpRequest has no client-supplied idempotency
+    # header today (unlike /transactions/send), so a fresh uuid4 is used
+    # here purely to satisfy the column's UNIQUE NOT NULL constraint. This
+    # does NOT protect against a double-submit the way send_money's
+    # header-based key does -- flagged as a follow-up, not solved by this
+    # ticket.
+    transaction = Transaction(
+        sender_id=wallet.user_id,
+        receiver_id=wallet.user_id,
+        amount=payload.amount,
+        currency=TransactionCurrency(wallet.currency.value),
+        category="TopUp",
+        status=TransactionStatus.completed,
+        idempotency_key=f"topup:{uuid4().hex}",
+    )
+    db.add(transaction)
 
     await db.commit()
     await db.refresh(wallet)
+    await db.refresh(transaction)
 
     await invalidate_balance_cache(wallet.user_id)
     await increment_topup_daily(wallet.user_id, payload.amount)
+
+    await append_audit(
+        db,
+        transaction_id=transaction.id,
+        action="topup_completed",
+        actor_id=wallet.user_id,
+        metadata={
+            "amount": str(payload.amount),
+            "currency": wallet.currency.value,
+            "wallet_id": wallet.id,
+        },
+    )
 
     return {
         "wallet_id": wallet.id,
