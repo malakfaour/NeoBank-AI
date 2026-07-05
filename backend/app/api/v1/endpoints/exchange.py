@@ -5,6 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
+
+from app.api.dependencies import require_action_token
+from app.schemas.user import CurrentUser
 from app.db.session import get_db
 from app.models.exchange_audit_log import ExchangeAuditLog
 from app.schemas.exchange import (
@@ -115,6 +118,7 @@ async def convert_currency(
 @router.post("/execute", response_model=ExchangeExecutionResponse)
 async def execute_exchange(
     payload: ExchangeExecutionRequest,
+    current_user: CurrentUser = Depends(require_action_token),
     db: AsyncSession = Depends(get_db),
 ):
     from_currency = payload.from_currency.upper()

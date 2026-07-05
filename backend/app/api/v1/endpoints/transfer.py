@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import get_current_user
+from app.api.dependencies import get_current_user, require_action_token
 from app.api.v1.endpoints.transactions import send_money
 from app.db.session import get_db
 from app.models.transaction import Transaction
@@ -126,7 +126,7 @@ async def _execute_transfer(
 async def transfer_by_mobile(
     payload: TransferByMobileRequest,
     x_idempotency_key: str = Header(..., alias="X-Idempotency-Key"),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_action_token),
     db: AsyncSession = Depends(get_db),
 ):
     sender_id = int(current_user.id)
@@ -155,7 +155,7 @@ async def transfer_by_mobile(
 async def transfer_by_iban(
     payload: TransferByIbanRequest,
     x_idempotency_key: str = Header(..., alias="X-Idempotency-Key"),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_action_token),
     db: AsyncSession = Depends(get_db),
 ):
     sender_id = int(current_user.id)

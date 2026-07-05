@@ -3,7 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import get_current_user
+from app.api.dependencies import get_current_user, require_action_token
 from app.core.redis import (
     cache_idempotent_response,
     get_cached_idempotent_response,
@@ -43,7 +43,7 @@ router = APIRouter(prefix="/transactions", tags=["transactions"])
 async def send_money(
     payload: SendMoneyRequest,
     x_idempotency_key: str = Header(..., alias="X-Idempotency-Key"),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_action_token),
     db: AsyncSession = Depends(get_db),
 ):
     sender_id = int(current_user.id)
