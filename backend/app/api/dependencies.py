@@ -1,8 +1,9 @@
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt import ExpiredSignatureError, InvalidTokenError
 
-from app.core.redis import is_blacklisted
+from app.core.config import settings
+from app.core.redis import consume_action_token, is_blacklisted
 from app.core.security import decode_token
 from app.schemas.user import CurrentUser, UserRole
 
@@ -77,3 +78,33 @@ def require_role(*roles: UserRole):
             )
         return current_user
     return role_checker
+
+async def require_action_token(
+    x_action_token: str | None = Header(default=None, alias="X-Action-Token"),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> CurrentUser:
+    """
+    FastAPI dependency -- gates money-movement endpoints behind a
+    short-lived, single-use action_token issued by POST /auth/passcode/verify.
+
+    Controlled by settings.REQUIRE_ACTION_TOKEN (default True in prod,
+    False in tests via conftest.py) so this can be soft-launched.
+    Missing, invalid, replayed, or another user's token all return 403.
+    """
+    if not settings.REQUIRE_ACTION_TOKEN:
+        return current_user
+
+    if not x_action_token:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Missing X-Action-Token header",
+        )
+
+    is_valid = await consume_action_token(current_user.id, x_action_token)
+    if not is_valid:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid or expired action token",
+        )
+
+    return current_user

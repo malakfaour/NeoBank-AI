@@ -26,7 +26,7 @@ class Settings(BaseSettings):
 
     # OTP
     OTP_EXPIRE_MINUTES: int = 5
-
+    REQUIRE_ACTION_TOKEN: bool = True
     # App
     APP_ENV: str = "development"
 
