@@ -25,6 +25,7 @@ os.environ["JWT_ALGORITHM"] = "HS256"
 os.environ["JWT_EXPIRE_MINUTES"] = "30"
 os.environ["JWT_REFRESH_EXPIRE_DAYS"] = "7"
 os.environ["OTP_EXPIRE_MINUTES"] = "5"
+os.environ["REQUIRE_ACTION_TOKEN"] = "false"
 os.environ["APP_ENV"] = "test"
 os.environ["DEEPFACE_MODEL"] = "ArcFace"
 os.environ["GROQ_API_KEY"] = "test_groq_key"
@@ -62,7 +63,9 @@ async def create_tables():
         Base.metadata.tables["transactions"],
         Base.metadata.tables["transaction_audit_logs"],
         Base.metadata.tables["beneficiaries"],
+        Base.metadata.tables["kyc_records"],
         Base.metadata.tables["notifications"],
+        Base.metadata.tables["chatbot_logs"],
     ]
     async with engine.begin() as conn:
         for table in reversed(tables):
@@ -77,7 +80,7 @@ async def create_tables():
 
 @pytest.fixture(autouse=True)
 async def mock_redis():
-    fake = fakeredis.aioredis.FakeRedis()
+    fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
     with patch("app.core.redis.redis_client", fake), \
          patch("app.core.cache_utils.redis_client", fake), \
          patch("app.main.redis_client", fake), \

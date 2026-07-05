@@ -76,7 +76,14 @@ async def store_action_token(user_id: str, token: str, ttl: int = 300) -> None:
 
 async def get_action_token(user_id: str) -> str | None:
     return await redis_client.get(f"action_token:{user_id}")
-
+async def consume_action_token(user_id: str, token: str) -> bool:
+    """
+    Atomically fetch-and-delete the action token for user_id (Redis GETDEL).
+    Single-use: a replay with the same token, or any check after the token
+    was already consumed/expired, gets None back and returns False.
+    """
+    stored = await redis_client.getdel(f"action_token:{user_id}")
+    return stored is not None and stored == token
 
 def _passcode_attempts_key(user_id: str) -> str:
     return f"passcode_attempts:{user_id}"
