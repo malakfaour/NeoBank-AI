@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+﻿from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,8 +36,7 @@ from app.schemas.transaction import (
 )
 from app.utils.transaction_query_utils import compute_total_pages, parse_summary_month
 
-router = APIRouter(prefix="/transactions", tags=["transactions"])
-
+router = APIRouter(tags=["transactions"])
 
 @router.post("/send", response_model=SendMoneyResponse)
 async def send_money(

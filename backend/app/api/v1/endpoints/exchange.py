@@ -5,7 +5,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
-
 from app.api.dependencies import require_action_token
 from app.schemas.user import CurrentUser
 from app.db.session import get_db
@@ -25,9 +24,7 @@ from app.services.exchange_forecast import train_and_forecast_usd_lbp
 from app.services.market_hours import get_market_status, is_market_open
 from app.tasks.exchange_tasks import fetch_exchange_rates
 
-
-router = APIRouter(prefix="/exchange", tags=["exchange"])
-
+router = APIRouter(tags=["exchange"])
 
 async def get_rates_from_cache_or_provider() -> dict[tuple[str, str], Decimal]:
     cached_rates = await get_cached_exchange_rates()
@@ -203,3 +200,31 @@ async def forecast_exchange_rate(days: int = Query(7, ge=1, le=7)):
         "model": "LightGBM",
         "predictions": predictions,
     }
+
+
+# =========================
+# NEW ENDPOINT (M2 STEP 1)
+# =========================
+
+@router.get("/rates/live", response_model=list[ExchangeRateResponse])
+async def get_live_rates():
+    cached_rates = await get_cached_exchange_rates()
+
+    if cached_rates is None:
+        rates = await fetch_exchange_rates()
+        await set_cached_exchange_rates(rates)
+        provider = "open.er-api.com"
+    else:
+        rates = cached_rates
+        provider = "redis-cache"
+
+    return [
+        {
+            "base_currency": base,
+            "target_currency": target,
+            "rate": rate,
+            "provider": provider,
+            "last_updated_at": None,
+        }
+        for (base, target), rate in rates.items()
+    ]

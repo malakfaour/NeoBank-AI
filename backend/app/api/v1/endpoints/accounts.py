@@ -11,7 +11,7 @@ from app.schemas.user import CurrentUser
 from app.schemas.wallet import CardTopUpRequest, CardTopUpResponse
 from app.services.account_service import create_wallets_for_user
 
-router = APIRouter(prefix="/accounts", tags=["accounts"])
+router = APIRouter(tags=["accounts"])
 
 
 @router.post("/create")
@@ -37,12 +37,8 @@ async def get_balance(
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Get all wallet balances for the authenticated user. Cached in Redis
-    for 30s (NBL-403) -- cache is invalidated on every debit/credit by the
-    transactions service via app.core.cache_utils.invalidate_balance_cache.
-    """
     user_id = int(current_user.id)
+
     cached = await get_cached_balance(user_id)
     if cached is not None:
         return cached
@@ -69,7 +65,6 @@ async def get_balance(
     }
 
     await cache_balance(user_id, response)
-
     return response
 
 
@@ -79,14 +74,6 @@ async def card_top_up(
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Tokenized card top-up endpoint.
-
-    This endpoint does not accept or store real card numbers.
-    It only accepts a tokenized card reference such as tok_visa_test_123.
-    Only the authenticated owner of the wallet can top it up.
-    """
-
     if not payload.card_token.startswith("tok_"):
         raise HTTPException(
             status_code=400,
@@ -113,7 +100,7 @@ async def card_top_up(
 
     return {
         "wallet_id": wallet.id,
-        "currency": wallet.currency.value if hasattr(wallet.currency, "value") else str(wallet.currency),
+        "currency": str(wallet.currency.value),
         "top_up_amount": payload.amount,
         "new_balance": wallet.balance,
         "status": "success",
@@ -128,11 +115,6 @@ async def validate_recipient(
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Pre-transfer recipient check for the frontend confirmation screen.
-    Never returns 404 for a missing recipient -- exists=False instead,
-    to avoid account enumeration (DEVATTECH-82).
-    """
     if not phone and not iban:
         raise HTTPException(
             status_code=400,
