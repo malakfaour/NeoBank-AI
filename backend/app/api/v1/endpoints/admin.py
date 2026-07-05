@@ -248,3 +248,25 @@ async def get_exchange_audit(
             "count": len(rows),
         },
     }
+@router.post("/kyc/{kyc_record_id}/request-resubmit", response_model=AdminKYCDecisionResponse)
+async def request_kyc_resubmit(
+    kyc_record_id: int,
+    current_user: CurrentUser = Depends(require_role(UserRole.compliance_officer, UserRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    record = await _get_kyc_record_or_404(db, kyc_record_id)
+    user = await _get_user_or_404(db, record.user_id)
+
+    record.status = KYCRecordStatus.rejected
+    record.rejection_reason = "resubmit_requested"
+    record.reviewed_at = datetime.now(timezone.utc)
+    record.reviewed_by = int(current_user.id)
+
+    user.kyc_status = KYCStatus.rejected
+
+    return await _build_decision_response(
+        db,
+        record=record,
+        user=user,
+        notification_type="KYC_REJECTED",
+    )
