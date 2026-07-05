@@ -15,6 +15,7 @@ model hyperparameters change; commit the resulting .pkl/.json.
 """
 import json
 import os
+from pathlib import Path
 
 import joblib
 import numpy as np
@@ -42,9 +43,10 @@ FEATURE_ORDER = [
     "currency_match",
 ]
 
-OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "app", "ml_models")
-MODEL_PATH = os.path.join(OUTPUT_DIR, "fraud_xgb.pkl")
-STATS_PATH = os.path.join(OUTPUT_DIR, "fraud_xgb_stats.json")
+REPO_ROOT = Path(__file__).resolve().parents[2]
+OUTPUT_DIR = REPO_ROOT / "backend" / "app" / "ml_models"
+MODEL_PATH = OUTPUT_DIR / "fraud_xgb.pkl"
+STATS_PATH = OUTPUT_DIR / "fraud_xgb_stats.json"
 
 
 def _night_weighted_hour_probs() -> np.ndarray:
