@@ -26,7 +26,7 @@ export default function ProfilePage() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
-
+const [biometric, setBiometric] = useState(false);
   // Sheet states
   const [sheet, setSheet] = useState<"none" | "email" | "phone" | "passcode">("none");
   const [sheetVal, setSheetVal] = useState("");
@@ -184,10 +184,13 @@ export default function ProfilePage() {
           <p style={{ fontSize: "14px", fontWeight: "500", color: "#000" }}>Change Passcode</p>
           <button onClick={() => openSheet("passcode")} style={{ fontSize: "13px", color: "#00C853", fontWeight: "600", background: "none", border: "none", cursor: "pointer" }}>Change</button>
         </div>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px" }}>
-          <p style={{ fontSize: "14px", fontWeight: "500", color: "#000" }}>Biometric Login</p>
-          <p style={{ fontSize: "12px", color: "#aaa" }}>Coming soon</p>
-        </div>
+       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px" }}>
+  <p style={{ fontSize: "14px", fontWeight: "500", color: "#000" }}>Biometric Login</p>
+  <button onClick={() => setBiometric(!biometric)}
+    style={{ width: "44px", height: "24px", borderRadius: "12px", border: "none", backgroundColor: biometric ? "#00C853" : "#E5E7EB", cursor: "pointer", position: "relative", transition: "background-color 0.2s" }}>
+    <span style={{ position: "absolute", top: "2px", left: biometric ? "22px" : "2px", width: "20px", height: "20px", borderRadius: "50%", backgroundColor: "#fff", transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)" }} />
+  </button>
+</div>
       </div>
 
       {/* Sheet overlay */}
