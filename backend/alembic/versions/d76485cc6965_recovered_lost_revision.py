@@ -31,7 +31,7 @@ def upgrade() -> None:
 
     op.create_table(
         "chat_sessions",
-        sa.Column("id", sa.String(), nullable=False),
+        sa.Column("id", sa.String(length=64), nullable=False),
         sa.Column("user_id", sa.Integer(), nullable=False),
         sa.Column(
             "messages",
