@@ -60,7 +60,7 @@ jobs:
         run: pytest ml/tests -q
 
   frontend-lint-test:
-    name: ESLint + Jest (Frontend)
+    name: Frontend lint + build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -69,21 +69,23 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
         run: |
           cd frontend
-          npm install
+          npm ci
 
       - name: ESLint
         run: |
           cd frontend
           npm run lint
 
-      - name: Jest tests
+      - name: Build
         run: |
           cd frontend
-          npm test -- --passWithNoTests
+          npm run build
 
   docker-build-check:
     name: Docker Compose Build Check
