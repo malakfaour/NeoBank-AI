@@ -7,7 +7,7 @@ import { useAuthStore } from "@/store/authStore";
 
 export default function LoginPage() {
   const router = useRouter();
-  const { setUser, setToken, setTokens } = useAuthStore();
+const { setUser, setTokens } = useAuthStore();
   const [form, setForm] = useState({ phone: "", passcode: "" });
   const [errors, setErrors] = useState<{ phone?: string; passcode?: string; general?: string }>({});
   const [loading, setLoading] = useState(false);
@@ -28,14 +28,8 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const res = await api.post("/auth/login", { phone: form.phone.trim(), passcode: form.passcode });
-      if (res.data.access_token && res.data.refresh_token) {
-        setTokens(res.data.access_token, res.data.refresh_token);
-      } else if (res.data.access_token) {
-        setToken(res.data.access_token);
-      }
-      if (res.data.user) {
-        setUser(res.data.user);
-      }
+      setTokens(res.data.access_token, res.data.refresh_token);
+      setUser(res.data.user);
       router.push("/dashboard");
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Invalid phone or passcode.";
