@@ -81,7 +81,6 @@ async def _get_action_token(client, access_token: str, user_id: int, phone: str)
     assert verify_resp.status_code == 200, verify_resp.text
     return verify_resp.json()["action_token"]
 
-
 async def test_send_money_with_valid_action_token_succeeds(client):
     """Happy path: correct token, correct user, one-time use, request succeeds."""
     sender = await _register_user(client, "atsender")
@@ -94,17 +93,19 @@ async def test_send_money_with_valid_action_token_succeeds(client):
     await _top_up(client, sender["access_token"], sender_wallet_id, "50.00")
     token = await _get_action_token(client, sender["access_token"], sender_id, sender["phone"])
 
-    response = await client.post(
-        "/api/v1/transactions/send",
-        headers={
-            "Authorization": f"Bearer {sender['access_token']}",
-            "X-Idempotency-Key": uuid4().hex,
-            "X-Action-Token": token,
-        },
-        json={"receiver_id": str(receiver_id), "amount": "10.00", "currency": "USD"},
-    )
-    assert response.status_code == 200, response.text
+    with patch("app.api.v1.endpoints.transactions.score_transaction.delay") as mock_delay:
+        response = await client.post(
+            "/api/v1/transactions/send",
+            headers={
+                "Authorization": f"Bearer {sender['access_token']}",
+                "X-Idempotency-Key": uuid4().hex,
+                "X-Action-Token": token,
+            },
+            json={"receiver_id": str(receiver_id), "amount": "10.00", "currency": "USD"},
+        )
 
+    assert response.status_code == 200, response.text
+    mock_delay.assert_called_once()
 
 async def test_send_money_missing_action_token_returns_403(client):
     """Missing header entirely -> 403."""
@@ -140,12 +141,16 @@ async def test_send_money_action_token_replay_returns_403(client):
         "Authorization": f"Bearer {sender['access_token']}",
         "X-Action-Token": token,
     }
-    first = await client.post(
-        "/api/v1/transactions/send",
-        headers={**headers, "X-Idempotency-Key": uuid4().hex},
-        json={"receiver_id": str(receiver_id), "amount": "5.00", "currency": "USD"},
-    )
+
+    with patch("app.api.v1.endpoints.transactions.score_transaction.delay") as mock_delay:
+        first = await client.post(
+            "/api/v1/transactions/send",
+            headers={**headers, "X-Idempotency-Key": uuid4().hex},
+            json={"receiver_id": str(receiver_id), "amount": "5.00", "currency": "USD"},
+        )
+
     assert first.status_code == 200, first.text
+    mock_delay.assert_called_once()
 
     second = await client.post(
         "/api/v1/transactions/send",
@@ -153,7 +158,6 @@ async def test_send_money_action_token_replay_returns_403(client):
         json={"receiver_id": str(receiver_id), "amount": "5.00", "currency": "USD"},
     )
     assert second.status_code == 403
-
 
 async def test_send_money_another_users_action_token_returns_403(client):
     """A valid token belonging to a different user must not work -> 403."""
