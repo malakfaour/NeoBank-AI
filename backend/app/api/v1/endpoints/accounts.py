@@ -14,7 +14,7 @@ from app.models.wallet import Wallet
 from app.schemas.user import CurrentUser
 from app.schemas.wallet import CardTopUpRequest, CardTopUpResponse
 from app.services.account_service import create_wallets_for_user
-
+from app.core.redis import TOPUP_DAILY_LIMIT, get_topup_daily_total, increment_topup_daily
 router = APIRouter(prefix="/accounts", tags=["accounts"])
 
 
@@ -125,6 +125,18 @@ async def card_top_up(
     if wallet is None:
         raise HTTPException(status_code=404, detail="Wallet not found")
 
+    daily_total = await get_topup_daily_total(int(current_user.id))
+    if daily_total + payload.amount > TOPUP_DAILY_LIMIT:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "daily_topup_limit_exceeded",
+                "daily_limit": str(TOPUP_DAILY_LIMIT),
+                "already_topped_up_today": str(daily_total),
+                "requested": str(payload.amount),
+            },
+        )
+
     gateway_response = await _call_payment_gateway(
         payload.card_token, payload.amount, wallet.currency.value
     )
@@ -147,6 +159,7 @@ async def card_top_up(
     await db.refresh(wallet)
 
     await invalidate_balance_cache(wallet.user_id)
+    await increment_topup_daily(wallet.user_id, payload.amount)
 
     return {
         "wallet_id": wallet.id,
