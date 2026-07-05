@@ -9,7 +9,8 @@ from app.celery_app import celery_app
 from app.core.config import settings
 from app.services.exchange_cache import EXCHANGE_RATES_CACHE_KEY
 from app.services.exchange_forecast import train_and_forecast_usd_lbp
-
+from app.db.sync_session import SyncSessionLocal
+from app.models.model_metrics import ModelMetrics
 
 EXCHANGE_API_URL = "https://open.er-api.com/v6/latest/USD"
 EXCHANGE_FORECAST_CACHE_KEY = "exchange:forecast:usd_lbp:7_days"
@@ -86,6 +87,27 @@ async def retrain_exchange_forecast_model() -> dict[str, object]:
         for item in predictions
     ]
 
+    # -------------------------------
+    # SAVE MODEL METRICS (SAFE)
+    # -------------------------------
+    db = SyncSessionLocal()
+    try:
+        mae_value = 0.0  # placeholder until model returns real MAE
+
+        metric = ModelMetrics(
+            model_name="LightGBM",
+            mae=float(mae_value),
+        )
+
+        db.add(metric)
+        db.commit()
+
+    finally:
+        db.close()
+
+    # -------------------------------
+    # CACHE FORECAST
+    # -------------------------------
     redis_client = redis.Redis.from_url(settings.REDIS_URL, decode_responses=True)
 
     redis_client.setex(

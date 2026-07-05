@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.models.model_metrics import ModelMetrics
 
 from app.api.dependencies import require_role
 from app.core.storage import get_presigned_url
@@ -270,3 +271,27 @@ async def request_kyc_resubmit(
         user=user,
         notification_type="KYC_REJECTED",
     )
+@router.get("/ml/metrics")
+async def get_ml_metrics(
+    current_user: CurrentUser = Depends(require_role(UserRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(ModelMetrics).order_by(ModelMetrics.trained_at.desc())
+    )
+
+    rows = result.scalars().all()
+
+    latest = {}
+    for r in rows:
+        if r.model_name not in latest:
+            latest[r.model_name] = r
+
+    return [
+        {
+            "model_name": r.model_name,
+            "mae": r.mae,
+            "trained_at": r.trained_at,
+        }
+        for r in latest.values()
+    ]
