@@ -20,7 +20,10 @@ class KYCRecord(Base):
     selfie_url = Column(String(500), nullable=True)
     id_photo_url = Column(String(500), nullable=True)
     match_score = Column(Float, nullable=True)
+    liveness_score = Column(Float, nullable=True)
     status = Column(SAEnum(KYCRecordStatus), nullable=False, default=KYCRecordStatus.pending)
+    rejection_reason = Column(String(255), nullable=True)
     reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    reviewed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
 
-    user = relationship("User", back_populates="kyc_records")
+    user = relationship("User", back_populates="kyc_records", foreign_keys=[user_id])

@@ -12,6 +12,7 @@ from app.api.v1.endpoints.transactions import router as transactions_router
 from app.api.v1.endpoints.transfer import router as transfer_router
 from app.api.v1.endpoints.beneficiaries import router as beneficiaries_router
 from app.api.v1.endpoints.admin import router as admin_router
+from app.api.v1.endpoints.users import router as users_router
 
 # Aggregate router for all v1 endpoints. Mounted once, at "/api/v1", in
 # main.py -- individual routers are NOT mounted directly there anymore.
@@ -43,3 +44,4 @@ router.include_router(transactions_router)
 router.include_router(transfer_router)
 router.include_router(beneficiaries_router)
 router.include_router(admin_router)
+router.include_router(users_router, prefix="/users", tags=["users"])
