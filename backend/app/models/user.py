@@ -35,3 +35,5 @@ class User(Base):
     kyc_records = relationship("KYCRecord", back_populates="user")
     sessions = relationship("UserSession", back_populates="user", cascade="all, delete-orphan")
     wallets = relationship("Wallet", back_populates="user", cascade="all, delete-orphan")
+    beneficiaries = relationship("Beneficiary", back_populates="user", cascade="all, delete-orphan")
+    notifications = relationship("Notification", back_populates="user", cascade="all, delete-orphan")

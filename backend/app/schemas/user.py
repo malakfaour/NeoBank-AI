@@ -1,11 +1,6 @@
-from enum import Enum
 from pydantic import BaseModel
 
-
-class UserRole(str, Enum):
-    customer = "customer"
-    compliance_officer = "compliance_officer"
-    admin = "admin"
+from app.models.user import UserRole
 
 
 class TokenPayload(BaseModel):

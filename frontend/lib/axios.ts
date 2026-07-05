@@ -6,7 +6,7 @@ type RetryableRequestConfig = InternalAxiosRequestConfig & {
 };
 
 const api = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000",
+  baseURL: (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000") + "/api/v1",
   headers: {
     "Content-Type": "application/json",
   },
@@ -34,7 +34,7 @@ async function refreshAccessToken(): Promise<string | null> {
   }
 
   const response = await axios.post(
-    `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/auth/refresh`,
+    `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/api/v1/auth/refresh`,
     { refresh_token: refreshToken },
     {
       headers: {

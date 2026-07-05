@@ -27,7 +27,7 @@ from app.models.user import KYCStatus, User, UserRole
 from app.schemas.user import CurrentUser, UserRegisterRequest, UserRegisterResponse
 from app.services.account_service import create_wallets_for_user
 from app.services.email_service import send_welcome_email
-from app.api.sessions import create_session
+from app.api.v1.endpoints.sessions import create_session
 from app.services.otp import generate_and_store_otp, verify_and_consume_otp
 from app.services.rate_limiter import check_rate_limit
 

@@ -6,12 +6,14 @@ so score_transaction can call either one interchangeably:
 
   - score_with_isolation_forest: cold-start model (< 5 prior transactions),
     trained on synthetic data (see ml/fraud/train_isolation_forest.py).
-  - score_with_xgboost: placeholder for M1's NBL-109. Not implemented yet
-    -- XGBoost model/training code doesn't exist in the repo as of this
-    ticket. Returns a safe non-flagged default until NBL-109 lands; M1
-    should replace this function's internals, keeping the same signature.
+  - score_with_xgboost: real inference (DEVATTECH-75) using a trained
+    sklearn Pipeline(StandardScaler, XGBClassifier) loaded from
+    fraud_xgb.pkl via joblib. Used for users past the cold-start
+    threshold. If fraud_xgb.pkl hasn't been generated yet (train_fraud_xgb.py
+    not run), _load_xgb_model() logs a warning and returns (None, None),
+    and score_with_xgboost() falls back to a safe non-flagged score (0.0)
+    rather than raising.
 """
-
 import json
 import logging
 import os
@@ -160,8 +162,9 @@ def score_with_isolation_forest(db: Session, transaction: Transaction) -> float:
 
     # decision_function: higher = more normal, lower/negative = more
     # anomalous (roughly in [-0.5, 0.5]). Invert and clip to 0..1 so higher
-    # fraud_score = more suspicious, matching the existing
-    # FRAUD_FLAG_THRESHOLD contract in transactions.py.
+    # fraud_score = more suspicious, matching the FRAUD_FLAG_THRESHOLD
+    # contract defined in this module and consumed by
+    # app/tasks/transaction_tasks.py's score_transaction task.
     raw_score = model.decision_function([features])[0]
     fraud_score = max(0.0, min(1.0, 0.5 - raw_score))
     return fraud_score

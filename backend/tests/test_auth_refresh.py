@@ -15,13 +15,13 @@ async def client():
 @pytest.fixture
 async def auth_tokens(client):
     """Register and login a test user, return tokens."""
-    await client.post("/auth/register", json={
+    await client.post("/api/v1/auth/register", json={
         "full_name": "Test User",
         "email": "refreshtest@neobank.com",
         "phone": "+96170000001",
         "password": "TestPass123",
     })
-    response = await client.post("/auth/login", json={
+    response = await client.post("/api/v1/auth/login", json={
         "email": "refreshtest@neobank.com",
         "password": "TestPass123",
     })
@@ -30,7 +30,7 @@ async def auth_tokens(client):
 
 async def test_refresh_happy_path(client, auth_tokens):
     """Happy path: valid refresh token returns new token pair."""
-    response = await client.post("/auth/refresh", json={
+    response = await client.post("/api/v1/auth/refresh", json={
         "refresh_token": auth_tokens["refresh_token"],
     })
     assert response.status_code == 200
@@ -47,11 +47,11 @@ async def test_refresh_replay_attack(client, auth_tokens):
     # Create a fresh token and mock Redis to simulate it being already used
     refresh_token, jti = create_refresh_token("test-user-999", role="customer")
 
-    with patch("app.api.auth.is_blacklisted", new=AsyncMock(return_value=False)), \
-         patch("app.api.auth.refresh_jti_exists", new=AsyncMock(return_value=False)), \
-         patch("app.api.auth.revoke_all_user_tokens", new=AsyncMock()):
+    with patch("app.api.v1.endpoints.auth.is_blacklisted", new=AsyncMock(return_value=False)), \
+         patch("app.api.v1.endpoints.auth.refresh_jti_exists", new=AsyncMock(return_value=False)), \
+         patch("app.api.v1.endpoints.auth.revoke_all_user_tokens", new=AsyncMock()):
 
-        response = await client.post("/auth/refresh", json={
+        response = await client.post("/api/v1/auth/refresh", json={
             "refresh_token": refresh_token,
         })
         assert response.status_code == 401
@@ -75,7 +75,7 @@ async def test_refresh_expired_token(client):
         settings.JWT_SECRET,
         algorithm=settings.JWT_ALGORITHM,
     )
-    response = await client.post("/auth/refresh", json={
+    response = await client.post("/api/v1/auth/refresh", json={
         "refresh_token": expired_token,
     })
     assert response.status_code == 401
@@ -83,17 +83,17 @@ async def test_refresh_expired_token(client):
 
 async def test_refresh_after_logout(client, auth_tokens):
     """After logout, refresh token returns 401."""
-    rotated = await client.post("/auth/refresh", json={
+    rotated = await client.post("/api/v1/auth/refresh", json={
         "refresh_token": auth_tokens["refresh_token"],
     })
     new_tokens = rotated.json()
 
-    await client.post("/auth/logout", json={
+    await client.post("/api/v1/auth/logout", json={
         "access_token": new_tokens["access_token"],
         "refresh_token": new_tokens["refresh_token"],
     })
 
-    response = await client.post("/auth/refresh", json={
+    response = await client.post("/api/v1/auth/refresh", json={
         "refresh_token": new_tokens["refresh_token"],
     })
     assert response.status_code == 401

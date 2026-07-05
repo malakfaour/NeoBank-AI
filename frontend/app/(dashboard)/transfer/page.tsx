@@ -12,6 +12,34 @@ type Step = "account" | "type" | "recipient" | "amount" | "confirm" | "receipt";
 type TransferType = "mobile" | "iban" | "own" | "bank";
 type Tab = "mobile" | "iban";
 
+function Header({
+  title,
+  step,
+  setStep,
+  router,
+}: {
+  title: string;
+  step: Step;
+  setStep: (s: Step) => void;
+  router: ReturnType<typeof useRouter>;
+}) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "24px" }}>
+      <button onClick={() => step === "account" ? router.back() : setStep(step === "type" ? "account" : step === "recipient" ? "type" : step === "amount" ? "recipient" : step === "confirm" ? "amount" : "account")}
+        style={{ width: "36px", height: "36px", borderRadius: "12px", border: "1px solid #E5E7EB", background: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M19 12H5M12 19l-7-7 7-7" stroke="#333" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+      </button>
+      <h2 style={{ fontSize: "18px", fontWeight: "700", color: "#000" }}>{title}</h2>
+    </div>
+  );
+}
+
+function Wrap({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{ minHeight: "100vh", backgroundColor: "#F5F5F5", padding: "20px" }}>{children}</div>
+  );
+}
+
 export default function TransferPage() {
   const router = useRouter();
   const [step, setStep] = useState<Step>("account");
@@ -80,28 +108,14 @@ export default function TransferPage() {
     (b.nickname.toLowerCase().includes(search.toLowerCase()) || b.value.includes(search))
   );
 
-  const Header = ({ title }: { title: string }) => (
-    <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "24px" }}>
-      <button onClick={() => step === "account" ? router.back() : setStep(step === "type" ? "account" : step === "recipient" ? "type" : step === "amount" ? "recipient" : step === "confirm" ? "amount" : "account")}
-        style={{ width: "36px", height: "36px", borderRadius: "12px", border: "1px solid #E5E7EB", background: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M19 12H5M12 19l-7-7 7-7" stroke="#333" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-      </button>
-      <h2 style={{ fontSize: "18px", fontWeight: "700", color: "#000" }}>{title}</h2>
-    </div>
-  );
-
-  const Wrap = ({ children }: { children: React.ReactNode }) => (
-    <div style={{ minHeight: "100vh", backgroundColor: "#F5F5F5", padding: "20px" }}>{children}</div>
-  );
-
   if (step === "account") return (
     <Wrap>
-      <Header title="Transfer Money" />
+      <Header title="Transfer Money" step={step} setStep={setStep} router={router} />
       <p style={{ color: "#aaa", fontSize: "13px", marginBottom: "12px" }}>From Account</p>
       <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "24px" }}>
         {wallets.map((w) => (
           <button key={w.currency} onClick={() => setSelectedWallet(w)}
-            style={{ backgroundColor: "#fff", border: `2px solid ${selectedWallet?.currency === w.currency ? "#00C853" : "#F0F0F0"}`, borderRadius: "16px", padding: "16px", textAlign: "left", cursor: "pointer" }}>
+            style={{ backgroundColor: "#fff", border: `2px solid ${selectedWallet?.currency === w.currency ? "#00C853" : "#F0F0F0"}`,borderRadius: "16px", padding: "16px", textAlign: "left", cursor: "pointer" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
                 <span style={{ backgroundColor: "#00C853", color: "#fff", fontSize: "10px", fontWeight: "700", padding: "2px 8px", borderRadius: "6px", marginRight: "8px" }}>{w.currency}</span>
@@ -123,13 +137,13 @@ export default function TransferPage() {
 
   if (step === "type") return (
     <Wrap>
-      <Header title="Transfer Type" />
-      <p style={{ color: "#aaa", fontSize: "13px", marginBottom: "12px" }}>Select which transfer you'd like to do</p>
+      <Header title="Transfer Type" step={step} setStep={setStep} router={router} />
+      <p style={{ color: "#aaa", fontSize: "13px", marginBottom: "12px" }}>Select which transfer you&apos;d like to do</p>
       <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
         {[
           { type: "mobile" as TransferType, label: "Within Neo", sub: "Via Mobile Number or IBAN", icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" stroke="#333" strokeWidth="2" strokeLinecap="round"/></svg> },
           { type: "own" as TransferType, label: "To my other accounts", sub: "Between your accounts", icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" stroke="#333" strokeWidth="2" strokeLinecap="round"/></svg> },
-          { type: "bank" as TransferType, label: "To Bank", sub: "Coming soon", icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M3 21h18M3 10h18M5 6l7-3 7 3M4 10v11M8 10v11M12 10v11M16 10v11M20 10v11" stroke="#ccc" strokeWidth="2" strokeLinecap="round"/></svg> },
+          { type: "bank" as TransferType, label: "To Bank", sub: "Coming soon", icon: <svg width="22" height="22" viewBox="0 0 24 24"fill="none"><path d="M3 21h18M3 10h18M5 6l7-3 7 3M4 10v11M8 10v11M12 10v11M16 10v11M20 10v11" stroke="#ccc" strokeWidth="2" strokeLinecap="round"/></svg> },
         ].map(({ type, label, sub, icon }) => (
           <button key={type} onClick={() => { if (type === "bank") return; setTransferType(type); setStep("recipient"); }}
             style={{ backgroundColor: "#fff", border: `2px solid ${transferType === type ? "#00C853" : "#F0F0F0"}`, borderRadius: "16px", padding: "16px", textAlign: "left", cursor: type === "bank" ? "not-allowed" : "pointer", opacity: type === "bank" ? 0.5 : 1, display: "flex", alignItems: "center", gap: "14px" }}>
@@ -146,7 +160,7 @@ export default function TransferPage() {
 
   if (step === "recipient") return (
     <Wrap>
-      <Header title="Transfer to?" />
+      <Header title="Transfer to?" step={step} setStep={setStep} router={router} />
       <div style={{ display: "flex", gap: "8px", marginBottom: "20px" }}>
         {(["mobile", "iban"] as Tab[]).map((t) => (
           <button key={t} onClick={() => { setTab(t); setRecipient(null); setError(""); setPhone(""); setIban(""); }}
@@ -161,9 +175,8 @@ export default function TransferPage() {
           <div style={{ display: "flex", alignItems: "center", border: "1.5px solid #E5E7EB", borderRadius: "14px", padding: "12px 16px", gap: "10px", backgroundColor: "#fff" }}>
             <span style={{ fontSize: "13px", color: "#666", whiteSpace: "nowrap" }}>🇱🇧 +961</span>
             <div style={{ width: "1px", height: "16px", backgroundColor: "#E5E7EB" }} />
-            <input type="tel" placeholder="70 123 456" value={phone} onChange={(e) => { setPhone(e.target.value); setRecipient(null); setError(""); }}
-              style={{ flex: 1, border: "none", outline: "none", fontSize: "14px", color: "#000", backgroundColor: "transparent" }} />
-          </div>
+            <input type="tel" placeholder="70 123 456" value={phone} onChange={(e) => { setPhone(e.target.value); setRecipient(null);setError(""); }}
+              style={{ flex: 1, border: "none", outline: "none", fontSize: "14px", color: "#000", backgroundColor: "transparent" }} />          </div>
         </div>
       ) : (
         <div style={{ marginBottom: "16px" }}>
@@ -197,8 +210,16 @@ export default function TransferPage() {
             style={{ width: "100%", border: "1.5px solid #E5E7EB", borderRadius: "14px", padding: "12px 16px", fontSize: "14px", color: "#000", outline: "none", boxSizing: "border-box", marginBottom: "12px" }} />
           <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
             {filteredBeneficiaries.map((b) => (
-              <button key={b.id} onClick={() => { tab === "mobile" ? setPhone(b.value.replace("+961", "")) : setIban(b.value); setRecipient(null); setError(""); }}
-                style={{ backgroundColor: "#fff", border: "1px solid #F0F0F0", borderRadius: "14px", padding: "12px 16px", textAlign: "left", cursor: "pointer" }}>
+              <button key={b.id} onClick={() => {
+                  if (tab === "mobile") {
+                    setPhone(b.value.replace("+961", ""));
+                  } else {
+                    setIban(b.value);
+                  }
+                  setRecipient(null);
+                  setError("");
+                }}
+                style={{ backgroundColor: "#fff", border: "1px solid #F0F0F0", borderRadius: "14px", padding: "12px 16px", textAlign:"left", cursor: "pointer" }}>
                 <p style={{ fontSize: "14px", fontWeight: "600", color: "#000" }}>{b.nickname}</p>
                 <p style={{ fontSize: "12px", color: "#aaa" }}>{b.value}</p>
               </button>
@@ -211,7 +232,7 @@ export default function TransferPage() {
 
   if (step === "amount") return (
     <Wrap>
-      <Header title="Enter Amount" />
+      <Header title="Enter Amount" step={step} setStep={setStep} router={router} />
       <div style={{ backgroundColor: "#fff", borderRadius: "20px", padding: "20px", marginBottom: "16px" }}>
         <p style={{ color: "#aaa", fontSize: "12px", marginBottom: "4px" }}>Sending to</p>
         <p style={{ fontSize: "15px", fontWeight: "600", color: "#000" }}>{recipient?.display_name ?? recipientValue}</p>
@@ -226,7 +247,7 @@ export default function TransferPage() {
       </div>
       {error && <p style={{ color: "#EF4444", fontSize: "13px", marginBottom: "12px" }}>{error}</p>}
       <button onClick={() => setStep("confirm")} disabled={!amount || insufficient || amountNum <= 0}
-        style={{ width: "100%", backgroundColor: !amount || insufficient || amountNum <= 0 ? "#E5E7EB" : "#00C853", color: !amount || insufficient || amountNum <= 0 ? "#999" : "#fff", fontWeight: "700", fontSize: "15px", border: "none", borderRadius: "14px", padding: "14px", cursor: !amount || insufficient || amountNum <= 0 ? "not-allowed" : "pointer" }}>
+        style={{ width: "100%", backgroundColor: !amount || insufficient || amountNum <= 0 ? "#E5E7EB" : "#00C853", color: !amount ||insufficient || amountNum <= 0 ? "#999" : "#fff", fontWeight: "700", fontSize: "15px", border: "none", borderRadius: "14px", padding:"14px", cursor: !amount || insufficient || amountNum <= 0 ? "not-allowed" : "pointer" }}>
         Next
       </button>
     </Wrap>
@@ -234,10 +255,10 @@ export default function TransferPage() {
 
   if (step === "confirm") return (
     <Wrap>
-      <Header title="Confirm Transfer" />
+      <Header title="Confirm Transfer" step={step} setStep={setStep} router={router} />
       <div style={{ backgroundColor: "#fff", borderRadius: "20px", padding: "24px", marginBottom: "16px", display: "flex", flexDirection: "column", gap: "16px" }}>
         {[
-          { label: "From", value: `${selectedWallet?.currency === "USD" ? "Fresh USD" : "Cash LBP"} — ${selectedWallet?.currency === "USD" ? `$${balance.toFixed(2)}` : `${balance.toLocaleString()} ل.ل`}` },
+          { label: "From", value: `${selectedWallet?.currency === "USD" ? "Fresh USD" : "Cash LBP"} \u2014 ${selectedWallet?.currency === "USD" ? `$${balance.toFixed(2)}` : `${balance.toLocaleString()} ل.ل`}` },
           { label: "To", value: recipient?.display_name ?? recipientValue },
           { label: "Amount", value: `${selectedWallet?.currency === "USD" ? `$${amountNum.toFixed(2)}` : `${amountNum.toLocaleString()} ل.ل`}` },
           { label: "Transfer type", value: tab === "mobile" ? "Via Mobile Number" : "Via IBAN" },
@@ -250,7 +271,7 @@ export default function TransferPage() {
       </div>
       {error && <p style={{ color: "#EF4444", fontSize: "13px", marginBottom: "12px" }}>{error}</p>}
       <button onClick={handleSubmit} disabled={loading}
-        style={{ width: "100%", backgroundColor: loading ? "#86EFAC" : "#00C853", color: "#fff", fontWeight: "700", fontSize: "15px", border: "none", borderRadius: "14px", padding: "14px", cursor: loading ? "not-allowed" : "pointer" }}>
+        style={{ width: "100%", backgroundColor: loading ? "#86EFAC" : "#00C853", color: "#fff", fontWeight: "700", fontSize: "15px",border: "none", borderRadius: "14px", padding: "14px", cursor: loading ? "not-allowed" : "pointer" }}>
         {loading ? "Sending..." : "Confirm Transfer"}
       </button>
     </Wrap>
@@ -265,7 +286,7 @@ export default function TransferPage() {
           {[
             { label: "To", value: recipient?.display_name ?? recipientValue },
             { label: "Amount", value: `${selectedWallet?.currency === "USD" ? `$${amountNum.toFixed(2)}` : `${amountNum.toLocaleString()} ل.ل`}` },
-            { label: "Transaction ID", value: String((receipt as { transaction_id?: unknown })?.transaction_id ?? "—") },
+            { label: "Transaction ID", value: String((receipt as { transaction_id?: unknown })?.transaction_id ?? "\u2014") },
           ].map(({ label, value }) => (
             <div key={label} style={{ display: "flex", justifyContent: "space-between" }}>
               <p style={{ color: "#aaa", fontSize: "14px" }}>{label}</p>

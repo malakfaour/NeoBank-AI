@@ -2,7 +2,7 @@ import enum
 from datetime import datetime, timezone
 
 from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 
@@ -43,3 +43,5 @@ class Beneficiary(Base):
         DateTime(timezone=True),
         nullable=True,
     )
+
+    user: Mapped['User'] = relationship('User', back_populates='beneficiaries')
