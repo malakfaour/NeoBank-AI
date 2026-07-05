@@ -63,6 +63,7 @@ async def create_tables():
         Base.metadata.tables["transaction_audit_logs"],
         Base.metadata.tables["beneficiaries"],
         Base.metadata.tables["notifications"],
+        Base.metadata.tables["chatbot_logs"],
     ]
     async with engine.begin() as conn:
         for table in reversed(tables):
