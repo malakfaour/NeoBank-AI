@@ -40,6 +40,25 @@ jobs:
           cd backend
           pytest
 
+  ml-tests:
+    name: Pytest (ML)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install -r ml/requirements.txt
+          pip install pytest
+
+      - name: Run ML tests
+        run: pytest ml/tests -q
+
   frontend-lint-test:
     name: ESLint + Jest (Frontend)
     runs-on: ubuntu-latest
