@@ -1,8 +1,12 @@
-﻿from fastapi import APIRouter, Depends, HTTPException
+import asyncio
+
+import httpx
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_current_user
+from app.core.config import settings
 from app.core.cache_utils import cache_balance, get_cached_balance, invalidate_balance_cache
 from app.db.session import get_db
 from app.models.user import KYCStatus, User
@@ -73,6 +77,23 @@ async def get_balance(
     return response
 
 
+async def _call_payment_gateway(card_token: str, amount, currency: str) -> httpx.Response:
+    """
+    Calls the external card payment gateway (NBL-411). Retries once, after
+    a 2s pause, on a 5xx response -- gateways are occasionally flaky under
+    load and a single retry clears most transient failures without the
+    user needing to resubmit. Not retried on 402 (declined), since that's
+    a definitive answer from the gateway, not a transient failure.
+    """
+    payload = {"card_token": card_token, "amount": str(amount), "currency": currency}
+    async with httpx.AsyncClient(timeout=10.0) as http_client:
+        response = await http_client.post(settings.PAYMENT_GATEWAY_URL, json=payload)
+        if response.status_code >= 500:
+            await asyncio.sleep(2)
+            response = await http_client.post(settings.PAYMENT_GATEWAY_URL, json=payload)
+    return response
+
+
 @router.post("/top-up", response_model=CardTopUpResponse)
 async def card_top_up(
     payload: CardTopUpRequest,
@@ -103,6 +124,22 @@ async def card_top_up(
 
     if wallet is None:
         raise HTTPException(status_code=404, detail="Wallet not found")
+
+    gateway_response = await _call_payment_gateway(
+        payload.card_token, payload.amount, wallet.currency.value
+    )
+
+    if gateway_response.status_code == 402:
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "error": "card_declined",
+                "gateway_message": gateway_response.json().get("message", "Card declined"),
+            },
+        )
+
+    if gateway_response.status_code >= 500:
+        raise HTTPException(status_code=502, detail="Payment gateway unavailable")
 
     wallet.balance = wallet.balance + payload.amount
 

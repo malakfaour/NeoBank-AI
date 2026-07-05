@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     # App
     APP_ENV: str = "development"
 
+    # Payment Gateway (Member 4 - top-up, NBL-411)
+    PAYMENT_GATEWAY_URL: str = ""
+
     # ML
     DEEPFACE_MODEL: str = "ArcFace"
     GROQ_API_KEY: str = ""
