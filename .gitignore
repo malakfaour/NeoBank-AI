@@ -17,6 +17,9 @@ eggs/
 .eggs/
 lib/
 lib64/
+# The Python-template lib/ rule above also matched frontend/lib/, which
+# silently kept the frontend API client out of the repo. Never ignore it.
+!frontend/lib/
 parts/
 sdist/
 var/
@@ -217,3 +220,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ML training artifacts (regenerate via train_isolation_forest.py)
+ml/fraud/artifacts/
+test_neobank.db
+*.db
+/00ec1be9d686_initial_schema.py[}]

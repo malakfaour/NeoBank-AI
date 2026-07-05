@@ -38,3 +38,17 @@ neobank-lebanon/
 1. Clone the repo
 2. Copy `.env.example` to `.env` and fill in your keys
 3. See `/backend/README.md` and `/frontend/README.md` for setup instructions
+
+## Running the Celery Worker
+
+Start Redis:
+docker compose up redis -d
+
+Start the worker (local, outside Docker):
+cd backend
+venv\Scripts\Activate.ps1   # Windows
+source venv/bin/activate    # Mac/Linux
+celery -A app.celery_app worker --loglevel=info --pool=solo   # Windows needs --pool=solo
+
+Or via Docker:
+docker compose up celery-worker -d

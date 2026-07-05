@@ -1,0 +1,27 @@
+# KYC Face Verification & Liveness
+deepface==0.0.96
+opencv-python==4.12.0.88
+mtcnn==1.0.0
+
+# Fraud Detection
+xgboost==2.0.0
+scikit-learn==1.9.0
+imbalanced-learn==0.14.0
+
+# Exchange Rate Forecasting
+lightgbm==4.6.0
+prophet==1.1.7
+
+# Chatbot
+langchain==1.0.3
+langchain-groq==1.0.1
+groq==0.31.1
+
+# Data & Scheduling
+pandas==3.0.3
+numpy==2.2.6
+celery[redis]==5.6.3
+
+# Utilities
+python-dotenv==1.2.2
+httpx==0.28.1
