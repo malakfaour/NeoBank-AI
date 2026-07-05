@@ -267,3 +267,114 @@ async def test_send_money_to_nonexistent_recipient_keeps_balance_unchanged(clien
     assert response.json()["detail"] == "Sender or receiver has no USD wallet"
     assert await _get_wallet_balance(sender_user.id, WalletCurrency.USD) == Decimal("30.0000")
     assert stub_fraud_scoring == []
+
+
+# --- NBL-411: card top-up ---
+
+
+async def _top_up_wallet_raw(client, access_token: str, wallet_id: int, amount: str):
+    """
+    Like _top_up_wallet above, but returns the raw response instead of
+    asserting 200 -- needed here since these tests exercise non-200 paths
+    (gateway decline, daily limit) that _top_up_wallet's assert would mask.
+    """
+    return await client.post(
+        "/api/v1/accounts/top-up",
+        headers={"Authorization": f"Bearer {access_token}"},
+        json={
+            "wallet_id": wallet_id,
+            "amount": amount,
+            "card_token": "tok_visa_test_123",
+        },
+    )
+
+
+@pytest.mark.anyio
+async def test_top_up_success_credits_wallet_balance(client):
+    """
+    Happy path (NBL-411): a gateway approval credits the wallet by the
+    top-up amount. The default autouse mock_payment_gateway fixture
+    (conftest.py) already returns a 200 "approved" response, so no
+    per-test monkeypatch is needed here.
+    """
+    tokens = await _register_user(client, "topup-success")
+    user, wallet = await _get_user_and_wallet(tokens["email"], WalletCurrency.USD)
+
+    response = await _top_up_wallet_raw(client, tokens["access_token"], wallet.id, "75.00")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "success"
+    assert Decimal(body["top_up_amount"]) == Decimal("75.00")
+    assert Decimal(body["new_balance"]) == Decimal("75.0000")
+    assert await _get_wallet_balance(user.id, WalletCurrency.USD) == Decimal("75.0000")
+
+
+@pytest.mark.anyio
+async def test_top_up_declined_by_gateway_does_not_credit_wallet(client, monkeypatch):
+    """
+    NBL-411: a 402 from the gateway must surface as a 402 with the
+    card_declined shape and must NOT touch the wallet balance.
+    """
+
+    class _DeclinedGatewayClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, url, json=None):
+            class _DeclinedResponse:
+                status_code = 402
+
+                def json(self):
+                    return {"message": "Insufficient funds on card"}
+
+            return _DeclinedResponse()
+
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.accounts.httpx.AsyncClient",
+        _DeclinedGatewayClient,
+    )
+
+    tokens = await _register_user(client, "topup-declined")
+    user, wallet = await _get_user_and_wallet(tokens["email"], WalletCurrency.USD)
+
+    response = await _top_up_wallet_raw(client, tokens["access_token"], wallet.id, "50.00")
+
+    assert response.status_code == 402, response.text
+    assert response.json()["detail"] == {
+        "error": "card_declined",
+        "gateway_message": "Insufficient funds on card",
+    }
+    assert await _get_wallet_balance(user.id, WalletCurrency.USD) == Decimal("0.0000")
+
+
+@pytest.mark.anyio
+async def test_top_up_exceeding_daily_limit_returns_422(client):
+    """
+    NBL-411: the $1000/day cap is enforced across multiple top-ups in the
+    same UTC day. First top-up (600) succeeds and credits the wallet;
+    second (500) would bring the day's total to 1100 > 1000 and must be
+    rejected with 422 before the gateway is ever charged, leaving the
+    balance at exactly the first top-up's amount.
+    """
+    tokens = await _register_user(client, "topup-limit")
+    user, wallet = await _get_user_and_wallet(tokens["email"], WalletCurrency.USD)
+
+    first = await _top_up_wallet_raw(client, tokens["access_token"], wallet.id, "600.00")
+    assert first.status_code == 200, first.text
+
+    second = await _top_up_wallet_raw(client, tokens["access_token"], wallet.id, "500.00")
+
+    assert second.status_code == 422, second.text
+    body = second.json()["detail"]
+    assert body["error"] == "daily_topup_limit_exceeded"
+    assert Decimal(body["daily_limit"]) == Decimal("1000")
+    assert Decimal(body["already_topped_up_today"]) == Decimal("600.00")
+    assert Decimal(body["requested"]) == Decimal("500.00")
+    assert await _get_wallet_balance(user.id, WalletCurrency.USD) == Decimal("600.0000")
