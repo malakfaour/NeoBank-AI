@@ -149,8 +149,12 @@ async def test_send_money_rejects_insufficient_balance(client, stub_fraud_scorin
         },
     )
 
-    assert response.status_code == 400
-    assert response.json()["detail"] == "Insufficient balance"
+    assert response.status_code == 422
+    assert response.json()["detail"] == {
+        "error": "insufficient_balance",
+        "available": "10.0000",
+        "requested": "50.00",
+    }
     assert await _get_wallet_balance(sender_user.id, WalletCurrency.USD) == Decimal("10.0000")
     assert await _get_wallet_balance(receiver_user.id, WalletCurrency.USD) == Decimal("0.0000")
     assert stub_fraud_scoring == []

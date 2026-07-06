@@ -110,9 +110,19 @@ async def send_money(
         )
 
     if sender_wallet.balance < payload.amount:
+        # NBL-411: aligned to the same 422 {error, available, requested} shape
+        # transfer.py already uses for its own pre-check -- send_money() is
+        # called internally by transfer.py's _execute_transfer, so a stale
+        # 400/string-detail response here could otherwise leak through in a
+        # race where balance changes between transfer.py's pre-check and
+        # this locked re-check.
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Insufficient balance",
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error": "insufficient_balance",
+                "available": str(sender_wallet.balance),
+                "requested": str(payload.amount),
+            },
         )
 
     # --- debit / credit + insert transaction row, all in one commit ---
