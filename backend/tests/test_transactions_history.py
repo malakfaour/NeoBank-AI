@@ -38,6 +38,15 @@ this repo, add:
 """
 import pytest
 
+from datetime import date
+from decimal import Decimal
+from uuid import uuid4
+
+from sqlalchemy import select
+
+from app.db.session import AsyncSessionLocal
+from app.models.user import User
+from app.models.wallet import Wallet, WalletCurrency
 from app.utils.transaction_query_utils import compute_total_pages, parse_summary_month
 
 
@@ -88,17 +97,6 @@ def test_parse_summary_month_invalid_month_number_raises():
 # and its exclusion from spend summary) -- the broader TODO list in the
 # docstring above (pagination, date filters, etc.) is still open and belongs
 # to DEVATTECH-73, not this ticket.
-
-from datetime import date
-from decimal import Decimal
-from uuid import uuid4
-
-from sqlalchemy import select
-
-from app.db.session import AsyncSessionLocal
-from app.models.user import User
-from app.models.wallet import Wallet, WalletCurrency
-
 
 async def _register_user(client, label: str) -> dict:
     suffix = uuid4().hex[:10]
