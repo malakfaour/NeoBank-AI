@@ -240,7 +240,7 @@ async def send_money(
 # These values are accepted as valid filters (so the endpoint doesn't 400
 # on a legitimate future value) but currently match zero rows.
 VALID_TRANSACTION_TYPES = {"send", "receive", "topup", "bill", "exchange"}
-TYPES_NOT_YET_SUPPORTED = {"topup", "bill", "exchange"}
+TYPES_NOT_YET_SUPPORTED = {"bill", "exchange"}
 
 
 @router.get("/summary", response_model=TransactionSummaryResponse)
@@ -278,6 +278,9 @@ async def get_transaction_summary(
             func.count(Transaction.id).label("transaction_count"),
         )
         .where(Transaction.sender_id == sender_id)
+        # NBL-411: top-ups are stored as sender_id == receiver_id and are not
+        # spend -- exclude them from the monthly spend summary.
+        .where(Transaction.sender_id != Transaction.receiver_id)
         .where(Transaction.created_at >= month_start)
         .where(Transaction.created_at < month_end)
         .group_by(Transaction.category, Transaction.currency)
@@ -315,11 +318,19 @@ async def get_transaction_detail(
     if transaction is None or user_id not in (transaction.sender_id, transaction.receiver_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transaction not found")
 
+    # NBL-411: top-ups are stored as sender_id == receiver_id (see
+    # accounts.py card_top_up) -- structural marker, not category, since
+    # category is free-text and may be rewritten by future categorization
+    # features. A top-up has no counterparty to look up or display.
+    is_topup = transaction.sender_id == transaction.receiver_id
     is_sender = transaction.sender_id == user_id
-    counterparty_id = transaction.receiver_id if is_sender else transaction.sender_id
 
-    counterparty_result = await db.execute(select(User).where(User.id == counterparty_id))
-    counterparty = counterparty_result.scalar_one_or_none()
+    if is_topup:
+        counterparty = None
+    else:
+        counterparty_id = transaction.receiver_id if is_sender else transaction.sender_id
+        counterparty_result = await db.execute(select(User).where(User.id == counterparty_id))
+        counterparty = counterparty_result.scalar_one_or_none()
 
     audit_result = await db.execute(
         select(TransactionAuditLog)
@@ -332,7 +343,7 @@ async def get_transaction_detail(
         id=transaction.id,
         sender_id=transaction.sender_id,
         receiver_id=transaction.receiver_id,
-        type="send" if is_sender else "receive",
+        type="topup" if is_topup else ("send" if is_sender else "receive"),
         amount=transaction.amount,
         currency=transaction.currency.value,
         counterparty_name=counterparty.full_name if counterparty else None,
@@ -394,6 +405,11 @@ async def list_transactions(
         filters.append(Transaction.sender_id == user_id)
     elif type == "receive":
         filters.append(Transaction.receiver_id == user_id)
+    elif type == "topup":
+        # NBL-411: top-ups are stored as sender_id == receiver_id; combined
+        # with the base OR filter above, this matches only the user's own
+        # top-ups.
+        filters.append(Transaction.sender_id == Transaction.receiver_id)
 
     if start_date is not None:
         filters.append(Transaction.created_at >= start_date)
@@ -426,14 +442,16 @@ async def list_transactions(
 
     items = []
     for tx in transactions:
+        # NBL-411: top-ups are stored as sender_id == receiver_id -- see the
+        # same note in get_transaction_detail above.
+        is_topup = tx.sender_id == tx.receiver_id
         is_sender = tx.sender_id == user_id
-        counterparty_id = tx.receiver_id if is_sender else tx.sender_id
-        counterparty = users_by_id.get(counterparty_id)
+        counterparty = None if is_topup else users_by_id.get(tx.receiver_id if is_sender else tx.sender_id)
 
         items.append(
             TransactionListItem(
                 id=tx.id,
-                type="send" if is_sender else "receive",
+                type="topup" if is_topup else ("send" if is_sender else "receive"),
                 amount=tx.amount,
                 currency=tx.currency.value,
                 counterparty_name=counterparty.full_name if counterparty else None,
