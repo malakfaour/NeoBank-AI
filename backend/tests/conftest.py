@@ -41,6 +41,7 @@ os.environ["SMTP_PASSWORD"] = "test_password"
 os.environ["TWILIO_ACCOUNT_SID"] = "test_sid"
 os.environ["TWILIO_AUTH_TOKEN"] = "test_token"
 os.environ["TWILIO_FROM_NUMBER"] = "+15555555555"
+os.environ["REQUIRE_ACTION_TOKEN"] = "false"
 
 from app.db.base import Base  # noqa: E402
 from app.db.session import engine  # noqa: E402
@@ -62,6 +63,8 @@ async def create_tables():
         Base.metadata.tables["user_sessions"],
         Base.metadata.tables["transactions"],
         Base.metadata.tables["transaction_audit_logs"],
+        Base.metadata.tables["bill_payments"],
+        Base.metadata.tables["fraud_resolutions"],
         Base.metadata.tables["beneficiaries"],
         Base.metadata.tables["kyc_records"],
         Base.metadata.tables["notifications"],

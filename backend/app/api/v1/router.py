@@ -11,6 +11,7 @@ from app.api.v1.endpoints.notifications import router as notifications_router
 from app.api.v1.endpoints.transactions import router as transactions_router
 from app.api.v1.endpoints.transfer import router as transfer_router
 from app.api.v1.endpoints.beneficiaries import router as beneficiaries_router
+from app.api.v1.endpoints.bills import router as bills_router
 from app.api.v1.endpoints.admin import router as admin_router
 from app.api.v1.endpoints.users import router as users_router
 
@@ -27,7 +28,7 @@ from app.api.v1.endpoints.users import router as users_router
 #   chatbot    -> /api/v1/chatbot/...
 #
 # exchange, accounts, notifications, transactions, transfer,
-# beneficiaries, and admin already declare their own prefix via
+# beneficiaries, bills, and admin already declare their own prefix via
 # APIRouter(prefix=...) in their respective modules, so no prefix is
 # passed here for those -- adding one would double it up.
 router = APIRouter()
@@ -43,5 +44,6 @@ router.include_router(notifications_router)
 router.include_router(transactions_router)
 router.include_router(transfer_router)
 router.include_router(beneficiaries_router)
+router.include_router(bills_router)
 router.include_router(admin_router)
 router.include_router(users_router, prefix="/users", tags=["users"])
