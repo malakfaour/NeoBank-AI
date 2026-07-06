@@ -63,6 +63,8 @@ async def create_tables():
         Base.metadata.tables["user_sessions"],
         Base.metadata.tables["transactions"],
         Base.metadata.tables["transaction_audit_logs"],
+        Base.metadata.tables["bill_payments"],
+        Base.metadata.tables["fraud_resolutions"],
         Base.metadata.tables["beneficiaries"],
         Base.metadata.tables["kyc_records"],
         Base.metadata.tables["notifications"],

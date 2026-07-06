@@ -13,7 +13,7 @@ class Settings(BaseSettings):
 
     # Database
     DATABASE_URL: str
-    DATABASE_URL_DIRECT: str = ""
+    DATABASE_URL_DIRECT: str
 
     # Redis
     REDIS_URL: str = "redis://localhost:6379"
@@ -21,12 +21,12 @@ class Settings(BaseSettings):
     # JWT
     JWT_SECRET: str
     JWT_ALGORITHM: str = "HS256"
-    JWT_EXPIRE_MINUTES: int = 60
+    JWT_EXPIRE_MINUTES: int = 30
     JWT_REFRESH_EXPIRE_DAYS: int = 7
 
     # OTP
-    OTP_EXPIRE_MINUTES: int = 5
-    REQUIRE_ACTION_TOKEN: bool = True
+    OTP_EXPIRE_MINUTES: int = 10
+
     # App
     APP_ENV: str = "development"
 
@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     # ML
     DEEPFACE_MODEL: str = "ArcFace"
     GROQ_API_KEY: str = ""
+    REQUIRE_ACTION_TOKEN: bool = False
 
     # AWS / S3
     AWS_ACCESS_KEY_ID: str = ""
@@ -63,6 +64,9 @@ class Settings(BaseSettings):
 
     # Frontend
     NEXT_PUBLIC_API_URL: str = "http://localhost:8000"
+
+    # Bill Payments
+    BILLER_API_URL: str = "http://localhost:9000/mock-biller"
 
 
 settings = Settings()
