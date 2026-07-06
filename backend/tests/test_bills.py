@@ -73,10 +73,11 @@ async def test_call_mock_biller_success_rate_within_expected_range():
     """
     random.seed(42)
     trials = 500
-    successes = sum(
-        1 for _ in range(trials)
-        if (await call_mock_biller("ogero", "REF-1", Decimal("10.00"))).success
-    )
+    successes = 0
+for _ in range(trials):
+    result = await call_mock_biller("ogero", "REF-1", Decimal("10.00"))
+    if result.success:
+        successes += 1
     observed_rate = successes / trials
     assert abs(observed_rate - SUCCESS_RATE) < 0.08  # generous tolerance for randomness
 

@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_MINUTES: int = 30
     JWT_REFRESH_EXPIRE_DAYS: int = 7
+    # OTP
+    OTP_EXPIRE_MINUTES: int = 10
 
     # App
     APP_ENV: str = "development"
