@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     APP_ENV: str = "development"
     DEEPFACE_MODEL: str = "ArcFace"
     GROQ_API_KEY: str = ""
+    REQUIRE_ACTION_TOKEN: bool = False
 
     # AWS / S3
     AWS_ACCESS_KEY_ID: str = ""
