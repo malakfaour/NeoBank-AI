@@ -1,5 +1,5 @@
 import json
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
@@ -59,21 +59,43 @@ async def auth_tokens(client):
     return response.json()
 
 
-async def test_chatbot_general_intent_happy_path(client, auth_tokens):
-    """Happy path: GENERAL intent, low confidence, no confirmation needed."""
-    with patch("httpx.AsyncClient.post", new=_groq_success("GENERAL", 0.4)):
+async def test_chatbot_general_intent_happy_path(
+    client,
+    auth_tokens,
+):
+    with (
+        patch(
+            "httpx.AsyncClient.post",
+            new=_groq_success("GENERAL", 0.4),
+        ),
+        patch(
+            "app.api.v1.endpoints.chatbot.get_chatbot_response",
+            new_callable=AsyncMock,
+            return_value="Hello! How can I help you?",
+        ),
+    ):
         response = await client.post(
             "/api/v1/chatbot/message",
-            json={"message": "hi there"},
-            headers={"Authorization": f"Bearer {auth_tokens['access_token']}"},
+            json={
+                "session_id": "test-general-session",
+                "message": "hi there",
+            },
+            headers={
+                "Authorization": (
+                    f"Bearer {auth_tokens['access_token']}"
+                )
+            },
         )
+
     assert response.status_code == 200
+
     data = response.json()
+
+    assert data["reply"] == "Hello! How can I help you?"
+    assert data["session_id"] == "test-general-session"
     assert data["intent"] == "GENERAL"
     assert data["confidence"] == 0.4
     assert data["confirmation_required"] is False
-    assert data["original_message"] == "hi there"
-
 
 async def test_chatbot_requires_auth(client):
     """Auth rejected: no Authorization header returns 401."""
@@ -81,31 +103,80 @@ async def test_chatbot_requires_auth(client):
     assert response.status_code == 401
 
 
-async def test_chatbot_transfer_intent_requires_confirmation(client, auth_tokens):
-    """High-confidence TRANSFER_INTENT sets confirmation_required, doesn't execute."""
-    with patch("httpx.AsyncClient.post", new=_groq_success("TRANSFER_INTENT", 0.92)):
+async def test_chatbot_transfer_intent_requires_confirmation(
+    client,
+    auth_tokens,
+):
+    with (
+        patch(
+            "httpx.AsyncClient.post",
+            new=_groq_success(
+                "TRANSFER_INTENT",
+                0.92,
+            ),
+        ),
+        patch(
+            "app.api.v1.endpoints.chatbot.save_chat_turn",
+            new_callable=AsyncMock,
+        ),
+    ):
         response = await client.post(
             "/api/v1/chatbot/message",
-            json={"message": "send 100 to Sara"},
-            headers={"Authorization": f"Bearer {auth_tokens['access_token']}"},
+            json={
+                "session_id": "test-transfer-session",
+                "message": "send 100 to Sara",
+            },
+            headers={
+                "Authorization": (
+                    f"Bearer {auth_tokens['access_token']}"
+                )
+            },
         )
+
     assert response.status_code == 200
+
     data = response.json()
+
+    assert data["session_id"] == "test-transfer-session"
     assert data["intent"] == "TRANSFER_INTENT"
+    assert data["confidence"] == 0.92
     assert data["confirmation_required"] is True
-    assert "confirm" in data["response"].lower()
+    assert "confirm" in data["reply"].lower()
 
-
-async def test_chatbot_groq_failure_falls_back_to_general(client, auth_tokens):
-    """Failure path: Groq unreachable falls back to GENERAL/0.0, doesn't 500."""
-    with patch("httpx.AsyncClient.post", new=_groq_unreachable()):
+async def test_chatbot_groq_failure_falls_back_to_general(
+    client,
+    auth_tokens,
+):
+    with (
+        patch(
+            "httpx.AsyncClient.post",
+            new=_groq_unreachable(),
+        ),
+        patch(
+            "app.api.v1.endpoints.chatbot.get_chatbot_response",
+            new_callable=AsyncMock,
+            return_value="I am still available to help.",
+        ),
+    ):
         response = await client.post(
             "/api/v1/chatbot/message",
-            json={"message": "what's my balance"},
-            headers={"Authorization": f"Bearer {auth_tokens['access_token']}"},
+            json={
+                "session_id": "test-fallback-session",
+                "message": "what's my balance",
+            },
+            headers={
+                "Authorization": (
+                    f"Bearer {auth_tokens['access_token']}"
+                )
+            },
         )
+
     assert response.status_code == 200
+
     data = response.json()
+
+    assert data["reply"] == "I am still available to help."
+    assert data["session_id"] == "test-fallback-session"
     assert data["intent"] == "GENERAL"
     assert data["confidence"] == 0.0
     assert data["confirmation_required"] is False

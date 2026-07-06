@@ -3,13 +3,16 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_current_user
-from app.core.cache_utils import cache_balance, get_cached_balance, invalidate_balance_cache
+from app.core.cache_utils import invalidate_balance_cache
 from app.db.session import get_db
 from app.models.user import KYCStatus, User
 from app.models.wallet import Wallet
 from app.schemas.user import CurrentUser
 from app.schemas.wallet import CardTopUpRequest, CardTopUpResponse
-from app.services.account_service import create_wallets_for_user
+from app.services.account_service import (
+    create_wallets_for_user,
+    get_user_balances,
+)
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
 
@@ -38,40 +41,24 @@ async def get_balance(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Get all wallet balances for the authenticated user. Cached in Redis
-    for 30s (NBL-403) -- cache is invalidated on every debit/credit by the
-    transactions service via app.core.cache_utils.invalidate_balance_cache.
+    Get all wallet balances for the authenticated user.
+
+    Cached in Redis for 30 seconds.
     """
     user_id = int(current_user.id)
-    cached = await get_cached_balance(user_id)
-    if cached is not None:
-        return cached
 
-    result = await db.execute(
-        select(Wallet).where(Wallet.user_id == user_id)
+    response = await get_user_balances(
+        user_id=user_id,
+        db=db,
     )
-    wallets = result.scalars().all()
 
-    if not wallets:
-        raise HTTPException(status_code=404, detail="No wallets found for this user")
-
-    response = {
-        "user_id": user_id,
-        "balances": [
-            {
-                "currency": w.currency.value,
-                "balance": float(w.balance),
-                "account_number": w.account_number,
-                "iban": w.iban,
-            }
-            for w in wallets
-        ],
-    }
-
-    await cache_balance(user_id, response)
+    if response is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No wallets found for this user",
+        )
 
     return response
-
 
 @router.post("/top-up", response_model=CardTopUpResponse)
 async def card_top_up(
