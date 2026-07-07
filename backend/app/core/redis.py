@@ -4,6 +4,8 @@ import json
 import redis.asyncio as aioredis
 
 from app.core.config import settings
+from datetime import datetime, timedelta, timezone
+from decimal import ROUND_HALF_UP, Decimal
 
 redis_client = aioredis.from_url(
     settings.REDIS_URL,
@@ -144,3 +146,44 @@ async def get_idempotent_response(key: str) -> dict | None:
     """Legacy raw-key cache accessor kept for backward compatibility."""
     result = await redis_client.get(f"idempotent:{key}")
     return json.loads(result) if result else None
+
+# NBL-411: max total card top-ups per user per UTC day.
+TOPUP_DAILY_LIMIT = Decimal("1000")
+
+
+def _topup_daily_key(user_id: int) -> str:
+    return f"topup_daily:{user_id}"
+
+
+async def get_topup_daily_total(user_id: int) -> Decimal:
+    """Current UTC-day top-up total for user_id, in dollars (NBL-411)."""
+    cents = await redis_client.get(_topup_daily_key(user_id))
+    return Decimal(cents) / 100 if cents is not None else Decimal("0")
+
+
+async def increment_topup_daily(user_id: int, amount: Decimal) -> Decimal:
+    """
+    Atomically add `amount` (dollars) to today's top-up total for user_id
+    and return the new total (NBL-411 daily limit).
+
+    Stored as integer cents so INCRBY (atomic, exact) can be used instead
+    of INCRBYFLOAT, which accumulates binary float error on repeated
+    increments -- not acceptable for money math.
+
+    TTL is (re)computed on every call to expire at the next UTC midnight.
+    Since Redis drops the key at that boundary, the first top-up of a new
+    day always starts a fresh key with a correct TTL; later top-ups the
+    same day just refresh the same expiry, which is a harmless no-op.
+    """
+    key = _topup_daily_key(user_id)
+    amount_cents = int((amount * 100).to_integral_value(rounding=ROUND_HALF_UP))
+
+    now = datetime.now(timezone.utc)
+    next_midnight = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    ttl_seconds = int((next_midnight - now).total_seconds())
+
+    pipe = redis_client.pipeline()
+    pipe.incrby(key, amount_cents)
+    pipe.expire(key, ttl_seconds)
+    results = await pipe.execute()
+    return Decimal(results[0]) / 100

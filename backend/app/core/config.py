@@ -23,11 +23,17 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_MINUTES: int = 30
     JWT_REFRESH_EXPIRE_DAYS: int = 7
+
     # OTP
     OTP_EXPIRE_MINUTES: int = 10
 
     # App
     APP_ENV: str = "development"
+
+    # Payment Gateway (Member 4 - top-up, NBL-411)
+    PAYMENT_GATEWAY_URL: str = ""
+
+    # ML
     DEEPFACE_MODEL: str = "ArcFace"
     GROQ_API_KEY: str = ""
     REQUIRE_ACTION_TOKEN: bool = False
@@ -50,6 +56,11 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str | None = None
     SMTP_USE_TLS: bool = True
     SENDGRID_API_KEY: str | None = None
+
+    # Twilio (SMS OTP delivery)
+    TWILIO_ACCOUNT_SID: str = ""
+    TWILIO_AUTH_TOKEN: str = ""
+    TWILIO_FROM_NUMBER: str = ""
 
     # Frontend
     NEXT_PUBLIC_API_URL: str = "http://localhost:8000"
