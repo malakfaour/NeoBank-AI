@@ -9,6 +9,11 @@ from app.services.chatbot_intent import GROQ_API_URL
 _REAL_POST = httpx.AsyncClient.post
 
 
+async def _mock_chatbot_response(message, session_id, user_id, db):
+    await db.commit()
+    return "Your balance is available in Accounts."
+
+
 def _groq_success(intent: str, confidence: float):
     """Only fakes calls to the Groq endpoint; everything else (the test
     client's own calls into the app) passes through to the real post()."""
@@ -189,10 +194,16 @@ async def test_chatbot_logs_intent_classification(client, auth_tokens):
     from app.db.session import engine
     from app.models.chatbot_log import ChatbotLog
 
-    with patch("httpx.AsyncClient.post", new=_groq_success("BALANCE_QUERY", 0.87)):
+    with (
+        patch("httpx.AsyncClient.post", new=_groq_success("BALANCE_QUERY", 0.87)),
+        patch(
+            "app.api.v1.endpoints.chatbot.get_chatbot_response",
+            side_effect=_mock_chatbot_response,
+        ),
+    ):
         response = await client.post(
             "/api/v1/chatbot/message",
-            json={"message": "what is my balance?"},
+            json={"message": "what is my balance?", "session_id": "test-intent-session"},
             headers={"Authorization": f"Bearer {auth_tokens['access_token']}"},
         )
 
