@@ -109,3 +109,30 @@ async def test_chatbot_groq_failure_falls_back_to_general(client, auth_tokens):
     assert data["intent"] == "GENERAL"
     assert data["confidence"] == 0.0
     assert data["confirmation_required"] is False
+
+async def test_chatbot_logs_intent_classification(client, auth_tokens):
+    """Chatbot message saves intent classification into chatbot_logs."""
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.db.session import engine
+    from app.models.chatbot_log import ChatbotLog
+
+    with patch("httpx.AsyncClient.post", new=_groq_success("BALANCE_QUERY", 0.87)):
+        response = await client.post(
+            "/api/v1/chatbot/message",
+            json={"message": "what is my balance?"},
+            headers={"Authorization": f"Bearer {auth_tokens['access_token']}"},
+        )
+
+    assert response.status_code == 200
+
+    async with AsyncSession(engine) as session:
+        result = await session.execute(
+            select(ChatbotLog).where(ChatbotLog.intent == "BALANCE_QUERY")
+        )
+        log = result.scalar_one_or_none()
+
+    assert log is not None
+    assert log.confidence == 0.87
+    assert log.latency_ms >= 0
