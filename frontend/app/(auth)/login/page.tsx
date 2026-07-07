@@ -7,34 +7,33 @@ import { useAuthStore } from "@/store/authStore";
 
 export default function LoginPage() {
   const router = useRouter();
-const { setUser, setTokens } = useAuthStore();
-  const [form, setForm] = useState({ phone: "", passcode: "" });
-  const [errors, setErrors] = useState<{ phone?: string; passcode?: string; general?: string }>({});
+  const { setTokens } = useAuthStore();
+  const [form, setForm] = useState({ email: "", password: "" });
+  const [errors, setErrors] = useState<{ email?: string; password?: string; general?: string }>({});
   const [loading, setLoading] = useState(false);
 
   const validate = () => {
-  const e: typeof errors = {};
-  if (!form.phone.trim()) e.phone = "Phone number is required.";
-  else if (!/^[0-9]{7,8}$/.test(form.phone.trim())) e.phone = "Enter a valid Lebanese number (e.g. 70 123 456).";
-  if (!form.passcode) e.passcode = "Passcode is required.";
-  else if (form.passcode.length < 6) e.passcode = "Passcode must be 6 digits.";
-  return e;
-};
+    const e: typeof errors = {};
+    if (!form.email.trim()) e.email = "Email is required.";
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) e.email = "Enter a valid email address.";
+    if (!form.password) e.password = "Password is required.";
+    else if (form.password.length < 6) e.password = "Password must be at least 6 characters.";
+    return e;
+  };
 
   const handleSubmit = async () => {
     const e = validate();
     if (Object.keys(e).length) { setErrors(e); return; }
     setErrors({});
     setLoading(true);
-   try {
-  const res = await api.post("/auth/login", { phone: `+961${form.phone.trim()}`, passcode: form.passcode });
-  setTokens(res.data.access_token, res.data.refresh_token);
-  setUser(res.data.user);
-  router.push("/dashboard");
-} catch (err: unknown) {
-  const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-  setErrors({ general: typeof detail === "string" ? detail : "Invalid phone or passcode." });
-}finally {
+    try {
+      const res = await api.post("/auth/login", { email: form.email.trim(), password: form.password });
+      setTokens(res.data.access_token, res.data.refresh_token);
+      router.push("/dashboard");
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setErrors({ general: typeof detail === "string" ? detail : "Invalid email or password." });
+    } finally {
       setLoading(false);
     }
   };
@@ -58,32 +57,28 @@ const { setUser, setTokens } = useAuthStore();
         )}
 
         <div style={{ marginBottom: "16px" }}>
-          <label style={{ display: "block", fontSize: "13px", fontWeight: "600", color: "#333", marginBottom: "8px" }}>Mobile number</label>
-          <div style={{ display: "flex", alignItems: "center", border: `1.5px solid ${errors.phone ? "#EF4444" : "#E5E7EB"}`, borderRadius: "14px", padding: "12px 16px", gap: "10px", backgroundColor: "#fff" }}>
-            <span style={{ fontSize: "13px", color: "#666", whiteSpace: "nowrap" }}>🇱🇧 +961</span>
-            <div style={{ width: "1px", height: "16px", backgroundColor: "#E5E7EB" }} />
-            <input
-              type="tel"
-              placeholder="70 123 456"
-              value={form.phone}
-              onChange={(e) => setForm({ ...form, phone: e.target.value })}
-              style={{ flex: 1, border: "none", outline: "none", fontSize: "14px", color: "#000", backgroundColor: "transparent" }}
-            />
-          </div>
-          {errors.phone && <p style={{ color: "#EF4444", fontSize: "12px", marginTop: "6px" }}>{errors.phone}</p>}
+          <label style={{ display: "block", fontSize: "13px", fontWeight: "600", color: "#333", marginBottom: "8px" }}>Email</label>
+          <input
+            type="email"
+            placeholder="you@example.com"
+            value={form.email}
+            onChange={(e) => setForm({ ...form, email: e.target.value })}
+            style={{ width: "100%", border: `1.5px solid ${errors.email ? "#EF4444" : "#E5E7EB"}`, borderRadius: "14px", padding: "12px 16px", fontSize: "14px", color: "#000", outline: "none", boxSizing: "border-box" }}
+          />
+          {errors.email && <p style={{ color: "#EF4444", fontSize: "12px", marginTop: "6px" }}>{errors.email}</p>}
         </div>
 
         <div style={{ marginBottom: "24px" }}>
-          <label style={{ display: "block", fontSize: "13px", fontWeight: "600", color: "#333", marginBottom: "8px" }}>Passcode</label>
+          <label style={{ display: "block", fontSize: "13px", fontWeight: "600", color: "#333", marginBottom: "8px" }}>Password</label>
           <input
             type="password"
             placeholder="••••••"
-            value={form.passcode}
-            onChange={(e) => setForm({ ...form, passcode: e.target.value })}
+            value={form.password}
+            onChange={(e) => setForm({ ...form, password: e.target.value })}
             onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
-            style={{ width: "100%", border: `1.5px solid ${errors.passcode ? "#EF4444" : "#E5E7EB"}`, borderRadius: "14px", padding: "12px 16px", fontSize: "14px", color: "#000", outline: "none", boxSizing: "border-box" }}
+            style={{ width: "100%", border: `1.5px solid ${errors.password ? "#EF4444" : "#E5E7EB"}`, borderRadius: "14px", padding: "12px 16px", fontSize: "14px", color: "#000", outline: "none", boxSizing: "border-box" }}
           />
-          {errors.passcode && <p style={{ color: "#EF4444", fontSize: "12px", marginTop: "6px" }}>{errors.passcode}</p>}
+          {errors.password && <p style={{ color: "#EF4444", fontSize: "12px", marginTop: "6px" }}>{errors.password}</p>}
         </div>
 
         <button
@@ -97,6 +92,3 @@ const { setUser, setTokens } = useAuthStore();
     </div>
   );
 }
-
-
-

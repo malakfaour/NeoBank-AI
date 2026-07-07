@@ -67,7 +67,10 @@ export default function TransferPage() {
       setWallets(b);
       if (b.length > 0) setSelectedWallet(b[0]);
     }).catch(() => {});
-    api.get("/beneficiaries").then((r) => setBeneficiaries(r.data ?? [])).catch(() => {});
+    api.get("/beneficiaries").then((r) => {
+  const data = r.data;
+  setBeneficiaries(Array.isArray(data) ? data : data?.items ?? []);
+}).catch(() => {});
   }, []);
 
   const validateRecipient = async () => {
