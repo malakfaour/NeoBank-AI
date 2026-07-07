@@ -1,4 +1,5 @@
-import asyncio
+﻿import asyncio
+from uuid import uuid4
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
@@ -6,17 +7,27 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_current_user
+from app.core.cache_utils import invalidate_balance_cache
 from app.core.config import settings
-from app.core.cache_utils import cache_balance, get_cached_balance, invalidate_balance_cache
+from app.core.redis import (
+    TOPUP_DAILY_LIMIT,
+    get_topup_daily_total,
+    increment_topup_daily,
+)
 from app.db.session import get_db
+from app.models.transaction import (
+    Transaction,
+    TransactionCurrency,
+    TransactionStatus,
+)
 from app.models.user import KYCStatus, User
 from app.models.wallet import Wallet
 from app.schemas.user import CurrentUser
 from app.schemas.wallet import CardTopUpRequest, CardTopUpResponse
-from app.services.account_service import create_wallets_for_user
-from app.core.redis import TOPUP_DAILY_LIMIT, get_topup_daily_total, increment_topup_daily
-from uuid import uuid4
-from app.models.transaction import Transaction, TransactionCurrency, TransactionStatus
+from app.services.account_service import (
+    create_wallets_for_user,
+    get_user_balances,
+)
 from app.services.audit_log import append_audit
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
@@ -46,42 +57,31 @@ async def get_balance(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Get all wallet balances for the authenticated user. Cached in Redis
-    for 30s (NBL-403) -- cache is invalidated on every debit/credit by the
-    transactions service via app.core.cache_utils.invalidate_balance_cache.
+    Get all wallet balances for the authenticated user.
+
+    Cached in Redis for 30 seconds.
     """
     user_id = int(current_user.id)
-    cached = await get_cached_balance(user_id)
-    if cached is not None:
-        return cached
 
-    result = await db.execute(
-        select(Wallet).where(Wallet.user_id == user_id)
+    response = await get_user_balances(
+        user_id=user_id,
+        db=db,
     )
-    wallets = result.scalars().all()
 
-    if not wallets:
-        raise HTTPException(status_code=404, detail="No wallets found for this user")
-
-    response = {
-        "user_id": user_id,
-        "balances": [
-            {
-                "currency": w.currency.value,
-                "balance": float(w.balance),
-                "account_number": w.account_number,
-                "iban": w.iban,
-            }
-            for w in wallets
-        ],
-    }
-
-    await cache_balance(user_id, response)
+    if response is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No wallets found for this user",
+        )
 
     return response
 
 
-async def _call_payment_gateway(card_token: str, amount, currency: str) -> httpx.Response:
+async def _call_payment_gateway(
+    card_token: str,
+    amount,
+    currency: str,
+) -> httpx.Response:
     """
     Calls the external card payment gateway (NBL-411). Retries once, after
     a 2s pause, on a 5xx response -- gateways are occasionally flaky under
@@ -89,12 +89,25 @@ async def _call_payment_gateway(card_token: str, amount, currency: str) -> httpx
     user needing to resubmit. Not retried on 402 (declined), since that's
     a definitive answer from the gateway, not a transient failure.
     """
-    payload = {"card_token": card_token, "amount": str(amount), "currency": currency}
+    payload = {
+        "card_token": card_token,
+        "amount": str(amount),
+        "currency": currency,
+    }
+
     async with httpx.AsyncClient(timeout=10.0) as http_client:
-        response = await http_client.post(settings.PAYMENT_GATEWAY_URL, json=payload)
+        response = await http_client.post(
+            settings.PAYMENT_GATEWAY_URL,
+            json=payload,
+        )
+
         if response.status_code >= 500:
             await asyncio.sleep(2)
-            response = await http_client.post(settings.PAYMENT_GATEWAY_URL, json=payload)
+            response = await http_client.post(
+                settings.PAYMENT_GATEWAY_URL,
+                json=payload,
+            )
+
     return response
 
 
@@ -142,7 +155,9 @@ async def card_top_up(
         )
 
     gateway_response = await _call_payment_gateway(
-        payload.card_token, payload.amount, wallet.currency.value
+        payload.card_token,
+        payload.amount,
+        wallet.currency.value,
     )
 
     if gateway_response.status_code == 402:
@@ -150,12 +165,18 @@ async def card_top_up(
             status_code=402,
             detail={
                 "error": "card_declined",
-                "gateway_message": gateway_response.json().get("message", "Card declined"),
+                "gateway_message": gateway_response.json().get(
+                    "message",
+                    "Card declined",
+                ),
             },
         )
 
     if gateway_response.status_code >= 500:
-        raise HTTPException(status_code=502, detail="Payment gateway unavailable")
+        raise HTTPException(
+            status_code=502,
+            detail="Payment gateway unavailable",
+        )
 
     # Row-locked re-fetch right before the mutation (NBL-411). Deliberately
     # NOT locked earlier: the gateway call above can take up to ~22s
@@ -217,7 +238,11 @@ async def card_top_up(
 
     return {
         "wallet_id": wallet.id,
-        "currency": wallet.currency.value if hasattr(wallet.currency, "value") else str(wallet.currency),
+        "currency": (
+            wallet.currency.value
+            if hasattr(wallet.currency, "value")
+            else str(wallet.currency)
+        ),
         "top_up_amount": payload.amount,
         "new_balance": wallet.balance,
         "status": "success",
@@ -253,7 +278,9 @@ async def validate_recipient(
         )
         user = result.scalars().first()
     elif phone:
-        result = await db.execute(select(User).where(User.phone == phone))
+        result = await db.execute(
+            select(User).where(User.phone == phone)
+        )
         user = result.scalar_one_or_none()
 
     if user is None:
