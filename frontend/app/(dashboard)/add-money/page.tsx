@@ -32,16 +32,17 @@ export default function AddMoneyPage() {
   const [error, setError] = useState("");
   const [newBalance, setNewBalance] = useState<number | null>(null);
 
-  useEffect(() => {
-    api.get("/accounts/balance").then((r) => {
-      const b = r.data.balances ?? [];
-      setWallets(b);
-      if (b.length > 0) setSelected(b[0]);
-    }).catch(() => {});
-  }, []);
+useEffect(() => {
+  api.get("/accounts/balance").then((r) => {
+    const b = r.data.balances ?? [];
+    setWallets(b);
+    if (b.length > 0) setSelected(b[0]);
+    if (b.length === 0) setError("No wallets found. Please contact support.");
+  }).catch(() => setError("Could not load wallets. Please try again."));
+}, []);
+const formatCard = (val: string) =>
+  val.replace(/\D/g, "").slice(0, 16).replace(/(.{4})/g, "$1 ").trim();
 
-  const formatCard = (val: string) =>
-    val.replace(/\D/g, "").slice(0, 16).replace(/(.{4})/g, "$1 ").trim();
 
   const formatExpiry = (val: string) => {
     const digits = val.replace(/\D/g, "").slice(0, 4);

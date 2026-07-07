@@ -13,28 +13,28 @@ const { setUser, setTokens } = useAuthStore();
   const [loading, setLoading] = useState(false);
 
   const validate = () => {
-    const e: typeof errors = {};
-    if (!form.phone.trim()) e.phone = "Phone number is required.";
-    else if (!/^\+?[0-9]{7,15}$/.test(form.phone.trim())) e.phone = "Enter a valid phone number.";
-    if (!form.passcode) e.passcode = "Passcode is required.";
-    else if (form.passcode.length < 4) e.passcode = "Passcode must be at least 4 digits.";
-    return e;
-  };
+  const e: typeof errors = {};
+  if (!form.phone.trim()) e.phone = "Phone number is required.";
+  else if (!/^[0-9]{7,8}$/.test(form.phone.trim())) e.phone = "Enter a valid Lebanese number (e.g. 70 123 456).";
+  if (!form.passcode) e.passcode = "Passcode is required.";
+  else if (form.passcode.length < 6) e.passcode = "Passcode must be 6 digits.";
+  return e;
+};
 
   const handleSubmit = async () => {
     const e = validate();
     if (Object.keys(e).length) { setErrors(e); return; }
     setErrors({});
     setLoading(true);
-    try {
-      const res = await api.post("/auth/login", { phone: form.phone.trim(), passcode: form.passcode });
-      setTokens(res.data.access_token, res.data.refresh_token);
-      setUser(res.data.user);
-      router.push("/dashboard");
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Invalid phone or passcode.";
-      setErrors({ general: message });
-    } finally {
+   try {
+  const res = await api.post("/auth/login", { phone: `+961${form.phone.trim()}`, passcode: form.passcode });
+  setTokens(res.data.access_token, res.data.refresh_token);
+  setUser(res.data.user);
+  router.push("/dashboard");
+} catch (err: unknown) {
+  const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+  setErrors({ general: typeof detail === "string" ? detail : "Invalid phone or passcode." });
+}finally {
       setLoading(false);
     }
   };

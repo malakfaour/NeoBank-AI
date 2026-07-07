@@ -44,10 +44,11 @@ export default function ExchangePage() {
     api.get("/exchange/market-status").then((r) => setMarketStatus(r.data)).catch(() => {});
     api.get("/exchange/forecast").then((r) => setForecast(r.data.predictions ?? [])).catch(() => {});
     api.get("/exchange/rates").then((r) => {
-      const rates: { base_currency: string; target_currency: string; rate: number }[] = r.data;
-      const r1 = rates.find((x) => x.base_currency === "USD" && x.target_currency === "LBP");
-      if (r1) setRate(r1.rate);
-    }).catch(() => {});
+  const rates: { base_currency: string; target_currency: string; rate: number }[] = r.data;
+  const r1 = rates.find((x) => x.base_currency === "USD" && x.target_currency === "LBP");
+  if (r1) setRate(r1.rate);
+  else setError("Exchange rate unavailable. Try again later.");
+}).catch(() => setError("Could not load exchange rates. Please try again."));
   }, []);
 
   const swap = () => {
