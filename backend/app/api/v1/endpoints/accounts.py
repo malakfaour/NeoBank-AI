@@ -1,15 +1,34 @@
-﻿from fastapi import APIRouter, Depends, HTTPException
+﻿import asyncio
+from uuid import uuid4
+
+import httpx
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_current_user
-from app.core.cache_utils import cache_balance, get_cached_balance, invalidate_balance_cache
+from app.core.cache_utils import invalidate_balance_cache
+from app.core.config import settings
+from app.core.redis import (
+    TOPUP_DAILY_LIMIT,
+    get_topup_daily_total,
+    increment_topup_daily,
+)
 from app.db.session import get_db
+from app.models.transaction import (
+    Transaction,
+    TransactionCurrency,
+    TransactionStatus,
+)
 from app.models.user import KYCStatus, User
 from app.models.wallet import Wallet
 from app.schemas.user import CurrentUser
 from app.schemas.wallet import CardTopUpRequest, CardTopUpResponse
-from app.services.account_service import create_wallets_for_user
+from app.services.account_service import (
+    create_wallets_for_user,
+    get_user_balances,
+)
+from app.services.audit_log import append_audit
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
 
@@ -38,37 +57,56 @@ async def get_balance(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Get all wallet balances for the authenticated user. Cached in Redis
-    for 30s (NBL-403) -- cache is invalidated on every debit/credit by the
-    transactions service via app.core.cache_utils.invalidate_balance_cache.
+    Get all wallet balances for the authenticated user.
+
+    Cached in Redis for 30 seconds.
     """
     user_id = int(current_user.id)
-    cached = await get_cached_balance(user_id)
-    if cached is not None:
-        return cached
 
-    result = await db.execute(
-        select(Wallet).where(Wallet.user_id == user_id)
+    response = await get_user_balances(
+        user_id=user_id,
+        db=db,
     )
-    wallets = result.scalars().all()
 
-    if not wallets:
-        raise HTTPException(status_code=404, detail="No wallets found for this user")
+    if response is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No wallets found for this user",
+        )
 
-    response = {
-        "user_id": user_id,
-        "balances": [
-            {
-                "currency": w.currency.value,
-                "balance": float(w.balance),
-                "account_number": w.account_number,
-                "iban": w.iban,
-            }
-            for w in wallets
-        ],
+    return response
+
+
+async def _call_payment_gateway(
+    card_token: str,
+    amount,
+    currency: str,
+) -> httpx.Response:
+    """
+    Calls the external card payment gateway (NBL-411). Retries once, after
+    a 2s pause, on a 5xx response -- gateways are occasionally flaky under
+    load and a single retry clears most transient failures without the
+    user needing to resubmit. Not retried on 402 (declined), since that's
+    a definitive answer from the gateway, not a transient failure.
+    """
+    payload = {
+        "card_token": card_token,
+        "amount": str(amount),
+        "currency": currency,
     }
 
-    await cache_balance(user_id, response)
+    async with httpx.AsyncClient(timeout=10.0) as http_client:
+        response = await http_client.post(
+            settings.PAYMENT_GATEWAY_URL,
+            json=payload,
+        )
+
+        if response.status_code >= 500:
+            await asyncio.sleep(2)
+            response = await http_client.post(
+                settings.PAYMENT_GATEWAY_URL,
+                json=payload,
+            )
 
     return response
 
@@ -104,16 +142,107 @@ async def card_top_up(
     if wallet is None:
         raise HTTPException(status_code=404, detail="Wallet not found")
 
+    daily_total = await get_topup_daily_total(int(current_user.id))
+    if daily_total + payload.amount > TOPUP_DAILY_LIMIT:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "daily_topup_limit_exceeded",
+                "daily_limit": str(TOPUP_DAILY_LIMIT),
+                "already_topped_up_today": str(daily_total),
+                "requested": str(payload.amount),
+            },
+        )
+
+    gateway_response = await _call_payment_gateway(
+        payload.card_token,
+        payload.amount,
+        wallet.currency.value,
+    )
+
+    if gateway_response.status_code == 402:
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "error": "card_declined",
+                "gateway_message": gateway_response.json().get(
+                    "message",
+                    "Card declined",
+                ),
+            },
+        )
+
+    if gateway_response.status_code >= 500:
+        raise HTTPException(
+            status_code=502,
+            detail="Payment gateway unavailable",
+        )
+
+    # Row-locked re-fetch right before the mutation (NBL-411). Deliberately
+    # NOT locked earlier: the gateway call above can take up to ~22s
+    # worst-case (10s timeout + 2s retry pause + 10s retry), and holding a
+    # SELECT FOR UPDATE across that entire external call would block every
+    # other operation on this wallet for the duration. Locking only here
+    # matches the pattern in transactions.send_money.
+    result = await db.execute(
+        select(Wallet).where(Wallet.id == wallet.id).with_for_update()
+    )
+    wallet = result.scalar_one()
+
     wallet.balance = wallet.balance + payload.amount
+
+    # NBL-411: top-ups are modeled as sender_id == receiver_id == the
+    # topping-up user, since Transaction.sender_id is NOT NULL and this
+    # table has no separate type/direction column -- category='TopUp'
+    # is the discriminator (see transactions.py list/detail/summary,
+    # which key off this same category value). This intentionally does
+    # NOT go through fraud scoring (score_transaction is only dispatched
+    # from send_money) since a self-top-up has no fraud-relevant
+    # sender/receiver relationship to score.
+    #
+    # idempotency_key: CardTopUpRequest has no client-supplied idempotency
+    # header today (unlike /transactions/send), so a fresh uuid4 is used
+    # here purely to satisfy the column's UNIQUE NOT NULL constraint. This
+    # does NOT protect against a double-submit the way send_money's
+    # header-based key does -- flagged as a follow-up, not solved by this
+    # ticket.
+    transaction = Transaction(
+        sender_id=wallet.user_id,
+        receiver_id=wallet.user_id,
+        amount=payload.amount,
+        currency=TransactionCurrency(wallet.currency.value),
+        category="TopUp",
+        status=TransactionStatus.completed,
+        idempotency_key=f"topup:{uuid4().hex}",
+    )
+    db.add(transaction)
 
     await db.commit()
     await db.refresh(wallet)
+    await db.refresh(transaction)
 
     await invalidate_balance_cache(wallet.user_id)
+    await increment_topup_daily(wallet.user_id, payload.amount)
+
+    await append_audit(
+        db,
+        transaction_id=transaction.id,
+        action="topup_completed",
+        actor_id=wallet.user_id,
+        metadata={
+            "amount": str(payload.amount),
+            "currency": wallet.currency.value,
+            "wallet_id": wallet.id,
+        },
+    )
 
     return {
         "wallet_id": wallet.id,
-        "currency": wallet.currency.value if hasattr(wallet.currency, "value") else str(wallet.currency),
+        "currency": (
+            wallet.currency.value
+            if hasattr(wallet.currency, "value")
+            else str(wallet.currency)
+        ),
         "top_up_amount": payload.amount,
         "new_balance": wallet.balance,
         "status": "success",
@@ -149,7 +278,9 @@ async def validate_recipient(
         )
         user = result.scalars().first()
     elif phone:
-        result = await db.execute(select(User).where(User.phone == phone))
+        result = await db.execute(
+            select(User).where(User.phone == phone)
+        )
         user = result.scalar_one_or_none()
 
     if user is None:

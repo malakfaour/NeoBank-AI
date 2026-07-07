@@ -8,6 +8,7 @@ from app.models.transaction import Transaction, TransactionCurrency, Transaction
 from app.models.transaction_audit_log import TransactionAuditLog
 from app.models.user import User
 from app.models.wallet import Wallet
+from app.models.chat_session import ChatSession
 
 __all__ = [
     "Beneficiary",
@@ -27,4 +28,5 @@ __all__ = [
     "TransactionAuditLog",
     "User",
     "Wallet",
+    "ChatSession",
 ]

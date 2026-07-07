@@ -1,3 +1,4 @@
+import json
 import logging
 from typing import Any
 
@@ -5,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
+from app.core.redis import get_redis_client
 from app.models.notification import Notification, NotificationType
 from app.models.user import User
 from app.services.email_service import send_email
@@ -171,6 +173,25 @@ async def _notify_with_session(
                 )
 
     await db.commit()
+
+    payload = {
+        "id": notification_id,
+        "user_id": user_id,
+        "type": type_value,
+        "message": message,
+        "read": False,
+        "created_at": (
+            notification.created_at.isoformat()
+            if notification.created_at is not None
+            else None
+        ),
+    }
+
+    redis_client = get_redis_client()
+    await redis_client.publish(
+        f"notifications:{user_id}",
+        json.dumps(payload),
+    )
 
     return notification_id
 
