@@ -2,7 +2,10 @@ import pytest
 from unittest.mock import AsyncMock, patch
 from httpx import AsyncClient, ASGITransport
 from app.main import app
+from sqlalchemy import select
 
+from app.core.security import hash_password
+from app.models.user import User
 
 @pytest.fixture
 async def client():
@@ -97,3 +100,95 @@ async def test_refresh_after_logout(client, auth_tokens):
         "refresh_token": new_tokens["refresh_token"],
     })
     assert response.status_code == 401
+
+@pytest.mark.asyncio
+async def test_register_returns_user(client):
+    response = await client.post("/api/v1/auth/register", json={
+        "full_name": "Register User",
+        "email": "registeruser@neobank.com",
+        "phone": "+96170000031",
+        "password": "TestPass123",
+    })
+
+    assert response.status_code == 200
+    data = response.json()
+
+    assert "access_token" in data
+    assert "refresh_token" in data
+    assert data["token_type"] == "bearer"
+    assert data["user"]["full_name"] == "Register User"
+    assert data["user"]["email"] == "registeruser@neobank.com"
+    assert data["user"]["phone"] == "+96170000031"
+    assert data["user"]["kyc_status"] == "pending"
+
+@pytest.mark.asyncio
+async def test_email_password_login_returns_user(client):
+    await client.post("/api/v1/auth/register", json={
+        "full_name": "Email Login User",
+        "email": "emaillogin@neobank.com",
+        "phone": "+96170000032",
+        "password": "TestPass123",
+    })
+
+    response = await client.post("/api/v1/auth/login", json={
+        "email": "emaillogin@neobank.com",
+        "password": "TestPass123",
+    })
+
+    assert response.status_code == 200
+    data = response.json()
+
+    assert "access_token" in data
+    assert "refresh_token" in data
+    assert data["token_type"] == "bearer"
+    assert data["user"]["email"] == "emaillogin@neobank.com"
+    assert data["user"]["phone"] == "+96170000032"
+
+
+@pytest.mark.asyncio
+async def test_phone_passcode_login_works(client, db_session):
+    register_response = await client.post("/api/v1/auth/register", json={
+        "full_name": "Phone Login User",
+        "email": "phonelogin@neobank.com",
+        "phone": "+96170000033",
+        "password": "TestPass123",
+    })
+
+    user_id = register_response.json()["user"]["id"]
+
+    result = await db_session.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one()
+    user.passcode_hash = hash_password("123456")
+    await db_session.commit()
+
+    response = await client.post("/api/v1/auth/login", json={
+        "phone": "+96170000033",
+        "passcode": "123456",
+    })
+
+    assert response.status_code == 200
+    data = response.json()
+
+    assert "access_token" in data
+    assert "refresh_token" in data
+    assert data["token_type"] == "bearer"
+    assert data["user"]["email"] == "phonelogin@neobank.com"
+    assert data["user"]["phone"] == "+96170000033"
+
+
+@pytest.mark.asyncio
+async def test_phone_passcode_login_without_passcode_hash_returns_401(client):
+    await client.post("/api/v1/auth/register", json={
+        "full_name": "No Passcode User",
+        "email": "nopasscode@neobank.com",
+        "phone": "+96170000034",
+        "password": "TestPass123",
+    })
+
+    response = await client.post("/api/v1/auth/login", json={
+        "phone": "+96170000034",
+        "passcode": "123456",
+    })
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Passcode not set"

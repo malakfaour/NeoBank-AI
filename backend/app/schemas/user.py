@@ -1,12 +1,12 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 
-from app.models.user import UserRole
+from app.models.user import KYCStatus, UserRole
 
 
 class TokenPayload(BaseModel):
-    sub: str        # user ID
-    jti: str        # token unique ID
-    type: str       # "access" or "refresh"
+    sub: str
+    jti: str
+    type: str
 
 
 class CurrentUser(BaseModel):
@@ -17,12 +17,21 @@ class CurrentUser(BaseModel):
 
 class UserRegisterRequest(BaseModel):
     full_name: str
-    email: str
+    email: EmailStr
     phone: str
     password: str
+
+
+class AuthUserResponse(BaseModel):
+    id: int
+    full_name: str
+    email: str
+    phone: str
+    kyc_status: KYCStatus
 
 
 class UserRegisterResponse(BaseModel):
     access_token: str
     refresh_token: str
-    token_type: str
+    token_type: str = "bearer"
+    user: AuthUserResponse
