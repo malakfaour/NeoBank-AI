@@ -7,11 +7,7 @@ export const metadata: Metadata = {
   description: "NeoBank Lebanon frontend application",
 };
 
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: ReactNode;
-}>) {
+export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
     <html lang="en">
       <body>{children}</body>
