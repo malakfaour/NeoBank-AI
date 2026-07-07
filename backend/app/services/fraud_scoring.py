@@ -1,4 +1,4 @@
-﻿"""
+"""
 DEVATTECH-84: fraud scoring for score_transaction.
 
 Two entry points, both with the same (db, transaction) -> float signature
@@ -89,6 +89,10 @@ def get_sender_tx_count(db: Session, sender_id: int, exclude_transaction_id: int
         .select_from(Transaction)
         .where(
             Transaction.sender_id == sender_id,
+            # NBL-411: exclude self-transfers (top-ups) from the cold-start
+            # transaction count -- otherwise top-ups graduate a user from
+            # Isolation Forest to XGBoost scoring early.
+            Transaction.sender_id != Transaction.receiver_id,
             Transaction.id != exclude_transaction_id,
         )
     )
@@ -108,6 +112,9 @@ def get_sender_tx_count_30d(db: Session, sender_id: int, exclude_transaction_id:
         .select_from(Transaction)
         .where(
             Transaction.sender_id == sender_id,
+            # NBL-411: exclude self-transfers (top-ups) -- same reasoning as
+            # get_sender_tx_count above.
+            Transaction.sender_id != Transaction.receiver_id,
             Transaction.id != exclude_transaction_id,
             Transaction.created_at >= cutoff,
         )
@@ -185,6 +192,9 @@ def _compute_xgb_features(db: Session, transaction: Transaction) -> list[float]:
         select(func.avg(Transaction.amount))
         .where(
             Transaction.sender_id == transaction.sender_id,
+            # NBL-411: exclude self-transfers (top-ups) -- otherwise a large
+            # top-up inflates this user's average and skews the ratio feature.
+            Transaction.sender_id != Transaction.receiver_id,
             Transaction.id != transaction.id,
         )
     )

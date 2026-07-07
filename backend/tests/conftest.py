@@ -41,7 +41,7 @@ os.environ["SMTP_PASSWORD"] = "test_password"
 os.environ["TWILIO_ACCOUNT_SID"] = "test_sid"
 os.environ["TWILIO_AUTH_TOKEN"] = "test_token"
 os.environ["TWILIO_FROM_NUMBER"] = "+15555555555"
-os.environ["REQUIRE_ACTION_TOKEN"] = "false"
+os.environ["PAYMENT_GATEWAY_URL"] = "https://sandbox.paymentgateway.example.com/v1/charge"
 
 from app.db.base import Base  # noqa: E402
 from app.db.session import engine  # noqa: E402
@@ -92,6 +92,55 @@ async def mock_redis():
          patch("app.services.rate_limiter.redis_client", fake):
         yield fake
 
+
+
+class _FakeGatewayResponse:
+    """Stand-in for httpx.Response, used by the payment gateway mock below."""
+
+    def __init__(self, status_code=200, json_data=None):
+        self.status_code = status_code
+        self._json_data = json_data or {"status": "approved"}
+
+    def json(self):
+        return self._json_data
+
+
+class _FakeGatewayClient:
+    """
+    Stand-in for httpx.AsyncClient used only by
+    app.api.v1.endpoints.accounts._call_payment_gateway (NBL-411).
+    Defaults to a 200 "approved" response for every test; individual tests
+    override this per-call by monkeypatching the same target with their
+    own client class (e.g. to simulate a 402 decline or a 5xx).
+    """
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return False
+
+    async def post(self, url, json=None):
+        return _FakeGatewayResponse(status_code=200)
+
+
+@pytest.fixture(autouse=True)
+def mock_payment_gateway(monkeypatch):
+    """
+    NBL-411: the real payment gateway is an external HTTP call and must be
+    mocked in tests (see ENGINEERING_RULES.md #6 -- external calls are
+    always mocked in CI). Autouse so every existing top-up call in the
+    suite gets a default success without each test needing its own
+    fixture; tests exercising decline/5xx paths monkeypatch this same
+    target locally to override the behavior.
+    """
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.accounts.httpx.AsyncClient",
+        _FakeGatewayClient,
+    )
 
 @pytest_asyncio.fixture
 async def client():
