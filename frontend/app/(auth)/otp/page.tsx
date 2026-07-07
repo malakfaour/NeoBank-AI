@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import api from "@/lib/axios";
+import { useAuthStore } from "@/store/authStore";
 
 export default function OTPPage() {
   const router = useRouter();
@@ -44,7 +45,8 @@ export default function OTPPage() {
     setLoading(true);
     setError("");
     try {
-      await api.post("/auth/verify-otp", { otp: code });
+     const user_id = useAuthStore.getState().user?.id;
+await api.post("/auth/verify-otp", { user_id, code });
       router.push("/kyc");
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Invalid or expired code.";
@@ -56,7 +58,8 @@ export default function OTPPage() {
 
   const handleResend = async () => {
     try {
-      await api.post("/auth/resend-otp");
+     const user_id = useAuthStore.getState().user?.id;
+await api.post("/auth/send-otp", { user_id });
       setResent(true);
       setDigits(Array(6).fill(""));
       inputs.current[0]?.focus();
