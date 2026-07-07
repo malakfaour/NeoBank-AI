@@ -11,6 +11,7 @@ from app.services.fraud_scoring import (
     score_with_isolation_forest,
     score_with_xgboost,
 )
+from app.tasks.categorization_tasks import categorize_transaction
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +66,15 @@ def score_transaction(transaction_id):
             )
             db.commit()
             db.refresh(transaction)
+
+            if transaction.status == TransactionStatus.completed:
+                try:
+                    categorize_transaction.delay(transaction.id)
+                except Exception:
+                    logger.exception(
+                        "Categorization enqueue failed for transaction %s",
+                        transaction.id,
+                    )
 
             append_audit_sync(
                 db,
