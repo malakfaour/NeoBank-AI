@@ -8,8 +8,8 @@ export function useWallets() {
   const fetchWallets = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.get("/accounts/wallets");
-      setWallets(res.data);
+     const res = await api.get("/accounts/balance");
+setWallets(res.data.balances ?? []);
     } finally {
       setLoading(false);
     }
