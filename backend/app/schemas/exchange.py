@@ -14,6 +14,15 @@ class ExchangeRateResponse(BaseModel):
     last_updated_at: datetime | None = None
 
 
+class LiveExchangeRateResponse(BaseModel):
+    base_currency: str
+    target_currency: str
+    rate: Decimal
+    provider: str | None = None
+    last_updated_at: datetime | None = None
+    cache_age_seconds: int
+
+
 class ConvertCurrencyResponse(BaseModel):
     from_currency: str
     to_currency: str

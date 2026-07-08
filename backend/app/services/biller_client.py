@@ -34,9 +34,13 @@ class BillerResult:
         self.biller_error = biller_error
 
 
-async def call_mock_biller(bill_type: str, bill_reference: str, amount: Decimal) -> BillerResult:
+async def call_mock_biller(
+    bill_type: str,
+    bill_reference: str,
+    amount: Decimal,
+) -> BillerResult:
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        async with httpx.AsyncClient(timeout=0.5) as client:
             await client.post(
                 settings.BILLER_API_URL,
                 json={
@@ -45,14 +49,16 @@ async def call_mock_biller(bill_type: str, bill_reference: str, amount: Decimal)
                     "amount": str(amount),
                 },
             )
+
     except httpx.HTTPError:
-        # Expected right now -- no server exists yet. Not treated as the
-        # failure signal; see module docstring.
         logger.debug(
-            "Biller API call to %s failed (expected -- no listener configured yet)",
-            settings.BILLER_API_URL,
+            "Biller API unavailable, using mock simulation"
         )
 
     if random.random() < SUCCESS_RATE:
         return BillerResult(success=True)
-    return BillerResult(success=False, biller_error="Biller temporarily unavailable")
+
+    return BillerResult(
+        success=False,
+        biller_error="Biller temporarily unavailable",
+    )
