@@ -4,6 +4,10 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
+from sqlalchemy import select
+
+from app.models.wallet import Wallet, WalletCurrency
+from app.core.cache_utils import invalidate_balance_cache
 
 
 from app.api.dependencies import require_action_token
@@ -149,8 +153,62 @@ async def execute_exchange(
             detail=f"Exchange pair {from_currency}->{to_currency} is not supported",
         )
 
-    exchange_id = uuid4()
+    user_id = int(current_user.id)
+
+    try:
+        from_wallet_currency = WalletCurrency(from_currency)
+        to_wallet_currency = WalletCurrency(to_currency)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported currency",
+        )
+
+    # Get source wallet
+    source_result = await db.execute(
+        select(Wallet).where(
+            Wallet.user_id == user_id,
+            Wallet.currency == from_wallet_currency,
+        )
+    )
+
+    source_wallet = source_result.scalar_one_or_none()
+
+    if source_wallet is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"{from_currency} wallet not found",
+        )
+
+    if source_wallet.balance < payload.amount:
+        raise HTTPException(
+            status_code=422,
+            detail="Insufficient balance",
+        )
+
+    # Get destination wallet
+    target_result = await db.execute(
+        select(Wallet).where(
+            Wallet.user_id == user_id,
+            Wallet.currency == to_wallet_currency,
+        )
+    )
+
+    target_wallet = target_result.scalar_one_or_none()
+
+    if target_wallet is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"{to_currency} wallet not found",
+        )
+
     converted_amount = payload.amount * rate
+
+    # Move money
+    source_wallet.balance -= payload.amount
+    target_wallet.balance += converted_amount
+
+    exchange_id = uuid4()
 
     audit_log = ExchangeAuditLog(
         exchange_id=str(exchange_id),
@@ -164,7 +222,10 @@ async def execute_exchange(
     )
 
     db.add(audit_log)
+
     await db.commit()
+
+    await invalidate_balance_cache(user_id)
 
     return {
         "exchange_id": exchange_id,
@@ -176,7 +237,6 @@ async def execute_exchange(
         "converted_amount": converted_amount,
         "message": "Exchange executed successfully",
     }
-
 
 @router.get("/forecast", response_model=ExchangeForecastResponse)
 async def forecast_exchange_rate(days: int = Query(7, ge=1, le=7)):
