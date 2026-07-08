@@ -1,4 +1,4 @@
-import enum
+﻿import enum
 
 from sqlalchemy import (
     Column,
@@ -15,10 +15,17 @@ from sqlalchemy.sql import func
 
 from app.db.base import Base
 
+
 class WalletCurrency(str, enum.Enum):
     USD = "USD"
     LBP = "LBP"
     USDT = "USDT"
+
+
+class WalletStatus(str, enum.Enum):
+    active = "active"
+    frozen = "frozen"
+    closed = "closed"
 
 
 class Wallet(Base):
@@ -30,6 +37,7 @@ class Wallet(Base):
     balance = Column(Numeric(18, 4), nullable=False, default=0, server_default="0")
     account_number = Column(String(16), unique=True, nullable=True)
     iban = Column(String(34), unique=True, nullable=True)
+    status = Column(SAEnum(WalletStatus), nullable=False, default=WalletStatus.active, server_default="active")
     updated_at = Column(
         DateTime(timezone=True),
         server_default=func.now(),
