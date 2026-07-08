@@ -250,7 +250,17 @@ async def send_money(
 # These values are accepted as valid filters (so the endpoint doesn't 400
 # on a legitimate future value) but currently match zero rows.
 VALID_TRANSACTION_TYPES = {"send", "receive", "topup", "bill", "exchange"}
-TYPES_NOT_YET_SUPPORTED = {"bill", "exchange"}
+TYPES_NOT_YET_SUPPORTED = {"bill"}
+
+
+def _derive_transaction_type(transaction: Transaction, user_id: int) -> str:
+    if transaction.sender_id == transaction.receiver_id:
+        if transaction.category == "Exchange":
+            return "exchange"
+        if transaction.category == "Bills":
+            return "bill"
+        return "topup"
+    return "send" if transaction.sender_id == user_id else "receive"
 
 
 @router.get("/summary", response_model=TransactionSummaryResponse)
@@ -328,14 +338,11 @@ async def get_transaction_detail(
     if transaction is None or user_id not in (transaction.sender_id, transaction.receiver_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transaction not found")
 
-    # NBL-411: top-ups are stored as sender_id == receiver_id (see
-    # accounts.py card_top_up) -- structural marker, not category, since
-    # category is free-text and may be rewritten by future categorization
-    # features. A top-up has no counterparty to look up or display.
-    is_topup = transaction.sender_id == transaction.receiver_id
+    transaction_type = _derive_transaction_type(transaction, user_id)
+    is_self_transaction = transaction.sender_id == transaction.receiver_id
     is_sender = transaction.sender_id == user_id
 
-    if is_topup:
+    if is_self_transaction:
         counterparty = None
     else:
         counterparty_id = transaction.receiver_id if is_sender else transaction.sender_id
@@ -353,7 +360,7 @@ async def get_transaction_detail(
         id=transaction.id,
         sender_id=transaction.sender_id,
         receiver_id=transaction.receiver_id,
-        type="topup" if is_topup else ("send" if is_sender else "receive"),
+        type=transaction_type,
         amount=transaction.amount,
         currency=transaction.currency.value,
         counterparty_name=counterparty.full_name if counterparty else None,
@@ -416,10 +423,9 @@ async def list_transactions(
     elif type == "receive":
         filters.append(Transaction.receiver_id == user_id)
     elif type == "topup":
-        # NBL-411: top-ups are stored as sender_id == receiver_id; combined
-        # with the base OR filter above, this matches only the user's own
-        # top-ups.
-        filters.append(Transaction.sender_id == Transaction.receiver_id)
+        filters.append(Transaction.category == "TopUp")
+    elif type == "exchange":
+        filters.append(Transaction.category == "Exchange")
 
     if start_date is not None:
         filters.append(Transaction.created_at >= start_date)
@@ -452,16 +458,15 @@ async def list_transactions(
 
     items = []
     for tx in transactions:
-        # NBL-411: top-ups are stored as sender_id == receiver_id -- see the
-        # same note in get_transaction_detail above.
-        is_topup = tx.sender_id == tx.receiver_id
+        transaction_type = _derive_transaction_type(tx, user_id)
+        is_self_transaction = tx.sender_id == tx.receiver_id
         is_sender = tx.sender_id == user_id
-        counterparty = None if is_topup else users_by_id.get(tx.receiver_id if is_sender else tx.sender_id)
+        counterparty = None if is_self_transaction else users_by_id.get(tx.receiver_id if is_sender else tx.sender_id)
 
         items.append(
             TransactionListItem(
                 id=tx.id,
-                type="topup" if is_topup else ("send" if is_sender else "receive"),
+                type=transaction_type,
                 amount=tx.amount,
                 currency=tx.currency.value,
                 counterparty_name=counterparty.full_name if counterparty else None,

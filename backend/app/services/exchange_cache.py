@@ -6,6 +6,7 @@ from app.core.redis import redis_client
 
 EXCHANGE_RATES_CACHE_KEY = "exchange:rates"
 EXCHANGE_LATEST_CACHE_KEY = "exchange:latest"
+EXCHANGE_RATES_DEFAULT_TTL_SECONDS = 300
 
 
 def decimal_to_str_rates(
@@ -44,13 +45,28 @@ async def get_cached_exchange_rates():
 
 async def set_cached_exchange_rates(
     rates: dict[tuple[str, str], Decimal],
-    ttl_seconds: int = 300,
+    ttl_seconds: int = EXCHANGE_RATES_DEFAULT_TTL_SECONDS,
 ):
     await redis_client.set(
         EXCHANGE_RATES_CACHE_KEY,
         json.dumps(decimal_to_str_rates(rates)),
         ex=ttl_seconds,
     )
+
+
+async def get_cached_exchange_rates_with_age() -> tuple[dict[tuple[str, str], Decimal] | None, int | None]:
+    cached_rates = await get_cached_exchange_rates()
+
+    if cached_rates is None:
+        return None, None
+
+    ttl_seconds = await redis_client.ttl(EXCHANGE_RATES_CACHE_KEY)
+    if ttl_seconds is None or ttl_seconds < 0:
+        cache_age_seconds = 0
+    else:
+        cache_age_seconds = max(0, EXCHANGE_RATES_DEFAULT_TTL_SECONDS - int(ttl_seconds))
+
+    return cached_rates, cache_age_seconds
 
 
 async def get_latest_exchange_rate() -> Any | None:

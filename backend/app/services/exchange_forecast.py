@@ -6,38 +6,18 @@ import pandas as pd
 from lightgbm import LGBMRegressor
 
 
-def train_and_forecast_usd_lbp(
-    latest_rate: Decimal,
-    days: int = 7,
-) -> list[dict[str, Decimal | date]]:
-    """
-    Simple LightGBM forecast model for USD -> LBP.
-
-    Since we do not have real historical exchange-rate data yet,
-    this creates a small synthetic training series around the latest rate.
-    Later, this can be replaced with real historical exchange_rate rows.
-    """
-
+def _build_synthetic_history(latest_rate: Decimal, history_days: int = 60) -> pd.DataFrame:
     latest_rate_float = float(latest_rate)
-    history_days = 60
-
     historical_dates = [
         date.today() - timedelta(days=history_days - i)
         for i in range(history_days)
     ]
 
-    trend = np.linspace(
-        latest_rate_float * 0.97,
-        latest_rate_float,
-        history_days,
-    )
-    seasonal_noise = np.sin(np.arange(history_days) / 4) * (
-        latest_rate_float * 0.002
-    )
-
+    trend = np.linspace(latest_rate_float * 0.97, latest_rate_float, history_days)
+    seasonal_noise = np.sin(np.arange(history_days) / 4) * (latest_rate_float * 0.002)
     rates = trend + seasonal_noise
 
-    df = pd.DataFrame(
+    return pd.DataFrame(
         {
             "date": historical_dates,
             "day_index": np.arange(history_days),
@@ -46,16 +26,31 @@ def train_and_forecast_usd_lbp(
         }
     )
 
-    x_train = df[["day_index", "day_of_week"]]
-    y_train = df["rate"]
 
-    model = LGBMRegressor(
-        n_estimators=80,
-        learning_rate=0.05,
-        random_state=42,
-    )
+def train_evaluate_and_forecast_usd_lbp(
+    latest_rate: Decimal,
+    days: int = 7,
+) -> dict[str, float | list[dict[str, Decimal | date]]]:
+    """
+    Simple LightGBM forecast model for USD -> LBP.
 
-    model.fit(x_train, y_train)
+    Since we do not have real historical exchange-rate data yet,
+    this creates a small synthetic training series around the latest rate.
+    Later, this can be replaced with real historical exchange_rate rows.
+    """
+    history_df = _build_synthetic_history(latest_rate)
+
+    validation_window = min(7, max(1, len(history_df) // 4))
+    train_df = history_df.iloc[:-validation_window]
+    validation_df = history_df.iloc[-validation_window:]
+
+    model = LGBMRegressor(n_estimators=80, learning_rate=0.05, random_state=42, n_jobs=1)
+    model.fit(train_df[["day_index", "day_of_week"]], train_df["rate"])
+    validation_predictions = model.predict(validation_df[["day_index", "day_of_week"]])
+    mae = float(np.mean(np.abs(validation_predictions - validation_df["rate"].to_numpy())))
+
+    model.fit(history_df[["day_index", "day_of_week"]], history_df["rate"])
+    history_days = len(history_df)
 
     future_dates = [
         date.today() + timedelta(days=i)
@@ -71,10 +66,20 @@ def train_and_forecast_usd_lbp(
 
     predictions = model.predict(future_df)
 
-    return [
-        {
-            "date": future_dates[i],
-            "predicted_rate": Decimal(str(round(float(predictions[i]), 4))),
-        }
-        for i in range(days)
-    ]
+    return {
+        "mae": round(mae, 4),
+        "predictions": [
+            {
+                "date": future_dates[i],
+                "predicted_rate": Decimal(str(round(float(predictions[i]), 4))),
+            }
+            for i in range(days)
+        ],
+    }
+
+
+def train_and_forecast_usd_lbp(
+    latest_rate: Decimal,
+    days: int = 7,
+) -> list[dict[str, Decimal | date]]:
+    return train_evaluate_and_forecast_usd_lbp(latest_rate, days)["predictions"]

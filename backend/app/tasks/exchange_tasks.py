@@ -7,8 +7,10 @@ import redis
 
 from app.celery_app import celery_app
 from app.core.config import settings
+from app.db.session import AsyncSessionLocal
+from app.models.model_metrics import ModelMetrics
 from app.services.exchange_cache import EXCHANGE_RATES_CACHE_KEY
-from app.services.exchange_forecast import train_and_forecast_usd_lbp
+from app.services.exchange_forecast import train_evaluate_and_forecast_usd_lbp
 
 
 EXCHANGE_API_URL = "https://open.er-api.com/v6/latest/USD"
@@ -76,7 +78,9 @@ async def retrain_exchange_forecast_model() -> dict[str, object]:
     if usd_to_lbp is None:
         raise RuntimeError("USD to LBP rate was not found for forecast training")
 
-    predictions = train_and_forecast_usd_lbp(usd_to_lbp, days=7)
+    training_result = train_evaluate_and_forecast_usd_lbp(usd_to_lbp, days=7)
+    predictions = training_result["predictions"]
+    mae = float(training_result["mae"])
 
     serialized_predictions = [
         {
@@ -102,10 +106,20 @@ async def retrain_exchange_forecast_model() -> dict[str, object]:
         ),
     )
 
+    async with AsyncSessionLocal() as session:
+        session.add(
+            ModelMetrics(
+                model_name="LightGBM",
+                mae=mae,
+            )
+        )
+        await session.commit()
+
     return {
         "status": "ok",
         "message": "Exchange forecast model retrained successfully",
         "model": "LightGBM",
+        "mae": mae,
         "predictions_count": len(predictions),
         "cache_key": EXCHANGE_FORECAST_CACHE_KEY,
     }

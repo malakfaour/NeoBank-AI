@@ -11,16 +11,21 @@ from app.api.dependencies import require_role
 from app.core.cache_utils import invalidate_balance_cache
 from app.core.storage import get_presigned_url
 from app.db.session import get_db
+from app.models.exchange_audit_log import ExchangeAuditLog
 from app.models.fraud_resolution import FraudResolution, FraudResolutionType
 from app.models.kyc_record import KYCRecord, KYCRecordStatus
+from app.models.model_metrics import ModelMetrics
 from app.models.transaction import Transaction, TransactionStatus
 from app.models.transaction_audit_log import TransactionAuditLog
 from app.models.user import KYCStatus, User, UserRole
 from app.models.wallet import Wallet, WalletCurrency
 from app.schemas.admin import (
     ComplianceSummaryResponse,
+    ExchangeAuditLogItem,
+    ExchangeAuditLogPageResponse,
     FlaggedTransactionItem,
     FlaggedTransactionsResponse,
+    ModelMetricItem,
     ResolutionCounts,
     ResolveFlagRequest,
     ResolveFlagResponse,
@@ -449,6 +454,84 @@ async def resolve_flag(
         reviewer_id=reviewer_id,
         resolved_at=fraud_resolution.resolved_at,
     )
+
+
+@router.get("/exchange/audit", response_model=ExchangeAuditLogPageResponse)
+async def get_exchange_audit_logs(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    current_user: CurrentUser = Depends(require_role(UserRole.compliance_officer, UserRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    total = await db.scalar(select(func.count()).select_from(ExchangeAuditLog)) or 0
+
+    result = await db.execute(
+        select(ExchangeAuditLog, User)
+        .outerjoin(User, User.id == ExchangeAuditLog.user_id)
+        .order_by(ExchangeAuditLog.created_at.desc(), ExchangeAuditLog.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    rows = result.all()
+
+    return ExchangeAuditLogPageResponse(
+        items=[
+            ExchangeAuditLogItem(
+                id=audit_log.id,
+                exchange_id=audit_log.exchange_id,
+                user_id=audit_log.user_id,
+                user_full_name=user.full_name if user else None,
+                user_email=user.email if user else None,
+                from_currency=audit_log.from_currency,
+                to_currency=audit_log.to_currency,
+                amount=audit_log.amount,
+                rate=audit_log.rate,
+                converted_amount=audit_log.converted_amount,
+                status=audit_log.status,
+                provider=audit_log.provider,
+                created_at=audit_log.created_at,
+            )
+            for audit_log, user in rows
+        ],
+        page=page,
+        page_size=page_size,
+        total=total,
+        total_pages=compute_total_pages(total, page_size),
+    )
+
+
+@router.get("/ml/metrics", response_model=list[ModelMetricItem])
+async def get_latest_model_metrics(
+    current_user: CurrentUser = Depends(require_role(UserRole.compliance_officer, UserRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    latest_per_model = (
+        select(
+            ModelMetrics.model_name.label("model_name"),
+            func.max(ModelMetrics.trained_at).label("latest_trained_at"),
+        )
+        .group_by(ModelMetrics.model_name)
+        .subquery()
+    )
+
+    result = await db.execute(
+        select(ModelMetrics)
+        .join(
+            latest_per_model,
+            (ModelMetrics.model_name == latest_per_model.c.model_name)
+            & (ModelMetrics.trained_at == latest_per_model.c.latest_trained_at),
+        )
+        .order_by(ModelMetrics.model_name.asc())
+    )
+
+    return [
+        ModelMetricItem(
+            model_name=row.model_name,
+            mae=row.mae,
+            trained_at=row.trained_at,
+        )
+        for row in result.scalars().all()
+    ]
 
 
 @router.get("/reports/summary", response_model=ComplianceSummaryResponse)
