@@ -2,14 +2,13 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import api from "@/lib/axios";
 import { useAuthStore } from "@/store/authStore";
 
 interface Wallet {
-  currency: string;
-  balance: number;
-  account_number: string | null;
-  iban: string | null;
+  currency: string; balance: number;
+  account_number: string | null; iban: string | null;
 }
 interface Transaction {
   id: number; type: "send" | "receive"; amount: number;
@@ -19,6 +18,10 @@ interface Transaction {
 interface ExchangeRate {
   base_currency: string; target_currency: string;
   rate: number; provider: string; last_updated_at: string | null;
+}
+interface SummaryItem {
+  category: string | null; currency: string;
+  total_amount: number; transaction_count: number;
 }
 
 function timeAgo(dateStr: string): string {
@@ -31,7 +34,13 @@ function timeAgo(dateStr: string): string {
 
 const categoryIcons: Record<string, string> = {
   Food: "🍽️", Transport: "🚗", Bills: "🧾", Entertainment: "🎬",
-  Transfer: "💸", TopUp: "➕", Exchange: "💱", Other: "📦",
+  Transfer: "💸", TopUp: "➕", Exchange: "💱", Other: "📦", Uncategorized: "❓",
+};
+
+const categoryColors: Record<string, string> = {
+  Food: "#00C853", Transport: "#2196F3", Bills: "#FF9800",
+  Entertainment: "#9C27B0", Transfer: "#00BCD4", TopUp: "#8BC34A",
+  Exchange: "#FF5722", Other: "#607D8B", Uncategorized: "#9E9E9E",
 };
 
 const pageStyle: React.CSSProperties = {
@@ -47,15 +56,19 @@ export default function DashboardPage() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [exchangeRate, setExchangeRate] = useState<ExchangeRate | null>(null);
   const [rateAge, setRateAge] = useState<string>("");
+  const [summary, setSummary] = useState<SummaryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState<string | null>(null);
 
+  const currentMonth = new Date().toISOString().slice(0, 7);
+
   const fetchAll = useCallback(async () => {
     try {
-      const [balanceRes, txRes, rateRes] = await Promise.allSettled([
+      const [balanceRes, txRes, rateRes, summaryRes] = await Promise.allSettled([
         api.get("/accounts/balance"),
         api.get("/transactions?page_size=5"),
-        api.get("/exchange/rates/live"),
+        api.get("/exchange/rates"),
+        api.get(`/transactions/summary?month=${currentMonth}`),
       ]);
       if (balanceRes.status === "fulfilled") setWallets(balanceRes.value.data.balances ?? []);
       if (txRes.status === "fulfilled") setTransactions(txRes.value.data.items ?? []);
@@ -67,10 +80,11 @@ export default function DashboardPage() {
         setExchangeRate(r);
         if (r?.last_updated_at) setRateAge(timeAgo(r.last_updated_at));
       }
+      if (summaryRes.status === "fulfilled") setSummary(summaryRes.value.data.summary ?? []);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [currentMonth]);
 
   useEffect(() => {
     fetchAll();
@@ -84,6 +98,17 @@ export default function DashboardPage() {
       setTimeout(() => setCopied(null), 2000);
     });
   };
+
+  // Aggregate summary by category (combine currencies for chart display)
+  const chartData = Object.values(
+    summary.reduce((acc, item) => {
+      const cat = item.category ?? "Uncategorized";
+      if (!acc[cat]) acc[cat] = { name: cat, value: 0, count: 0 };
+      acc[cat].value += Number(item.total_amount);
+      acc[cat].count += item.transaction_count;
+      return acc;
+    }, {} as Record<string, { name: string; value: number; count: number }>)
+  );
 
   const usdWallet = wallets.find((w) => w.currency === "USD");
   const lbpWallet = wallets.find((w) => w.currency === "LBP");
@@ -168,6 +193,43 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* Spending chart */}
+      <div style={{ backgroundColor: "#fff", borderRadius: "20px", border: "1px solid #F0F0F0", padding: "16px" }}>
+        <p style={{ color: "#aaa", fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "12px" }}>
+          Spending by category — {currentMonth}
+        </p>
+        {chartData.length === 0 ? (
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "24px 0", gap: "8px" }}>
+            <span style={{ fontSize: "32px" }}>📊</span>
+            <p style={{ color: "#aaa", fontSize: "13px" }}>No spending data yet this month</p>
+            <p style={{ color: "#ccc", fontSize: "12px" }}>Make a transaction to see your breakdown</p>
+          </div>
+        ) : (
+          <>
+            <ResponsiveContainer width="100%" height={200}>
+              <PieChart>
+                <Pie data={chartData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} innerRadius={50}>
+                  {chartData.map((entry) => (
+                    <Cell key={entry.name} fill={categoryColors[entry.name] ?? "#9E9E9E"} />
+                  ))}
+                </Pie>
+              <Tooltip formatter={(v) => (typeof v === "number" ? v.toLocaleString() : String(v))} />
+                <Legend iconType="circle" iconSize={8} />
+              </PieChart>
+            </ResponsiveContainer>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "8px" }}>
+              {chartData.map((entry) => (
+                <div key={entry.name} style={{ display: "flex", alignItems: "center", gap: "6px", backgroundColor: "#F5F5F5", borderRadius: "20px", padding: "4px 10px" }}>
+                  <span style={{ fontSize: "12px" }}>{categoryIcons[entry.name] ?? "📦"}</span>
+                  <span style={{ fontSize: "12px", fontWeight: "600", color: "#333" }}>{entry.name}</span>
+                  <span style={{ fontSize: "11px", color: "#aaa" }}>({entry.count})</span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+
       {/* Recent transactions */}
       <div>
         <p style={{ color: "#aaa", fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "12px" }}>Recent transactions</p>
@@ -176,22 +238,30 @@ export default function DashboardPage() {
             <div style={{ padding: "32px", textAlign: "center" }}>
               <p style={{ color: "#aaa", fontSize: "14px" }}>No transactions yet</p>
             </div>
-          ) : transactions.map((tx, i) => (
-            <div key={tx.id} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "14px 16px", borderBottom: i < transactions.length - 1 ? "1px solid #F5F5F5" : "none" }}>
-              <div style={{ width: "36px", height: "36px", borderRadius: "12px", backgroundColor: "#F0FDF4", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "16px", flexShrink: 0 }}>
-                {categoryIcons[tx.category ?? "Other"] ?? "📦"}
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <p style={{ color: "#000", fontSize: "14px", fontWeight: "500", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {tx.counterparty_name ?? (tx.type === "send" ? "Sent" : "Received")}
+          ) : transactions.map((tx, i) => {
+            const cat = tx.category ?? "Uncategorized";
+            return (
+              <div key={tx.id} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "14px 16px", borderBottom: i < transactions.length - 1 ? "1px solid #F5F5F5" : "none" }}>
+                <div style={{ width: "36px", height: "36px", borderRadius: "12px", backgroundColor: "#F0FDF4", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "16px", flexShrink: 0 }}>
+                  {categoryIcons[cat] ?? "📦"}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ color: "#000", fontSize: "14px", fontWeight: "500", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {tx.counterparty_name ?? (tx.type === "send" ? "Sent" : "Received")}
+                  </p>
+                  <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "2px" }}>
+                    <p style={{ color: "#aaa", fontSize: "12px" }}>{timeAgo(tx.created_at)}</p>
+                    <span style={{ fontSize: "10px", fontWeight: "600", color: categoryColors[cat] ?? "#9E9E9E", backgroundColor: `${categoryColors[cat] ?? "#9E9E9E"}18`, borderRadius: "6px", padding: "1px 6px" }}>
+                      {cat}
+                    </span>
+                  </div>
+                </div>
+                <p style={{ fontSize: "14px", fontWeight: "700", color: tx.type === "receive" ? "#00C853" : "#000", flexShrink: 0 }}>
+                  {tx.type === "receive" ? "+" : "-"}{tx.amount} {tx.currency}
                 </p>
-                <p style={{ color: "#aaa", fontSize: "12px" }}>{timeAgo(tx.created_at)}</p>
               </div>
-              <p style={{ fontSize: "14px", fontWeight: "700", color: tx.type === "receive" ? "#00C853" : "#000", flexShrink: 0 }}>
-                {tx.type === "receive" ? "+" : "-"}{tx.amount} {tx.currency}
-              </p>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>

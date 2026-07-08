@@ -26,13 +26,18 @@ class User(Base):
     full_name = Column(String(255), nullable=False)
     email = Column(String(255), unique=True, nullable=False, index=True)
     phone = Column(String(20), unique=True, nullable=False, index=True)
+    avatar_url = Column(String(500), nullable=True)
     password_hash = Column(String(255), nullable=False)
     kyc_status = Column(SAEnum(KYCStatus), nullable=False, default=KYCStatus.pending)
     role = Column(SAEnum(UserRole), nullable=False, default=UserRole.customer)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     passcode_hash = Column(String(255), nullable=True)
 
-    kyc_records = relationship("KYCRecord", back_populates="user")
+    kyc_records = relationship(
+        "KYCRecord",
+        back_populates="user",
+        foreign_keys="KYCRecord.user_id",
+    )
     sessions = relationship("UserSession", back_populates="user", cascade="all, delete-orphan")
     wallets = relationship("Wallet", back_populates="user", cascade="all, delete-orphan")
     beneficiaries = relationship("Beneficiary", back_populates="user", cascade="all, delete-orphan")

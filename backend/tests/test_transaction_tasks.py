@@ -1,10 +1,14 @@
-from datetime import datetime, timezone
+﻿from datetime import datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.models.transaction import Transaction, TransactionCurrency, TransactionStatus
+from app.models.transaction import (
+    Transaction,
+    TransactionCurrency,
+    TransactionStatus,
+)
 from app.models.user import KYCStatus, User, UserRole
 from app.services.fraud_rules import RuleCheckResult
 from app.services.fraud_scoring import FRAUD_FLAG_THRESHOLD
@@ -55,10 +59,21 @@ def _seed_transaction(session_factory, *, idempotency_key: str):
 
 def test_score_transaction_flags_when_score_crosses_threshold(monkeypatch):
     session_factory = _build_sync_session()
-    transaction_id = _seed_transaction(session_factory, idempotency_key="idem-flag")
+    transaction_id = _seed_transaction(
+        session_factory,
+        idempotency_key="idem-flag",
+    )
 
-    monkeypatch.setattr(transaction_tasks, "SyncSessionLocal", session_factory)
-    monkeypatch.setattr(transaction_tasks, "get_sender_tx_count", lambda *args, **kwargs: 0)
+    monkeypatch.setattr(
+        transaction_tasks,
+        "SyncSessionLocal",
+        session_factory,
+    )
+    monkeypatch.setattr(
+        transaction_tasks,
+        "get_sender_tx_count",
+        lambda *args, **kwargs: 0,
+    )
     monkeypatch.setattr(
         transaction_tasks,
         "score_with_isolation_forest",
@@ -67,9 +82,23 @@ def test_score_transaction_flags_when_score_crosses_threshold(monkeypatch):
     monkeypatch.setattr(
         transaction_tasks,
         "check_fraud_rules_sync",
-        lambda *args, **kwargs: RuleCheckResult(triggered=False, rule_name=None),
+        lambda *args, **kwargs: RuleCheckResult(
+            triggered=False,
+            rule_name=None,
+        ),
     )
-    monkeypatch.setattr(transaction_tasks, "append_audit_sync", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        transaction_tasks,
+        "append_audit_sync",
+        lambda *args, **kwargs: None,
+    )
+
+    enqueued = []
+    monkeypatch.setattr(
+        transaction_tasks.categorize_transaction,
+        "delay",
+        lambda queued_id: enqueued.append(queued_id),
+    )
 
     result = transaction_tasks.score_transaction(transaction_id)
 
@@ -80,6 +109,8 @@ def test_score_transaction_flags_when_score_crosses_threshold(monkeypatch):
         assert transaction.fraud_score == FRAUD_FLAG_THRESHOLD + 0.01
         assert transaction.rule_triggered is False
 
+    assert enqueued == []
+
     assert result == {
         "score": FRAUD_FLAG_THRESHOLD + 0.01,
         "flagged": True,
@@ -89,9 +120,16 @@ def test_score_transaction_flags_when_score_crosses_threshold(monkeypatch):
 
 def test_score_transaction_leaves_completed_below_threshold(monkeypatch):
     session_factory = _build_sync_session()
-    transaction_id = _seed_transaction(session_factory, idempotency_key="idem-safe")
+    transaction_id = _seed_transaction(
+        session_factory,
+        idempotency_key="idem-safe",
+    )
 
-    monkeypatch.setattr(transaction_tasks, "SyncSessionLocal", session_factory)
+    monkeypatch.setattr(
+        transaction_tasks,
+        "SyncSessionLocal",
+        session_factory,
+    )
     monkeypatch.setattr(
         transaction_tasks,
         "get_sender_tx_count",
@@ -105,9 +143,23 @@ def test_score_transaction_leaves_completed_below_threshold(monkeypatch):
     monkeypatch.setattr(
         transaction_tasks,
         "check_fraud_rules_sync",
-        lambda *args, **kwargs: RuleCheckResult(triggered=False, rule_name=None),
+        lambda *args, **kwargs: RuleCheckResult(
+            triggered=False,
+            rule_name=None,
+        ),
     )
-    monkeypatch.setattr(transaction_tasks, "append_audit_sync", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        transaction_tasks,
+        "append_audit_sync",
+        lambda *args, **kwargs: None,
+    )
+
+    enqueued = []
+    monkeypatch.setattr(
+        transaction_tasks.categorize_transaction,
+        "delay",
+        lambda queued_id: enqueued.append(queued_id),
+    )
 
     result = transaction_tasks.score_transaction(transaction_id)
 
@@ -117,6 +169,8 @@ def test_score_transaction_leaves_completed_below_threshold(monkeypatch):
         assert transaction.scoring_model == "xgboost"
         assert transaction.fraud_score == FRAUD_FLAG_THRESHOLD - 0.01
         assert transaction.rule_triggered is False
+
+    assert enqueued == [transaction_id]
 
     assert result == {
         "score": FRAUD_FLAG_THRESHOLD - 0.01,

@@ -4,7 +4,6 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request,
 from pydantic import BaseModel
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.api.dependencies import get_current_user
 from app.core.config import settings
 from app.core.redis import (
@@ -24,7 +23,7 @@ from app.core.security import (
 )
 from app.db.session import get_async_db
 from app.models.user import KYCStatus, User, UserRole
-from app.schemas.user import CurrentUser, UserRegisterRequest, UserRegisterResponse
+from app.schemas.user import AuthUserResponse, CurrentUser, UserRegisterRequest, UserRegisterResponse
 from app.services.account_service import create_wallets_for_user
 from app.services.email_service import send_welcome_email
 from app.api.v1.endpoints.sessions import create_session
@@ -36,8 +35,10 @@ router = APIRouter()
 
 
 class LoginRequest(BaseModel):
-    email: str
-    password: str
+    email: str | None = None
+    password: str | None = None
+    phone: str | None = None
+    passcode: str | None = None
 
 
 class RefreshRequest(BaseModel):
@@ -107,10 +108,16 @@ async def register(
         access_token=access_token,
         refresh_token=refresh_token,
         token_type="bearer",
+        user=AuthUserResponse(
+            id=user.id,
+            full_name=user.full_name,
+            email=user.email,
+            phone=user.phone,
+            kyc_status=user.kyc_status,
+        ),
     )
 
-
-@router.post("/login", summary="Login with email and password")
+@router.post("/login", summary="Login with email/password or phone/passcode")
 async def login(
     request: Request,
     body: LoginRequest,
@@ -118,14 +125,36 @@ async def login(
 ):
     await check_rate_limit(request, key_prefix="login", max_requests=5, window_seconds=60)
 
-    result = await db.execute(select(User).where(User.email == body.email))
-    user = result.scalar_one_or_none()
+    if body.phone and body.passcode:
+        result = await db.execute(select(User).where(User.phone == body.phone))
+        user = result.scalar_one_or_none()
 
-    if not user or not verify_password(body.password, user.password_hash):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",
-        )
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid credentials",
+            )
+
+        if not user.passcode_hash:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Passcode not set",
+            )
+
+        if not verify_password(body.passcode, user.passcode_hash):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid credentials",
+            )
+    else:
+        result = await db.execute(select(User).where(User.email == body.email))
+        user = result.scalar_one_or_none()
+
+        if not user or not body.password or not verify_password(body.password, user.password_hash):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid credentials",
+            )
 
     access_token, _ = create_access_token(str(user.id), role=user.role.value)
     refresh_token, refresh_jti = create_refresh_token(str(user.id), role=user.role.value)
@@ -136,6 +165,13 @@ async def login(
         "access_token": access_token,
         "refresh_token": refresh_token,
         "token_type": "bearer",
+        "user": AuthUserResponse(
+            id=user.id,
+            full_name=user.full_name,
+            email=user.email,
+            phone=user.phone,
+            kyc_status=user.kyc_status,
+        ),
     }
 
 

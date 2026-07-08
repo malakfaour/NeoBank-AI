@@ -1,5 +1,6 @@
 import time
 import logging
+from uuid import uuid4
 
 from fastapi import HTTPException, Request, status
 
@@ -69,11 +70,12 @@ async def check_rate_limit(
 
     key = f"sliding:{key_prefix}:{ip}"
     now = time.time()
+    member = uuid4().hex
     window_start = now - window_seconds
 
     pipe = redis_client.pipeline()
     pipe.zremrangebyscore(key, "-inf", window_start)
-    pipe.zadd(key, {str(now): now})
+    pipe.zadd(key, {member: now})
     pipe.zcard(key)
     pipe.expire(key, window_seconds + 1)
     results = await pipe.execute()

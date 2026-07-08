@@ -7,6 +7,7 @@ import fakeredis.aioredis
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 REPO_ROOT = BACKEND_DIR.parent
@@ -25,6 +26,7 @@ os.environ["JWT_ALGORITHM"] = "HS256"
 os.environ["JWT_EXPIRE_MINUTES"] = "30"
 os.environ["JWT_REFRESH_EXPIRE_DAYS"] = "7"
 os.environ["OTP_EXPIRE_MINUTES"] = "5"
+os.environ["REQUIRE_ACTION_TOKEN"] = "false"
 os.environ["APP_ENV"] = "test"
 os.environ["DEEPFACE_MODEL"] = "ArcFace"
 os.environ["GROQ_API_KEY"] = "test_groq_key"
@@ -40,6 +42,7 @@ os.environ["SMTP_PASSWORD"] = "test_password"
 os.environ["TWILIO_ACCOUNT_SID"] = "test_sid"
 os.environ["TWILIO_AUTH_TOKEN"] = "test_token"
 os.environ["TWILIO_FROM_NUMBER"] = "+15555555555"
+os.environ["PAYMENT_GATEWAY_URL"] = "https://sandbox.paymentgateway.example.com/v1/charge"
 
 from app.db.base import Base  # noqa: E402
 from app.db.session import engine  # noqa: E402
@@ -61,8 +64,15 @@ async def create_tables():
         Base.metadata.tables["user_sessions"],
         Base.metadata.tables["transactions"],
         Base.metadata.tables["transaction_audit_logs"],
+        Base.metadata.tables["bill_payments"],
+        Base.metadata.tables["exchange_rates"],
+        Base.metadata.tables["exchange_audit_logs"],
+        Base.metadata.tables["fraud_resolutions"],
         Base.metadata.tables["beneficiaries"],
+        Base.metadata.tables["kyc_records"],
+        Base.metadata.tables["model_metrics"],
         Base.metadata.tables["notifications"],
+        Base.metadata.tables["chatbot_logs"],
     ]
     async with engine.begin() as conn:
         for table in reversed(tables):
@@ -77,7 +87,7 @@ async def create_tables():
 
 @pytest.fixture(autouse=True)
 async def mock_redis():
-    fake = fakeredis.aioredis.FakeRedis()
+    fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
     with patch("app.core.redis.redis_client", fake), \
          patch("app.core.cache_utils.redis_client", fake), \
          patch("app.main.redis_client", fake), \
@@ -87,9 +97,63 @@ async def mock_redis():
         yield fake
 
 
+
+class _FakeGatewayResponse:
+    """Stand-in for httpx.Response, used by the payment gateway mock below."""
+
+    def __init__(self, status_code=200, json_data=None):
+        self.status_code = status_code
+        self._json_data = json_data or {"status": "approved"}
+
+    def json(self):
+        return self._json_data
+
+
+class _FakeGatewayClient:
+    """
+    Stand-in for httpx.AsyncClient used only by
+    app.api.v1.endpoints.accounts._call_payment_gateway (NBL-411).
+    Defaults to a 200 "approved" response for every test; individual tests
+    override this per-call by monkeypatching the same target with their
+    own client class (e.g. to simulate a 402 decline or a 5xx).
+    """
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return False
+
+    async def post(self, url, json=None):
+        return _FakeGatewayResponse(status_code=200)
+
+
+@pytest.fixture(autouse=True)
+def mock_payment_gateway(monkeypatch):
+    """
+    NBL-411: the real payment gateway is an external HTTP call and must be
+    mocked in tests (see ENGINEERING_RULES.md #6 -- external calls are
+    always mocked in CI). Autouse so every existing top-up call in the
+    suite gets a default success without each test needing its own
+    fixture; tests exercising decline/5xx paths monkeypatch this same
+    target locally to override the behavior.
+    """
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.accounts.httpx.AsyncClient",
+        _FakeGatewayClient,
+    )
+
 @pytest_asyncio.fixture
 async def client():
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as ac:
         yield ac
+
+@pytest_asyncio.fixture
+async def db_session():
+    async with AsyncSession(engine, expire_on_commit=False) as session:
+        yield session

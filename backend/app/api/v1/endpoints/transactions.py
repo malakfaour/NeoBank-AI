@@ -3,7 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import get_current_user
+from app.api.dependencies import get_current_user, require_action_token
 from app.core.redis import (
     cache_idempotent_response,
     get_cached_idempotent_response,
@@ -43,7 +43,7 @@ router = APIRouter(prefix="/transactions", tags=["transactions"])
 async def send_money(
     payload: SendMoneyRequest,
     x_idempotency_key: str = Header(..., alias="X-Idempotency-Key"),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_action_token),
     db: AsyncSession = Depends(get_db),
 ):
     sender_id = int(current_user.id)
@@ -110,9 +110,19 @@ async def send_money(
         )
 
     if sender_wallet.balance < payload.amount:
+        # NBL-411: aligned to the same 422 {error, available, requested} shape
+        # transfer.py already uses for its own pre-check -- send_money() is
+        # called internally by transfer.py's _execute_transfer, so a stale
+        # 400/string-detail response here could otherwise leak through in a
+        # race where balance changes between transfer.py's pre-check and
+        # this locked re-check.
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Insufficient balance",
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error": "insufficient_balance",
+                "available": str(sender_wallet.balance),
+                "requested": str(payload.amount),
+            },
         )
 
     # --- debit / credit + insert transaction row, all in one commit ---
@@ -240,7 +250,17 @@ async def send_money(
 # These values are accepted as valid filters (so the endpoint doesn't 400
 # on a legitimate future value) but currently match zero rows.
 VALID_TRANSACTION_TYPES = {"send", "receive", "topup", "bill", "exchange"}
-TYPES_NOT_YET_SUPPORTED = {"topup", "bill", "exchange"}
+TYPES_NOT_YET_SUPPORTED = {"bill"}
+
+
+def _derive_transaction_type(transaction: Transaction, user_id: int) -> str:
+    if transaction.sender_id == transaction.receiver_id:
+        if transaction.category == "Exchange":
+            return "exchange"
+        if transaction.category == "Bills":
+            return "bill"
+        return "topup"
+    return "send" if transaction.sender_id == user_id else "receive"
 
 
 @router.get("/summary", response_model=TransactionSummaryResponse)
@@ -278,6 +298,9 @@ async def get_transaction_summary(
             func.count(Transaction.id).label("transaction_count"),
         )
         .where(Transaction.sender_id == sender_id)
+        # NBL-411: top-ups are stored as sender_id == receiver_id and are not
+        # spend -- exclude them from the monthly spend summary.
+        .where(Transaction.sender_id != Transaction.receiver_id)
         .where(Transaction.created_at >= month_start)
         .where(Transaction.created_at < month_end)
         .group_by(Transaction.category, Transaction.currency)
@@ -315,11 +338,16 @@ async def get_transaction_detail(
     if transaction is None or user_id not in (transaction.sender_id, transaction.receiver_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transaction not found")
 
+    transaction_type = _derive_transaction_type(transaction, user_id)
+    is_self_transaction = transaction.sender_id == transaction.receiver_id
     is_sender = transaction.sender_id == user_id
-    counterparty_id = transaction.receiver_id if is_sender else transaction.sender_id
 
-    counterparty_result = await db.execute(select(User).where(User.id == counterparty_id))
-    counterparty = counterparty_result.scalar_one_or_none()
+    if is_self_transaction:
+        counterparty = None
+    else:
+        counterparty_id = transaction.receiver_id if is_sender else transaction.sender_id
+        counterparty_result = await db.execute(select(User).where(User.id == counterparty_id))
+        counterparty = counterparty_result.scalar_one_or_none()
 
     audit_result = await db.execute(
         select(TransactionAuditLog)
@@ -332,7 +360,7 @@ async def get_transaction_detail(
         id=transaction.id,
         sender_id=transaction.sender_id,
         receiver_id=transaction.receiver_id,
-        type="send" if is_sender else "receive",
+        type=transaction_type,
         amount=transaction.amount,
         currency=transaction.currency.value,
         counterparty_name=counterparty.full_name if counterparty else None,
@@ -394,6 +422,10 @@ async def list_transactions(
         filters.append(Transaction.sender_id == user_id)
     elif type == "receive":
         filters.append(Transaction.receiver_id == user_id)
+    elif type == "topup":
+        filters.append(Transaction.category == "TopUp")
+    elif type == "exchange":
+        filters.append(Transaction.category == "Exchange")
 
     if start_date is not None:
         filters.append(Transaction.created_at >= start_date)
@@ -426,14 +458,15 @@ async def list_transactions(
 
     items = []
     for tx in transactions:
+        transaction_type = _derive_transaction_type(tx, user_id)
+        is_self_transaction = tx.sender_id == tx.receiver_id
         is_sender = tx.sender_id == user_id
-        counterparty_id = tx.receiver_id if is_sender else tx.sender_id
-        counterparty = users_by_id.get(counterparty_id)
+        counterparty = None if is_self_transaction else users_by_id.get(tx.receiver_id if is_sender else tx.sender_id)
 
         items.append(
             TransactionListItem(
                 id=tx.id,
-                type="send" if is_sender else "receive",
+                type=transaction_type,
                 amount=tx.amount,
                 currency=tx.currency.value,
                 counterparty_name=counterparty.full_name if counterparty else None,
