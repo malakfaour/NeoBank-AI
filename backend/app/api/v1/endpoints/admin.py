@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 from functools import partial
 from datetime import date, datetime, timezone
 
@@ -42,6 +42,7 @@ from app.services.audit_log import append_audit
 from app.services.fraud_scoring import FRAUD_FLAG_THRESHOLD
 from app.services.notifications import notify
 from app.services.wallet_locking import lock_and_credit_wallet
+from app.services.wallet_status import WalletClosedError, WalletFrozenError
 from app.utils.transaction_query_utils import compute_total_pages, parse_summary_month
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -279,7 +280,7 @@ async def get_flagged_transactions(
         the two real, independent flagging signals per DEVATTECH-84/87 --
         a transaction can be ML-flagged, rule-flagged, both, or neither.
     FRAUD_FLAG_THRESHOLD is imported from app/services/fraud_scoring.py
-    (never hardcoded), per ENGINEERING_RULES.md §7.
+    (never hardcoded), per ENGINEERING_RULES.md Â§7.
     """
     filter_condition = or_(
         Transaction.status == TransactionStatus.flagged,
@@ -393,6 +394,12 @@ async def resolve_flag(
 
         try:
             await lock_and_credit_wallet(db, wallet.id, transaction.amount)
+        except (WalletFrozenError, WalletClosedError) as e:
+            reason = "wallet_frozen" if isinstance(e, WalletFrozenError) else "wallet_closed"
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"error": reason},
+            )
         except ValueError:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -609,3 +616,4 @@ async def get_compliance_summary(
         resolutions_this_month=ResolutionCounts(**resolution_counts),
         reversed_amount_by_currency=reversed_amount_by_currency,
     )
+

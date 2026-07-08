@@ -1,4 +1,4 @@
-from decimal import Decimal
+﻿from decimal import Decimal
 from enum import Enum
 
 from pydantic import BaseModel, Field
@@ -18,6 +18,18 @@ class WalletResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class WalletStatusEnum(str, Enum):
+    active = "active"
+    frozen = "frozen"
+    closed = "closed"
+
+
+class WalletStatusChangeResponse(BaseModel):
+    wallet_id: int
+    status: WalletStatusEnum
+    message: str
 
 
 class CardTopUpRequest(BaseModel):
