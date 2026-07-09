@@ -1,4 +1,4 @@
-"""
+﻿"""
 DEVATTECH-87: rule-based fraud fallback layer.
 
 Deterministic checks that run in addition to ML scoring (Isolation Forest /
@@ -15,6 +15,21 @@ NOTE: this module uses AsyncSession throughout, matching the async
 FastAPI request path in transactions.py (db: AsyncSession = Depends(get_db)).
 Do not swap this back to sqlalchemy.orm.Session -- that's for the sync
 Celery engine (see app/db/sync_session.py), a different code path.
+
+DEVATTECH-106: rules 1-3's threshold/comparison logic previously existed
+twice (once inline in check_fraud_rules, once inline in
+check_fraud_rules_sync). It now exists once each, as the pure
+_evaluate_rule_1/2/3 functions below -- no I/O, no db parameter, same
+input always produces the same output. check_fraud_rules() and
+check_fraud_rules_sync() are now thin wrappers: fetch one value via the
+matching async/sync I/O helper, delegate the decision to the pure
+function, short-circuit on the first trigger (unchanged from before --
+this avoids querying for rules 2/3 once rule 1 has already fired, same
+as the original implementation). The I/O helper functions themselves
+(_get_rolling_average_spend/_sync, etc.) are NOT consolidated -- that
+would require calling an async service from a sync Celery path (or vice
+versa), which ENGINEERING_RULES.md Section 3 forbids. That duplication is
+inherent to the async/sync split, not "rule logic" duplication.
 """
 
 from dataclasses import dataclass
@@ -74,6 +89,39 @@ def check_currency_match(tx_currency: str, source_wallet: Wallet) -> None:
     """
     if tx_currency != source_wallet.currency.value:
         raise CurrencyMismatchError(tx_currency, source_wallet.currency.value)
+
+
+def _evaluate_rule_1(amount: Decimal, rolling_avg: Decimal) -> RuleCheckResult | None:
+    """
+    Rule 1 -- amount > 5x sender's rolling 30-day average.
+    Pure: given the same amount and rolling_avg, always returns the same
+    result. Returns None (not RuleCheckResult(triggered=False, ...)) when
+    the rule doesn't fire, so callers can tell "this rule didn't trigger"
+    apart from "this is the final answer" and keep checking the next rule.
+    """
+    if rolling_avg > 0 and amount > (rolling_avg * ROLLING_MULTIPLIER):
+        return RuleCheckResult(triggered=True, rule_name="excessive_amount_vs_average")
+    return None
+
+
+def _evaluate_rule_2(prior_recipient_count: int) -> RuleCheckResult | None:
+    """
+    Rule 2 -- >=3 distinct recipients within 5 minutes, INCLUDING the
+    transaction currently being scored. prior_recipient_count excludes
+    that transaction, so the threshold is checked as (threshold - 1):
+    this transaction's receiver is what pushes the count to the real
+    threshold.
+    """
+    if prior_recipient_count >= MULTI_RECIPIENT_THRESHOLD - 1:
+        return RuleCheckResult(triggered=True, rule_name="rapid_multi_recipient")
+    return None
+
+
+def _evaluate_rule_3(is_new_recipient: bool, amount: Decimal) -> RuleCheckResult | None:
+    """Rule 3 -- new recipient AND amount > $500."""
+    if is_new_recipient and amount > NEW_RECIPIENT_AMOUNT_THRESHOLD:
+        return RuleCheckResult(triggered=True, rule_name="new_recipient_high_amount")
+    return None
 
 
 async def _get_rolling_average_spend(
@@ -147,30 +195,33 @@ async def check_fraud_rules(db: AsyncSession, transaction: Transaction) -> RuleC
     Order below is check priority, not severity -- all three are equally
     "flag for review," this just determines which name lands in metadata
     when multiple rules would have fired.
+
+    Each rule's data is fetched only if needed: fetching stops at the
+    first rule that triggers, same as before DEVATTECH-106 -- this is a
+    thin wrapper around the pure _evaluate_rule_* functions, not a
+    fetch-everything-then-decide function, specifically to preserve that
+    short-circuit (avoids two unnecessary queries once rule 1 has fired).
     """
     now = transaction.created_at or datetime.utcnow()
 
-    # Rule 1 -- amount > 5x sender's rolling 30-day average
     rolling_avg = await _get_rolling_average_spend(db, transaction.sender_id, now)
-    if rolling_avg > 0 and transaction.amount > (rolling_avg * ROLLING_MULTIPLIER):
-        return RuleCheckResult(triggered=True, rule_name="excessive_amount_vs_average")
+    result = _evaluate_rule_1(transaction.amount, rolling_avg)
+    if result is not None:
+        return result
 
-    # Rule 2 -- >=3 distinct recipients within 5 minutes, INCLUDING this tx.
-    # _count_distinct_recipients_recent excludes the current transaction,
-    # so we check against (threshold - 1) prior distinct recipients, then
-    # confirm this transaction's receiver pushes the count to the threshold.
     prior_recipient_count = await _count_distinct_recipients_recent(
         db, transaction.sender_id, now
     )
-    if prior_recipient_count >= MULTI_RECIPIENT_THRESHOLD - 1:
-        return RuleCheckResult(triggered=True, rule_name="rapid_multi_recipient")
+    result = _evaluate_rule_2(prior_recipient_count)
+    if result is not None:
+        return result
 
-    # Rule 3 -- new recipient AND amount > $500
     is_new = await _is_new_recipient(
         db, transaction.sender_id, transaction.receiver_id, transaction.id
     )
-    if is_new and transaction.amount > NEW_RECIPIENT_AMOUNT_THRESHOLD:
-        return RuleCheckResult(triggered=True, rule_name="new_recipient_high_amount")
+    result = _evaluate_rule_3(is_new, transaction.amount)
+    if result is not None:
+        return result
 
     return RuleCheckResult(triggered=False, rule_name=None)
 
@@ -228,23 +279,29 @@ def _is_new_recipient_sync(
 
 
 def check_fraud_rules_sync(db: Session, transaction: Transaction) -> RuleCheckResult:
-    """Sync equivalent of check_fraud_rules() for Celery task sessions."""
+    """
+    Sync equivalent of check_fraud_rules() for Celery task sessions.
+    Same short-circuit shape as the async version -- see its docstring.
+    """
     now = transaction.created_at or datetime.utcnow()
 
     rolling_avg = _get_rolling_average_spend_sync(db, transaction.sender_id, now)
-    if rolling_avg > 0 and transaction.amount > (rolling_avg * ROLLING_MULTIPLIER):
-        return RuleCheckResult(triggered=True, rule_name="excessive_amount_vs_average")
+    result = _evaluate_rule_1(transaction.amount, rolling_avg)
+    if result is not None:
+        return result
 
     prior_recipient_count = _count_distinct_recipients_recent_sync(
         db, transaction.sender_id, now
     )
-    if prior_recipient_count >= MULTI_RECIPIENT_THRESHOLD - 1:
-        return RuleCheckResult(triggered=True, rule_name="rapid_multi_recipient")
+    result = _evaluate_rule_2(prior_recipient_count)
+    if result is not None:
+        return result
 
     is_new = _is_new_recipient_sync(
         db, transaction.sender_id, transaction.receiver_id, transaction.id
     )
-    if is_new and transaction.amount > NEW_RECIPIENT_AMOUNT_THRESHOLD:
-        return RuleCheckResult(triggered=True, rule_name="new_recipient_high_amount")
+    result = _evaluate_rule_3(is_new, transaction.amount)
+    if result is not None:
+        return result
 
     return RuleCheckResult(triggered=False, rule_name=None)
