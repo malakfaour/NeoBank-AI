@@ -11,6 +11,7 @@ from app.models.transaction_audit_log import TransactionAuditLog
 from app.models.user import User
 from app.models.wallet import Wallet
 from app.models.chat_session import ChatSession
+from app.models.session import UserSession
 
 __all__ = [
     "Beneficiary",
@@ -33,4 +34,5 @@ __all__ = [
     "User",
     "Wallet",
     "ChatSession",
+    "UserSession",
 ]
