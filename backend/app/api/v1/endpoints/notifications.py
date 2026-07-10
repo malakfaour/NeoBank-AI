@@ -76,8 +76,14 @@ async def get_current_user_from_query_token(token: str) -> CurrentUser:
 @router.get("/stream")
 async def stream_notifications(
     request: Request,
-    token: str = Query(...),
+    token: str | None = Query(None),
 ):
+    if token is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing token",
+        )
+
     current_user = await get_current_user_from_query_token(token)
     user_id = get_user_id(current_user)
     channel = f"notifications:{user_id}"
