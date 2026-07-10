@@ -1,4 +1,5 @@
 import asyncio
+from uuid import uuid4
 from functools import partial
 from datetime import date, datetime, timezone
 
@@ -15,13 +16,19 @@ from app.models.exchange_audit_log import ExchangeAuditLog
 from app.models.fraud_resolution import FraudResolution, FraudResolutionType
 from app.models.kyc_record import KYCRecord, KYCRecordStatus
 from app.models.model_metrics import ModelMetrics
-from app.models.transaction import Transaction, TransactionStatus
+from app.models.transaction import Transaction, TransactionCurrency, TransactionStatus
 from app.models.transaction_audit_log import TransactionAuditLog
 from app.models.user import KYCStatus, User, UserRole
 from app.models.wallet import Wallet, WalletCurrency
 from app.schemas.admin import (
     ComplianceSummaryResponse,
     ExchangeAuditLogItem,
+    AdminUserSearchItem,
+    AdminUserSearchResponse,
+    AdminUserWalletsResponse,
+    AdminWalletAdjustRequest,
+    AdminWalletAdjustResponse,
+    AdminWalletItem,
     ExchangeAuditLogPageResponse,
     FlaggedTransactionItem,
     FlaggedTransactionsResponse,
@@ -41,7 +48,7 @@ from app.schemas.user import CurrentUser
 from app.services.audit_log import append_audit
 from app.services.fraud_scoring import FRAUD_FLAG_THRESHOLD
 from app.services.notifications import notify
-from app.services.wallet_locking import lock_and_credit_wallet
+from app.services.wallet_locking import lock_and_credit_wallet, lock_and_debit_wallet
 from app.utils.transaction_query_utils import compute_total_pages, parse_summary_month
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -279,7 +286,7 @@ async def get_flagged_transactions(
         the two real, independent flagging signals per DEVATTECH-84/87 --
         a transaction can be ML-flagged, rule-flagged, both, or neither.
     FRAUD_FLAG_THRESHOLD is imported from app/services/fraud_scoring.py
-    (never hardcoded), per ENGINEERING_RULES.md §7.
+    (never hardcoded), per ENGINEERING_RULES.md Â§7.
     """
     filter_condition = or_(
         Transaction.status == TransactionStatus.flagged,
@@ -608,4 +615,180 @@ async def get_compliance_summary(
         currently_flagged_from_month=currently_flagged_from_month,
         resolutions_this_month=ResolutionCounts(**resolution_counts),
         reversed_amount_by_currency=reversed_amount_by_currency,
+    )
+
+
+
+# =====================================================================
+# DEVATTECH-108: admin support tools -- user/wallet lookup + manual
+# adjustment. Appended at the end of the file to keep this a clean,
+# additive block for merging (per the ticket's own note).
+# =====================================================================
+
+@router.get("/users/search", response_model=AdminUserSearchResponse)
+async def search_users(
+    q: str = Query(..., min_length=1),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    current_user: CurrentUser = Depends(
+        require_role(UserRole.compliance_officer, UserRole.admin)
+    ),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    DEVATTECH-108: search users by name/email/phone (partial match),
+    paginated. compliance_officer + admin, matching the rest of this
+    file's read-only lookup endpoints (flagged-transactions, exchange
+    audit log) -- only the money-moving /adjust endpoint below is
+    restricted to admin-only, per the ticket's explicit AC.
+    """
+    like_pattern = f"%{q}%"
+    filter_condition = or_(
+        User.full_name.ilike(like_pattern),
+        User.email.ilike(like_pattern),
+        User.phone.ilike(like_pattern),
+    )
+
+    count_result = await db.execute(
+        select(func.count()).select_from(User).where(filter_condition)
+    )
+    total = count_result.scalar_one()
+
+    result = await db.execute(
+        select(User)
+        .where(filter_condition)
+        .order_by(User.id.asc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    users = result.scalars().all()
+
+    return AdminUserSearchResponse(
+        items=[
+            AdminUserSearchItem(
+                id=u.id,
+                full_name=u.full_name,
+                email=u.email,
+                phone=u.phone,
+                kyc_status=u.kyc_status.value,
+                role=u.role.value,
+            )
+            for u in users
+        ],
+        page=page,
+        page_size=page_size,
+        total=total,
+        total_pages=compute_total_pages(total, page_size),
+    )
+
+
+@router.get("/users/{user_id}/wallets", response_model=AdminUserWalletsResponse)
+async def get_user_wallets(
+    user_id: int,
+    current_user: CurrentUser = Depends(
+        require_role(UserRole.compliance_officer, UserRole.admin)
+    ),
+    db: AsyncSession = Depends(get_db),
+):
+    """DEVATTECH-108: list a user's wallets for support lookup."""
+    user_result = await db.execute(select(User).where(User.id == user_id))
+    if user_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    result = await db.execute(
+        select(Wallet).where(Wallet.user_id == user_id).order_by(Wallet.currency)
+    )
+    wallets = result.scalars().all()
+
+    return AdminUserWalletsResponse(
+        user_id=user_id,
+        items=[
+            AdminWalletItem(
+                id=w.id,
+                currency=w.currency.value,
+                balance=w.balance,
+                account_number=w.account_number,
+                iban=w.iban,
+            )
+            for w in wallets
+        ],
+    )
+
+
+@router.post("/wallets/{wallet_id}/adjust", response_model=AdminWalletAdjustResponse)
+async def adjust_wallet_balance(
+    wallet_id: int,
+    payload: AdminWalletAdjustRequest,
+    current_user: CurrentUser = Depends(require_role(UserRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    DEVATTECH-108: manual balance adjustment -- admin ONLY, not
+    compliance_officer, per the ticket's explicit AC.
+
+    Reuses lock_and_credit_wallet / lock_and_debit_wallet (wallet_locking.py)
+    for the actual mutation rather than touching wallet.balance directly --
+    same reuse principle as every other money-moving endpoint in this
+    codebase. Always writes a transactions row (category="Adjustment",
+    self-transaction: sender_id == receiver_id == the wallet's owner, same
+    discriminator pattern NBL-411 established for top-ups) -- no silent
+    balance edits, per the ticket's note. The admin's identity is recorded
+    as the audit entry's actor_id, not on the Transaction row itself
+    (Transaction has no separate "actor" column).
+
+    Does not dispatch fraud scoring or LLM categorization -- this is a
+    trusted administrative action, not a user-initiated transfer; category
+    is set directly and deterministically, same as bill payments already
+    skip the Groq categorization call.
+    """
+    wallet_check = await db.execute(select(Wallet).where(Wallet.id == wallet_id))
+    if wallet_check.scalar_one_or_none() is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Wallet not found")
+
+    if payload.direction == "credit":
+        wallet = await lock_and_credit_wallet(db, wallet_id, payload.amount)
+    else:
+        try:
+            wallet = await lock_and_debit_wallet(db, wallet_id, payload.amount)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"error": "insufficient_balance", "detail": str(e)},
+            )
+
+    transaction = Transaction(
+        sender_id=wallet.user_id,
+        receiver_id=wallet.user_id,
+        amount=payload.amount,
+        currency=TransactionCurrency(wallet.currency.value),
+        category="Adjustment",
+        status=TransactionStatus.completed,
+        idempotency_key=f"admin-adjust:{uuid4().hex}",
+    )
+    db.add(transaction)
+    await db.commit()
+    await db.refresh(transaction)
+    await db.refresh(wallet)
+
+    await invalidate_balance_cache(wallet.user_id)
+
+    await append_audit(
+        db,
+        transaction_id=transaction.id,
+        action="admin_adjustment",
+        actor_id=int(current_user.id),
+        metadata={
+            "direction": payload.direction,
+            "reason": payload.reason,
+            "amount": str(payload.amount),
+        },
+    )
+
+    return AdminWalletAdjustResponse(
+        wallet_id=wallet.id,
+        transaction_id=transaction.id,
+        direction=payload.direction,
+        amount=payload.amount,
+        new_balance=wallet.balance,
+        reason=payload.reason,
     )
