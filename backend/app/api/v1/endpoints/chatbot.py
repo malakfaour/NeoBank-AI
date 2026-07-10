@@ -4,6 +4,7 @@ from fastapi import (
     APIRouter,
     Depends,
     HTTPException,
+    Request,
     status,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,6 +18,7 @@ from app.schemas.chatbot import (
 )
 from app.schemas.user import CurrentUser
 from app.services.chatbot_intent import classify_intent
+from app.services.rate_limiter import check_rate_limit
 from app.services.chatbot_service import (
     ChatSessionOwnershipError,
     get_chatbot_response,
@@ -34,12 +36,18 @@ _TRANSFER_CONFIRMATION_THRESHOLD = 0.8
     summary="Send a message to the chatbot",
 )
 async def send_chatbot_message(
+    request: Request,
     body: ChatbotMessageRequest,
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db),
 ) -> ChatbotMessageResponse:
+    await check_rate_limit(
+        request,
+        key_prefix="chatbot_message",
+        max_requests=20,
+        window_seconds=60,
+    )
     user_id = int(current_user.id)
-
     start = time.monotonic()
 
     classification = await classify_intent(

@@ -218,3 +218,16 @@ async def test_chatbot_logs_intent_classification(client, auth_tokens):
     assert log is not None
     assert log.confidence == 0.87
     assert log.latency_ms >= 0
+
+async def test_chatbot_banned_ip_returns_429(client, auth_tokens, mock_redis):
+    """Banned-IP check applies to /chatbot/message (DEVATTECH-120)."""
+    await mock_redis.set("banned:127.0.0.1", "1", ex=3600)
+
+    response = await client.post(
+        "/api/v1/chatbot/message",
+        json={"session_id": "test-banned-session", "message": "hi"},
+        headers={"Authorization": f"Bearer {auth_tokens['access_token']}"},
+    )
+
+    assert response.status_code == 429
+    assert "banned" in response.json()["detail"].lower()
