@@ -39,6 +39,9 @@ class User(Base):
         foreign_keys="KYCRecord.user_id",
     )
     sessions = relationship("UserSession", back_populates="user", cascade="all, delete-orphan")
+    device_credentials = relationship(
+        "DeviceCredential", back_populates="user", cascade="all, delete-orphan"
+    )
     wallets = relationship("Wallet", back_populates="user", cascade="all, delete-orphan")
     beneficiaries = relationship("Beneficiary", back_populates="user", cascade="all, delete-orphan")
     notifications = relationship("Notification", back_populates="user", cascade="all, delete-orphan")
