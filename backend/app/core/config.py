@@ -1,4 +1,6 @@
+﻿from decimal import Decimal
 from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _ENV_FILE = str(Path(__file__).parent.parent.parent.parent / ".env")
@@ -36,6 +38,7 @@ class Settings(BaseSettings):
     # ML
     DEEPFACE_MODEL: str = "ArcFace"
     GROQ_API_KEY: str = ""
+
     REQUIRE_ACTION_TOKEN: bool = False
 
     # AWS / S3
@@ -67,6 +70,11 @@ class Settings(BaseSettings):
 
     # Bill Payments
     BILLER_API_URL: str = "http://localhost:9000/mock-biller"
+
+    # DEVATTECH-107: per-user daily transfer cap (send_money). Default is a
+    # placeholder pending a real product/compliance figure -- override via
+    # the DAILY_TRANSFER_LIMIT_USD env var.
+    DAILY_TRANSFER_LIMIT_USD: Decimal = Decimal("10000")
 
 
 settings = Settings()
