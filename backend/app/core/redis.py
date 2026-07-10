@@ -78,6 +78,8 @@ async def store_action_token(user_id: str, token: str, ttl: int = 300) -> None:
 
 async def get_action_token(user_id: str) -> str | None:
     return await redis_client.get(f"action_token:{user_id}")
+
+
 async def consume_action_token(user_id: str, token: str) -> bool:
     """
     Atomically fetch-and-delete the action token for user_id (Redis GETDEL).
@@ -86,6 +88,18 @@ async def consume_action_token(user_id: str, token: str) -> bool:
     """
     stored = await redis_client.getdel(f"action_token:{user_id}")
     return stored is not None and stored == token
+
+async def store_biometric_challenge(user_id: str, nonce: str, ttl: int = 120) -> None:
+    """Store the user's `challenge:{user_id}` nonce with a two-minute default TTL."""
+    await redis_client.set(f"challenge:{user_id}", nonce, ex=ttl)
+
+
+async def consume_biometric_challenge(user_id: str) -> str | None:
+    """Atomically fetch and delete a single-use biometric challenge nonce."""
+    nonce = await redis_client.getdel(f"challenge:{user_id}")
+    if isinstance(nonce, bytes):
+        return nonce.decode("utf-8")
+    return nonce
 
 def _passcode_attempts_key(user_id: str) -> str:
     return f"passcode_attempts:{user_id}"
