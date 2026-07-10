@@ -58,6 +58,7 @@ import random
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
+from faker import Faker
 from sqlalchemy import select
 
 import app.models  # noqa: F401 -- registers most mapped classes so string-based
@@ -79,19 +80,43 @@ from app.tasks.categorization_tasks import CATEGORIES
 
 SEED = 42
 random.seed(SEED)
+Faker.seed(SEED)
+fake = Faker()
 
 TRANSACTION_COUNT = 200
 TRANSACTION_WINDOW_DAYS = 30
 IDEMPOTENCY_PREFIX = "seed-demo-tx-"
 
-# (label, email, phone, kyc_status, usd_balance)
+# (label, email, phone, kyc_status, usd_balance) -- name/email/phone are
+# Faker-generated, not hardcoded. Faker.seed(SEED) above + calling fake.*
+# in this exact fixed order/count (6 users, name+email+phone each, always
+# in this sequence) is what keeps these deterministic across runs -- same
+# seed + same call sequence = same 6 identities every time, required for
+# idempotency (_get_or_create_user keys off User.email). Do not reorder
+# these calls or add other fake.* calls before this point.
+_DEMO_KYC_STATUSES = ["approved", "approved", "approved", "approved", "pending", "flagged"]
+_DEMO_BALANCES = [
+    Decimal("5000.00"),
+    Decimal("2500.00"),
+    Decimal("1000.00"),
+    Decimal("750.00"),
+    Decimal("0"),
+    Decimal("0"),
+]
+
 DEMO_USERS = [
-    ("Demo User One", "demo1@neobank.test", "+96170000001", "approved", Decimal("5000.00")),
-    ("Demo User Two", "demo2@neobank.test", "+96170000002", "approved", Decimal("2500.00")),
-    ("Demo User Three", "demo3@neobank.test", "+96170000003", "approved", Decimal("1000.00")),
-    ("Demo User Four", "demo4@neobank.test", "+96170000004", "approved", Decimal("750.00")),
-    ("Demo User Five", "demo5@neobank.test", "+96170000005", "pending", Decimal("0")),
-    ("Demo User Six", "demo6@neobank.test", "+96170000006", "flagged", Decimal("0")),
+    (
+        fake.name(),
+        fake.email(),
+        # Lebanese-mobile-style, kept short and deterministic --
+        # fake.phone_number() varies in length/format by locale and can
+        # exceed User.phone's String(20) column; numerify() gives full
+        # control over format and length.
+        fake.numerify(text="+961########"),
+        _DEMO_KYC_STATUSES[i],
+        _DEMO_BALANCES[i],
+    )
+    for i in range(6)
 ]
 
 DEMO_PASSCODE = "123456"
