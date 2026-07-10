@@ -11,12 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 REPO_ROOT = BACKEND_DIR.parent
-TEST_DB_PATH = BACKEND_DIR / "test_neobank.db"
 if str(REPO_ROOT) not in sys.path:
     # Import the shared top-level ml package from the repo root.
     sys.path.insert(0, str(REPO_ROOT))
 
-TEST_DB_URL = f"sqlite+aiosqlite:///{TEST_DB_PATH.resolve().as_posix()}"
+TEST_DB_URL = "sqlite+aiosqlite:///:memory:"
 
 os.environ["DATABASE_URL"] = TEST_DB_URL
 os.environ["DATABASE_URL_DIRECT"] = TEST_DB_URL
