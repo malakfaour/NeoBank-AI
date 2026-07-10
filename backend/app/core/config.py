@@ -35,6 +35,8 @@ class Settings(BaseSettings):
 
     # ML
     DEEPFACE_MODEL: str = "ArcFace"
+    KYC_MATCH_APPROVE_THRESHOLD: float = 0.80
+    KYC_MATCH_FLAG_THRESHOLD: float = 0.60
     GROQ_API_KEY: str = ""
     REQUIRE_ACTION_TOKEN: bool = False
 
@@ -67,6 +69,5 @@ class Settings(BaseSettings):
 
     # Bill Payments
     BILLER_API_URL: str = "http://localhost:9000/mock-biller"
-
 
 settings = Settings()
