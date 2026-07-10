@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 from sklearn.datasets import fetch_lfw_pairs
 from PIL import Image
+import numpy as np
 
 OUTPUT_DIR = Path(__file__).resolve().parent / "eval_data" / "genuine_pairs"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -14,8 +15,14 @@ for i, (img1, img2) in enumerate(pairs.pairs):
         continue
     pair_dir = OUTPUT_DIR / f"pair_{i:03d}"
     pair_dir.mkdir(exist_ok=True)
-    Image.fromarray(img1.astype("uint8")).save(pair_dir / "selfie.jpg")
-    Image.fromarray(img2.astype("uint8")).save(pair_dir / "id_photo.jpg")
+    def to_uint8(image):
+        image = np.asarray(image)
+        if image.max() <= 1.0:
+            image = image * 255.0
+        return np.clip(image, 0, 255).astype("uint8")
+
+    Image.fromarray(to_uint8(img1)).save(pair_dir / "selfie.jpg")
+    Image.fromarray(to_uint8(img2)).save(pair_dir / "id_photo.jpg")
     saved += 1
 
 print(f"Saved {saved} genuine same-person pairs to {OUTPUT_DIR}")
