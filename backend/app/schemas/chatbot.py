@@ -4,13 +4,24 @@ from app.services.chatbot_intent import IntentLabel
 
 
 class ChatbotMessageRequest(BaseModel):
-    message: str = Field(..., min_length=1)
+    session_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=64,
+    )
+
+    message: str = Field(
+        ...,
+        min_length=1,
+    )
 
 
 class ChatbotMessageResponse(BaseModel):
-    message: str
-    response: str
+    reply: str
+    session_id: str
     intent: IntentLabel
-    confidence: float
-    original_message: str
+    confidence: float = Field(
+        ge=0.0,
+        le=1.0,
+    )
     confirmation_required: bool = False

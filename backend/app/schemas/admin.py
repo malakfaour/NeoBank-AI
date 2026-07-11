@@ -54,5 +54,36 @@ class ComplianceSummaryResponse(BaseModel):
     month: str
     total_transactions_created: int
     currently_flagged_from_month: int
+    flagged_rate: float
     resolutions_this_month: ResolutionCounts
     reversed_amount_by_currency: list[ReversedAmountByCurrency]
+
+
+class ExchangeAuditLogItem(BaseModel):
+    id: int
+    exchange_id: str
+    user_id: int | None
+    user_full_name: str | None
+    user_email: str | None
+    from_currency: str
+    to_currency: str
+    amount: Decimal
+    rate: Decimal
+    converted_amount: Decimal
+    status: str
+    provider: str | None
+    created_at: datetime
+
+
+class ExchangeAuditLogPageResponse(BaseModel):
+    items: list[ExchangeAuditLogItem]
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
+
+
+class ModelMetricItem(BaseModel):
+    model_name: str
+    mae: float
+    trained_at: datetime

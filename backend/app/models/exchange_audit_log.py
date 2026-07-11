@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, Integer, Numeric, String
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, Numeric, String
 from sqlalchemy.sql import func
 
 from app.db.base import Base
@@ -9,6 +9,7 @@ class ExchangeAuditLog(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     exchange_id = Column(String(36), unique=True, nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
 
     from_currency = Column(String(3), nullable=False)
     to_currency = Column(String(3), nullable=False)

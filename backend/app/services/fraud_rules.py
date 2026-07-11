@@ -1,4 +1,4 @@
-﻿"""
+"""
 DEVATTECH-87: rule-based fraud fallback layer.
 
 Deterministic checks that run in addition to ML scoring (Isolation Forest /
@@ -84,6 +84,10 @@ async def _get_rolling_average_spend(
     result = await db.execute(
         select(func.avg(Transaction.amount)).where(
             Transaction.sender_id == sender_id,
+            # NBL-411: exclude self-transfers (top-ups) from the spend average --
+            # otherwise a large top-up inflates the baseline and Rule 1 stops
+            # flagging genuinely large sends.
+            Transaction.sender_id != Transaction.receiver_id,
             Transaction.created_at >= window_start,
             Transaction.created_at < now,
         )
@@ -104,6 +108,10 @@ async def _count_distinct_recipients_recent(
     result = await db.execute(
         select(func.count(func.distinct(Transaction.receiver_id))).where(
             Transaction.sender_id == sender_id,
+            # NBL-411: exclude self-transfers (top-ups) -- otherwise the user
+            # counts as their own `recipient`, inflating this toward the
+            # rapid-multi-recipient threshold.
+            Transaction.sender_id != Transaction.receiver_id,
             Transaction.created_at >= window_start,
             Transaction.created_at < now,
         )
@@ -174,6 +182,10 @@ def _get_rolling_average_spend_sync(
     result = db.execute(
         select(func.avg(Transaction.amount)).where(
             Transaction.sender_id == sender_id,
+            # NBL-411: exclude self-transfers (top-ups) from the spend average --
+            # otherwise a large top-up inflates the baseline and Rule 1 stops
+            # flagging genuinely large sends.
+            Transaction.sender_id != Transaction.receiver_id,
             Transaction.created_at >= window_start,
             Transaction.created_at < now,
         )
@@ -189,6 +201,10 @@ def _count_distinct_recipients_recent_sync(
     result = db.execute(
         select(func.count(func.distinct(Transaction.receiver_id))).where(
             Transaction.sender_id == sender_id,
+            # NBL-411: exclude self-transfers (top-ups) -- otherwise the user
+            # counts as their own `recipient`, inflating this toward the
+            # rapid-multi-recipient threshold.
+            Transaction.sender_id != Transaction.receiver_id,
             Transaction.created_at >= window_start,
             Transaction.created_at < now,
         )
