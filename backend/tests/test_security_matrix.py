@@ -22,6 +22,7 @@ from app.main import app
 # Path is the raw FastAPI path template, e.g. "/api/v1/auth/login".
 _PUBLIC_ROUTES: set[tuple[str, str]] = {
     ("GET", "/health"),
+    ("GET", "/health/ready"),
     ("POST", "/api/v1/auth/register"),
     ("POST", "/api/v1/auth/login"),
     ("POST", "/api/v1/auth/refresh"),

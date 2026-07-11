@@ -1,16 +1,20 @@
+import asyncio
 import logging
 import uuid
 
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
 from starlette.datastructures import MutableHeaders
 
 from app.api.v1.router import router as v1_router
+from app.celery_app import celery_app
 from app.core.config import settings
 from app.core.logging_config import configure_logging
 from app.core.redis import redis_client
 from app.core.request_context import get_request_id, request_id_var
+from app.db.session import AsyncSessionLocal
 
 configure_logging(settings.LOG_FORMAT)
 
@@ -99,11 +103,13 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
     """
     logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
     request_id = get_request_id()
-    return JSONResponse(
+    response = JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={"error": "internal_error", "request_id": request_id},
-        headers={"X-Request-ID": request_id},
     )
+    if request_id:
+        response.headers["X-Request-ID"] = request_id
+    return response
 
 
 app.include_router(v1_router, prefix="/api/v1")
@@ -121,3 +127,47 @@ async def health_check():
         "env": settings.APP_ENV,
         "redis": redis_status,
     }
+
+
+@app.get("/health/ready")
+async def readiness_check():
+    """
+    DEVATTECH-123 / SP3-704: readiness probe -- checks every dependency
+    the app actually needs to serve traffic (DB, Redis, Celery workers).
+
+    Unlike /health (liveness, kept deliberately cheap -- no DB call),
+    this does real work and is meant for orchestrator readiness checks,
+    not high-frequency polling.
+    """
+    checks: dict[str, str] = {}
+
+    try:
+        async with AsyncSessionLocal() as db:
+            await db.execute(text("SELECT 1"))
+        checks["database"] = "ok"
+    except Exception:
+        logger.exception("Readiness check: database unavailable")
+        checks["database"] = "unavailable"
+
+    try:
+        await redis_client.ping()
+        checks["redis"] = "ok"
+    except Exception:
+        logger.exception("Readiness check: redis unavailable")
+        checks["redis"] = "unavailable"
+
+    try:
+        # control.ping() is a blocking call (kombu/broker round-trip) --
+        # run it off the event loop so one slow/dead worker can't stall
+        # every concurrent request being handled by this process.
+        responses = await asyncio.to_thread(celery_app.control.ping, timeout=2.0)
+        checks["celery"] = "ok" if responses else "unavailable"
+    except Exception:
+        logger.exception("Readiness check: celery unavailable")
+        checks["celery"] = "unavailable"
+
+    all_ok = all(v == "ok" for v in checks.values())
+    return JSONResponse(
+        status_code=status.HTTP_200_OK if all_ok else status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={"status": "ready" if all_ok else "not_ready", "checks": checks},
+    )
