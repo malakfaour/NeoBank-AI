@@ -95,7 +95,11 @@ def process_kyc(kyc_record_id: int):
         with SyncSessionLocal() as db:
             kyc_record = db.get(KYCRecord, kyc_record_id)
             if kyc_record is None:
-                logger.warning("KYC record %s not found", kyc_record_id)
+                logger.warning(
+                    "KYC record %s not found",
+                    kyc_record_id,
+                    extra={"kyc_record_id": kyc_record_id},
+                )
                 return {"kyc_record_id": kyc_record_id, "status": "missing"}
 
             if kyc_record.status != KYCRecordStatus.pending:
@@ -109,7 +113,12 @@ def process_kyc(kyc_record_id: int):
 
             user = db.get(User, kyc_record.user_id)
             if user is None:
-                logger.warning("User %s missing for KYC record %s", kyc_record.user_id, kyc_record_id)
+                logger.warning(
+                    "User %s missing for KYC record %s",
+                    kyc_record.user_id,
+                    kyc_record_id,
+                    extra={"kyc_record_id": kyc_record_id, "user_id": kyc_record.user_id},
+                )
                 return {"kyc_record_id": kyc_record_id, "status": "missing_user"}
 
             if not kyc_record.selfie_url or not kyc_record.id_photo_url:
@@ -186,7 +195,11 @@ def process_kyc(kyc_record_id: int):
                 notification_type="KYC_REJECTED",
             )
     except Exception:
-        logger.exception("KYC processing failed for record %s", kyc_record_id)
+        logger.exception(
+            "KYC processing failed for record %s",
+            kyc_record_id,
+            extra={"kyc_record_id": kyc_record_id},
+        )
         with SyncSessionLocal() as db:
             kyc_record = db.get(KYCRecord, kyc_record_id)
             if kyc_record is not None:
