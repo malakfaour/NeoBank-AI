@@ -92,7 +92,21 @@ export default function ChatWidget() {
                 </div>
               )}
             </div>
-
+{/* Quick action chips */}
+{messages.length === 0 && (
+  <div style={{ padding: "0 16px 12px", display: "flex", gap: "8px", flexWrap: "wrap" }}>
+    {[
+      { label: "💰 My Balance", msg: "What is my current balance?" },
+      { label: "📋 Last Transactions", msg: "Show me my last transactions" },
+      { label: "💱 Exchange Rate", msg: "What is the current USD to LBP exchange rate?" },
+    ].map(({ label, msg }) => (
+      <button key={label} onClick={() => sendMessage(msg)}
+        style={{ padding: "8px 14px", borderRadius: "20px", border: "1.5px solid #00C853", backgroundColor: "#F0FDF4", color: "#00C853", fontSize: "12px", fontWeight: "600", cursor: "pointer", whiteSpace: "nowrap" }}>
+        {label}
+      </button>
+    ))}
+  </div>
+)}
             <div style={{ padding: "12px 16px", borderTop: "1px solid #F5F5F5", display: "flex", gap: "10px", alignItems: "center" }}>
               <input value={input} onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && !chatLoading && sendMessage(input)}
