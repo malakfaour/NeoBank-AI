@@ -124,11 +124,20 @@ async def test_transaction_audit_log_update_is_rejected_by_db_trigger(client, st
 
         target_row = audit_log_rows[0]
         original_action = target_row.action
+        # Captured as a plain int now -- target_row itself will be
+        # expired after the rollback() below (SQLAlchemy expires all
+        # objects in a session on rollback, regardless of
+        # expire_on_commit=False, which only suppresses expiration on
+        # commit), and this session closes at the end of this `async
+        # with` block. Accessing target_row.id later, in a NEW session,
+        # would raise DetachedInstanceError -- a plain int has no such
+        # lifecycle.
+        target_row_id = target_row.id
 
         with pytest.raises(DBAPIError):
             await db.execute(
                 text("UPDATE transaction_audit_logs SET action = :new_action WHERE id = :row_id"),
-                {"new_action": "tampered", "row_id": target_row.id},
+                {"new_action": "tampered", "row_id": target_row_id},
             )
             await db.commit()
 
@@ -139,7 +148,7 @@ async def test_transaction_audit_log_update_is_rejected_by_db_trigger(client, st
     # --- confirm the row is genuinely unchanged, not just that an exception fired ---
     async with AsyncSessionLocal() as db:
         result = await db.execute(
-            select(TransactionAuditLog).where(TransactionAuditLog.id == target_row.id)
+            select(TransactionAuditLog).where(TransactionAuditLog.id == target_row_id)
         )
         unchanged_row = result.scalar_one()
         assert unchanged_row.action == original_action

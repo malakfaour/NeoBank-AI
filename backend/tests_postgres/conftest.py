@@ -125,6 +125,48 @@ def pytest_collection_modifyitems(config, items):
 
 
 @pytest.fixture(autouse=True)
+async def _reset_db_engine_per_test():
+    """
+    Disposes app/db/session.py's module-level AsyncEngine's connection
+    pool before each test in this suite. NOT a production file change --
+    engine.dispose() is a normal SQLAlchemy operation, called from test
+    code only.
+
+    Why this is needed: `engine` in app/db/session.py is a MODULE-LEVEL
+    object, constructed exactly once (Python caches modules in
+    sys.modules). Its underlying asyncpg connections bind to whichever
+    asyncio event loop is running at the moment they are first
+    established -- a well-known asyncpg/async-SQLAlchemy constraint.
+    pytest-asyncio's default is a FRESH event loop per test function,
+    torn down after each test. Without this fixture: Test 1 creates the
+    engine (and its connections) bound to Loop A; Loop A closes at the
+    end of Test 1; Test 2 starts on a new Loop B but reuses the SAME
+    cached engine object, whose connections are still bound to the
+    now-closed Loop A -- raising "RuntimeError: Event loop is closed".
+
+    Calling engine.dispose() discards any pooled connections (harmless
+    no-op if none exist yet, e.g. before the very first test); the pool
+    then creates fresh connections bound to whichever loop is actually
+    running for the CURRENT test. This is intentionally version-agnostic
+    with respect to pytest-asyncio's own event-loop-scope configuration
+    (the classic event_loop fixture override pattern is version-
+    sensitive and was not used here) -- it only depends on
+    AsyncEngine.dispose(), stable, long-standing SQLAlchemy API.
+
+    autouse=True, no explicit dependents needed: pytest completes setup
+    for ALL autouse fixtures before a test function's body runs, so this
+    always executes before any AsyncSessionLocal() usage in that body --
+    whether via the client fixture's HTTP calls or a test's own direct
+    "async with AsyncSessionLocal() as db:" blocks.
+    """
+    if POSTGRES_TEST_URL:
+        from app.db.session import engine
+
+        await engine.dispose()
+    yield
+
+
+@pytest.fixture(autouse=True)
 def mock_redis():
     """
     Independently authored here, not imported from
