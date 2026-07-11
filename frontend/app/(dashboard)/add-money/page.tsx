@@ -63,8 +63,15 @@ const formatCard = (val: string) =>
       setNewBalance(res.data.new_balance);
       setStep("receipt");
     } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Top-up failed.";
-      setError(msg);
+    const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+if (detail && typeof detail === "object") {
+  const d = detail as { error?: string };
+  if (d.error === "wallet_frozen") setError("Your wallet is frozen. Please contact support.");
+  else if (d.error === "wallet_closed") setError("Your wallet is closed. Please contact support.");
+  else setError(JSON.stringify(d));
+} else {
+  setError(typeof detail === "string" ? detail : "Top-up failed.");
+}
     } finally { setLoading(false); }
   };
 
