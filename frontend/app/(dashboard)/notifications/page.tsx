@@ -38,13 +38,29 @@ export default function NotificationsPage() {
     finally { setLoading(false); }
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => { if (!cancelled) await fetchNotifications(); };
-    load();
-    const interval = setInterval(load, 30000);
-    return () => { cancelled = true; clearInterval(interval); };
-  }, [fetchNotifications]);
+ useEffect(() => {
+  let cancelled = false;
+  const load = async () => { if (!cancelled) await fetchNotifications(); };
+  load();
+
+  // SSE real-time stream
+  const token = localStorage.getItem("access_token");
+  if (token) {
+    const es = new EventSource(`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/api/v1/notifications/stream?token=${token}`);
+    es.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.type !== "ping") {
+          setNotifications((prev) => [data, ...prev]);
+        }
+      } catch { /* ignore parse errors */ }
+    };
+    return () => { cancelled = true; es.close(); };
+  }
+
+  const interval = setInterval(load, 30000);
+  return () => { cancelled = true; clearInterval(interval); };
+}, [fetchNotifications]);
 
   const markRead = async (id: number) => {
     try {

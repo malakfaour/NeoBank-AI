@@ -67,19 +67,18 @@ export default function DashboardPage() {
       const [balanceRes, txRes, rateRes, summaryRes] = await Promise.allSettled([
         api.get("/accounts/balance"),
         api.get("/transactions?page_size=5"),
-        api.get("/exchange/rates"),
+        api.get("/exchange/rates/live"),
         api.get(`/transactions/summary?month=${currentMonth}`),
       ]);
       if (balanceRes.status === "fulfilled") setWallets(balanceRes.value.data.balances ?? []);
       if (txRes.status === "fulfilled") setTransactions(txRes.value.data.items ?? []);
-      if (rateRes.status === "fulfilled") {
-        const rates: ExchangeRate[] = rateRes.value.data;
-        const r = Array.isArray(rates)
-          ? rates.find((x) => x.base_currency === "USD" && x.target_currency === "LBP") ?? null
-          : null;
-        setExchangeRate(r);
-        if (r?.last_updated_at) setRateAge(timeAgo(r.last_updated_at));
-      }
+     if (rateRes.status === "fulfilled") {
+  const data = rateRes.value.data;
+  setExchangeRate(data);
+  if (data?.cache_age_seconds !== undefined) {
+    setRateAge(`${data.cache_age_seconds}s ago`);
+  }
+}
       if (summaryRes.status === "fulfilled") setSummary(summaryRes.value.data.summary ?? []);
     } finally {
       setLoading(false);
