@@ -22,7 +22,7 @@ export default function ChatWidget() {
     setConfirmCard(null);
     try {
       const res = await api.post("/chatbot/message", { session_id: sessionId, message: text });
-      const reply = res.data.reply ?? res.data.message ?? "...";
+     const reply = res.data.response ?? res.data.reply ?? "...";
       setMessages((prev) => [...prev, { role: "bot", text: reply }]);
       if (res.data.confirmation_required) {
         setConfirmCard({ amount: res.data.amount, recipient: res.data.recipient });

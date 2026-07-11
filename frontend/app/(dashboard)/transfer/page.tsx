@@ -117,7 +117,7 @@ export default function TransferPage() {
     } catch (e: unknown) {
       const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
       if (detail && typeof detail === "object") {
-        const d = detail as { error?: string; available?: string; requested?: string };
+      const d = detail as { error?: string; available?: string; requested?: string; remaining?: string };
        if (d.error === "insufficient_balance") {
   setError(`Insufficient balance. Available: ${d.available}, requested: ${d.requested}`);
 } else if (d.error === "daily_limit_exceeded") {
