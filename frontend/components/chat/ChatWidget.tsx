@@ -4,7 +4,7 @@ import { useState } from "react";
 import api from "@/lib/axios";
 
 interface ChatMessage { role: "user" | "bot"; text: string; }
-interface ConfirmCard { amount?: string; recipient?: string; }
+interface PendingAction { type?: string; method?: string; recipient?: string; amount?: string; currency?: string; }
 
 export default function ChatWidget() {
   const [chatOpen, setChatOpen] = useState(false);
@@ -12,28 +12,63 @@ export default function ChatWidget() {
   const [input, setInput] = useState("");
   const [sessionId] = useState(() => `session_${Date.now()}`);
   const [chatLoading, setChatLoading] = useState(false);
-  const [confirmCard, setConfirmCard] = useState<ConfirmCard | null>(null);
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  const [showPasscode, setShowPasscode] = useState(false);
+  const [passcode, setPasscode] = useState("");
+  const [passcodeLoading, setPasscodeLoading] = useState(false);
+  const [passcodeError, setPasscodeError] = useState("");
 
-  const sendMessage = async (text: string) => {
+  const sendMessage = async (text: string, actionToken?: string) => {
     if (!text.trim()) return;
-    setMessages((prev) => [...prev, { role: "user", text }]);
+    if (!actionToken) {
+      setMessages((prev) => [...prev, { role: "user", text }]);
+    }
     setInput("");
     setChatLoading(true);
-    setConfirmCard(null);
     try {
-      const res = await api.post("/chatbot/message", { session_id: sessionId, message: text });
-     const reply = res.data.response ?? res.data.reply ?? "...";
+      const headers: Record<string, string> = {};
+      if (actionToken) headers["X-Action-Token"] = actionToken;
+      const res = await api.post("/chatbot/message", { session_id: sessionId, message: text }, { headers });
+      const reply = res.data.reply ?? "...";
       setMessages((prev) => [...prev, { role: "bot", text: reply }]);
-      if (res.data.confirmation_required) {
-        setConfirmCard({ amount: res.data.amount, recipient: res.data.recipient });
+      if (res.data.confirmation_required && res.data.pending_action) {
+        setPendingAction(res.data.pending_action);
+      } else {
+        setPendingAction(null);
       }
     } catch {
       setMessages((prev) => [...prev, { role: "bot", text: "Sorry, something went wrong." }]);
     } finally { setChatLoading(false); }
   };
 
-  const handleConfirm = () => { setConfirmCard(null); sendMessage("confirm"); };
-  const handleCancel = () => { setConfirmCard(null); setMessages((prev) => [...prev, { role: "bot", text: "Action cancelled." }]); };
+  const handleConfirmClick = () => {
+    setShowPasscode(true);
+    setPasscode("");
+    setPasscodeError("");
+  };
+
+  const handlePasscodeSubmit = async () => {
+    if (passcode.length < 6) return;
+    setPasscodeLoading(true);
+    setPasscodeError("");
+    try {
+      const res = await api.post("/auth/passcode/verify", { passcode });
+      const actionToken = res.data.action_token;
+      setShowPasscode(false);
+      setPendingAction(null);
+      setMessages((prev) => [...prev, { role: "user", text: "confirm" }]);
+      await sendMessage("confirm", actionToken);
+    } catch {
+      setPasscodeError("Incorrect passcode. Try again.");
+    } finally { setPasscodeLoading(false); }
+  };
+
+  const handleCancel = async () => {
+    setPendingAction(null);
+    setShowPasscode(false);
+    setMessages((prev) => [...prev, { role: "user", text: "cancel" }]);
+    await sendMessage("cancel");
+  };
 
   return (
     <>
@@ -43,10 +78,11 @@ export default function ChatWidget() {
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
       </button>
 
-      {/* Chat panel */}
       {chatOpen && (
         <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.4)", zIndex: 100, display: "flex", alignItems: "flex-end" }}>
           <div style={{ backgroundColor: "#fff", borderRadius: "24px 24px 0 0", width: "100%", height: "70vh", display: "flex", flexDirection: "column", boxSizing: "border-box" }}>
+
+            {/* Header */}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "20px 20px 12px", borderBottom: "1px solid #F5F5F5" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                 <div style={{ width: "36px", height: "36px", borderRadius: "50%", backgroundColor: "#00C853", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -60,6 +96,7 @@ export default function ChatWidget() {
               <button onClick={() => setChatOpen(false)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "20px", color: "#aaa" }}>✕</button>
             </div>
 
+            {/* Messages */}
             <div style={{ flex: 1, overflowY: "auto", padding: "16px", display: "flex", flexDirection: "column", gap: "10px" }}>
               {messages.length === 0 && (
                 <div style={{ textAlign: "center", marginTop: "40px" }}>
@@ -80,33 +117,66 @@ export default function ChatWidget() {
                   </div>
                 </div>
               )}
-              {confirmCard && (
+
+              {/* Confirm card */}
+              {pendingAction && !showPasscode && (
                 <div style={{ backgroundColor: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: "16px", padding: "16px", display: "flex", flexDirection: "column", gap: "10px" }}>
-                  <p style={{ fontSize: "14px", fontWeight: "600", color: "#000" }}>Confirm action?</p>
-                  {confirmCard.recipient && <p style={{ fontSize: "13px", color: "#555" }}>To: {confirmCard.recipient}</p>}
-                  {confirmCard.amount && <p style={{ fontSize: "13px", color: "#555" }}>Amount: {confirmCard.amount}</p>}
+                  <p style={{ fontSize: "14px", fontWeight: "700", color: "#000" }}>🏦 Confirm Transfer</p>
+                  {pendingAction.recipient && <p style={{ fontSize: "13px", color: "#555" }}>To: {pendingAction.recipient}</p>}
+                  {pendingAction.amount && pendingAction.currency && (
+                    <p style={{ fontSize: "13px", color: "#555" }}>Amount: {pendingAction.amount} {pendingAction.currency}</p>
+                  )}
+                  <p style={{ fontSize: "11px", color: "#aaa" }}>⏱ Expires in 5 minutes</p>
                   <div style={{ display: "flex", gap: "8px" }}>
-                    <button onClick={handleConfirm} style={{ flex: 1, backgroundColor: "#00C853", color: "#fff", border: "none", borderRadius: "10px", padding: "10px", fontWeight: "700", cursor: "pointer" }}>Confirm</button>
-                    <button onClick={handleCancel} style={{ flex: 1, backgroundColor: "#F5F5F5", color: "#333", border: "none", borderRadius: "10px", padding: "10px", fontWeight: "600", cursor: "pointer" }}>Cancel</button>
+                    <button onClick={handleConfirmClick} style={{ flex: 1, backgroundColor: "#00C853", color: "#fff", border: "none", borderRadius: "10px", padding: "10px", fontWeight: "700", cursor: "pointer", fontSize: "13px" }}>
+                      Confirm
+                    </button>
+                    <button onClick={handleCancel} style={{ flex: 1, backgroundColor: "#F5F5F5", color: "#333", border: "none", borderRadius: "10px", padding: "10px", fontWeight: "600", cursor: "pointer", fontSize: "13px" }}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Passcode sheet */}
+              {showPasscode && (
+                <div style={{ backgroundColor: "#fff", border: "1.5px solid #E5E7EB", borderRadius: "16px", padding: "16px", display: "flex", flexDirection: "column", gap: "10px" }}>
+                  <p style={{ fontSize: "14px", fontWeight: "700", color: "#000" }}>🔐 Enter Passcode</p>
+                  <p style={{ fontSize: "12px", color: "#aaa" }}>Verify your identity to complete the transfer</p>
+                  <input type="password" placeholder="••••••" maxLength={6} value={passcode}
+                    onChange={(e) => { setPasscode(e.target.value.replace(/\D/g, "")); setPasscodeError(""); }}
+                    style={{ width: "100%", border: "1.5px solid #E5E7EB", borderRadius: "12px", padding: "10px 14px", fontSize: "20px", letterSpacing: "8px", outline: "none", boxSizing: "border-box", textAlign: "center" }} />
+                  {passcodeError && <p style={{ color: "#EF4444", fontSize: "12px" }}>{passcodeError}</p>}
+                  <div style={{ display: "flex", gap: "8px" }}>
+                    <button onClick={handlePasscodeSubmit} disabled={passcode.length < 6 || passcodeLoading}
+                      style={{ flex: 1, backgroundColor: passcode.length < 6 ? "#E5E7EB" : "#00C853", color: passcode.length < 6 ? "#999" : "#fff", border: "none", borderRadius: "10px", padding: "10px", fontWeight: "700", cursor: passcode.length < 6 ? "not-allowed" : "pointer", fontSize: "13px" }}>
+                      {passcodeLoading ? "Verifying..." : "Verify"}
+                    </button>
+                    <button onClick={() => { setShowPasscode(false); setPasscode(""); }} style={{ flex: 1, backgroundColor: "#F5F5F5", color: "#333", border: "none", borderRadius: "10px", padding: "10px", fontWeight: "600", cursor: "pointer", fontSize: "13px" }}>
+                      Back
+                    </button>
                   </div>
                 </div>
               )}
             </div>
-{/* Quick action chips */}
-{messages.length === 0 && (
-  <div style={{ padding: "0 16px 12px", display: "flex", gap: "8px", flexWrap: "wrap" }}>
-    {[
-      { label: "💰 My Balance", msg: "What is my current balance?" },
-      { label: "📋 Last Transactions", msg: "Show me my last transactions" },
-      { label: "💱 Exchange Rate", msg: "What is the current USD to LBP exchange rate?" },
-    ].map(({ label, msg }) => (
-      <button key={label} onClick={() => sendMessage(msg)}
-        style={{ padding: "8px 14px", borderRadius: "20px", border: "1.5px solid #00C853", backgroundColor: "#F0FDF4", color: "#00C853", fontSize: "12px", fontWeight: "600", cursor: "pointer", whiteSpace: "nowrap" }}>
-        {label}
-      </button>
-    ))}
-  </div>
-)}
+
+            {/* Quick action chips */}
+            {messages.length === 0 && (
+              <div style={{ padding: "0 16px 12px", display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                {[
+                  { label: "💰 My Balance", msg: "What is my current balance?" },
+                  { label: "📋 Last Transactions", msg: "Show me my last transactions" },
+                  { label: "💱 Exchange Rate", msg: "What is the current USD to LBP exchange rate?" },
+                ].map(({ label, msg }) => (
+                  <button key={label} onClick={() => sendMessage(msg)}
+                    style={{ padding: "8px 14px", borderRadius: "20px", border: "1.5px solid #00C853", backgroundColor: "#F0FDF4", color: "#00C853", fontSize: "12px", fontWeight: "600", cursor: "pointer", whiteSpace: "nowrap" }}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Input */}
             <div style={{ padding: "12px 16px", borderTop: "1px solid #F5F5F5", display: "flex", gap: "10px", alignItems: "center" }}>
               <input value={input} onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && !chatLoading && sendMessage(input)}
