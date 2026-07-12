@@ -173,7 +173,7 @@ def score_with_isolation_forest(db: Session, transaction: Transaction) -> float:
     # contract defined in this module and consumed by
     # app/tasks/transaction_tasks.py's score_transaction task.
     raw_score = model.decision_function([features])[0]
-    fraud_score = max(0.0, min(1.0, 0.5 - raw_score))
+    fraud_score = float(max(0.0, min(1.0, 0.5 - raw_score)))
     return fraud_score
 
 def _compute_xgb_features(db: Session, transaction: Transaction) -> list[float]:
