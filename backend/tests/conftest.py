@@ -42,7 +42,9 @@ os.environ["SMTP_PASSWORD"] = "test_password"
 os.environ["TWILIO_ACCOUNT_SID"] = "test_sid"
 os.environ["TWILIO_AUTH_TOKEN"] = "test_token"
 os.environ["TWILIO_FROM_NUMBER"] = "+15555555555"
-os.environ["PAYMENT_GATEWAY_URL"] = "https://sandbox.paymentgateway.example.com/v1/charge"
+os.environ["PAYMENT_GATEWAY_URL"] = (
+    "https://sandbox.paymentgateway.example.com/v1/charge"
+)
 
 from app.db.base import Base  # noqa: E402
 from app.db.session import engine  # noqa: E402
@@ -72,6 +74,8 @@ async def create_tables():
         Base.metadata.tables["kyc_records"],
         Base.metadata.tables["model_metrics"],
         Base.metadata.tables["notifications"],
+        Base.metadata.tables["push_subscriptions"],
+        Base.metadata.tables["chat_sessions"],
         Base.metadata.tables["chatbot_logs"],
     ]
     async with engine.begin() as conn:
@@ -88,14 +92,15 @@ async def create_tables():
 @pytest.fixture(autouse=True)
 async def mock_redis():
     fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
-    with patch("app.core.redis.redis_client", fake), \
-         patch("app.core.cache_utils.redis_client", fake), \
-         patch("app.main.redis_client", fake), \
-         patch("app.services.exchange_cache.redis_client", fake), \
-         patch("app.services.otp.redis_client", fake), \
-         patch("app.services.rate_limiter.redis_client", fake):
+    with (
+        patch("app.core.redis.redis_client", fake),
+        patch("app.core.cache_utils.redis_client", fake),
+        patch("app.main.redis_client", fake),
+        patch("app.services.exchange_cache.redis_client", fake),
+        patch("app.services.otp.redis_client", fake),
+        patch("app.services.rate_limiter.redis_client", fake),
+    ):
         yield fake
-
 
 
 class _FakeGatewayResponse:
@@ -146,12 +151,14 @@ def mock_payment_gateway(monkeypatch):
         _FakeGatewayClient,
     )
 
+
 @pytest_asyncio.fixture
 async def client():
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as ac:
         yield ac
+
 
 @pytest_asyncio.fixture
 async def db_session():
