@@ -46,13 +46,12 @@ def generate_synthetic_history(
         }
     )
 
-
 def load_exchange_dataset(
     latest_rate: float,
 ) -> pd.DataFrame:
     """
-    Load real exchange history and
-    backfill missing dates synthetically.
+    Load exchange history.
+    Backfill to provide enough history for forecasting models.
     """
 
     df = pd.read_csv(
@@ -66,31 +65,31 @@ def load_exchange_dataset(
         .astype(bool)
     )
 
+    # Extend history to 180 days for ML training
     min_date = df["date"].min()
-    max_date = df["date"].max()
 
-    expected_dates = set(
-        pd.date_range(
-            min_date,
-            max_date,
-        ).date
-    )
+    required_start = (
+        pd.Timestamp(max_date := min_date)
+        - pd.Timedelta(days=180)
+    ).date()
 
-    existing_dates = set(
-        df["date"]
-    )
+    existing_dates = set(df["date"])
 
     missing_dates = sorted(
-        expected_dates - existing_dates
+        set(
+            pd.date_range(
+                required_start,
+                min_date - timedelta(days=1),
+            ).date
+        )
+        - existing_dates
     )
 
     if missing_dates:
-        synthetic_rows = pd.DataFrame(
-            {
-                "date": missing_dates,
-                "rate": latest_rate,
-                "synthetic": True,
-            }
+        synthetic_rows = generate_synthetic_history(
+            missing_dates[0],
+            missing_dates[-1],
+            latest_rate,
         )
 
         df = pd.concat(

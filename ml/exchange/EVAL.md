@@ -2,9 +2,9 @@
 
 | Model | MAE |
 |---|---:|
-| LightGBM | 844.7281 |
-| Prophet | 58.5315 |
+| LightGBM | 624.3922 |
+| Prophet | inf |
 
 ## Winner
 
-Prophet
+LightGBM

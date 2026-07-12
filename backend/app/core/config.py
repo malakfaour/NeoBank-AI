@@ -47,12 +47,15 @@ class Settings(BaseSettings):
 =======
     FORECAST_MODEL: str = "LightGBM"
     FEE_PCT: float = 0.01
+<<<<<<< ours
     FORECAST_MODEL: str = "LightGBM"
 <<<<<<< HEAD
 >>>>>>> d3ffa24 (feat(exchange): DEVATTECH-94 DS-2 exchange forecast — dataset, LightGBM+Prophet training, FORECAST_MODEL config, /exchange/forecast serves winner)
 =======
     FEE_PCT: float = 0.01
 >>>>>>> 3a2716c (feat(exchange): add rate history and configurable exchange fee)
+=======
+>>>>>>> theirs
     REQUIRE_ACTION_TOKEN: bool = False
 
     # AWS / S3

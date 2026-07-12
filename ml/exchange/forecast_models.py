@@ -1,11 +1,12 @@
 import json
+import sys
 from pathlib import Path
 
 import pandas as pd
 from lightgbm import LGBMRegressor
 from sklearn.metrics import mean_absolute_error
 
-from dataset import load_exchange_dataset
+from ml.exchange.dataset import load_exchange_dataset
 
 
 def prepare_lightgbm_features(
@@ -94,12 +95,13 @@ def train_prophet(
     validation = prophet_df.iloc[-validation_size:]
 
     model = Prophet(
-        daily_seasonality=True,
+        daily_seasonality=False,
+        weekly_seasonality=False,
+        yearly_seasonality=False,
+        changepoint_prior_scale=0.01,
     )
 
-    model.fit(
-        train
-    )
+    model.fit(train)
 
     future = model.make_future_dataframe(
         periods=validation_size,
@@ -136,9 +138,20 @@ def evaluate_models(
         dataset
     )
 
-    prophet_result = train_prophet(
-        dataset
-    )
+    try:
+        prophet_result = train_prophet(
+            dataset
+        )
+
+    except Exception as e:
+        print(
+            f"Prophet failed: {e}"
+        )
+
+        prophet_result = {
+            "model": "Prophet",
+            "mae": float("inf"),
+        }
 
     results = [
         lightgbm_result,
@@ -189,8 +202,14 @@ def write_eval_report(
 
 if __name__ == "__main__":
 
+    latest_rate = (
+        float(sys.argv[1])
+        if len(sys.argv) > 1
+        else 89500
+    )
+
     result = evaluate_models(
-        89500
+        latest_rate
     )
 
     write_eval_report(

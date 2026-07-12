@@ -381,7 +381,6 @@ async def execute_exchange(
     await db.refresh(credit_transaction)
 
     await invalidate_balance_cache(user_id)
-<<<<<<< HEAD
     # Real, separate audit entries for BOTH legs -- one append_audit()
     # call per Transaction, since TransactionAuditLog.transaction_id is a
     # required, single-target FK (one entry cannot cover two
@@ -450,7 +449,6 @@ async def execute_exchange(
     # modified, per instruction. The two transaction ids exist in the DB
     # and in the audit metadata above; DEVATTECH-92 reads directly from
     # the DB, not through this response.
-=======
 
     await append_audit(
         db,
@@ -464,7 +462,6 @@ async def execute_exchange(
             "converted_amount": str(converted_amount),
         },
     )
->>>>>>> 3a2716c (feat(exchange): add rate history and configurable exchange fee)
     return {
         "exchange_id": exchange_id,
         "status": "executed",

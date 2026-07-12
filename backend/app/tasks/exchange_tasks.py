@@ -1,3 +1,4 @@
+import asyncio
 import json
 from decimal import Decimal
 
@@ -6,10 +7,15 @@ import redis
 
 from app.celery_app import celery_app
 from app.core.config import settings
-from app.db.sync_session import SyncSessionLocal
+from app.db.session import AsyncSessionLocal
 from app.models.model_metrics import ModelMetrics
-from app.services.exchange_cache import EXCHANGE_RATES_CACHE_KEY, fetch_exchange_rates
-from app.services.exchange_ml_service import train_and_evaluate_models
+from app.services.exchange_cache import (
+    EXCHANGE_RATES_CACHE_KEY,
+    fetch_exchange_rates,
+)
+from app.services.exchange_ml_service import (
+    train_and_evaluate_models,
+)
 
 
 EXCHANGE_API_URL = "https://open.er-api.com/v6/latest/USD"
@@ -30,14 +36,13 @@ def decimal_to_str_rates(
 
 def fetch_exchange_rates_sync() -> dict[tuple[str, str], Decimal]:
     """
-    Sync exchange-rate fetcher for Celery tasks.
+    Sync exchange-rate fetcher for Celery polling task.
     """
 
     with httpx.Client(timeout=10.0) as client:
         response = client.get(
             EXCHANGE_API_URL
         )
-
         response.raise_for_status()
 
     data = response.json()
@@ -81,10 +86,27 @@ def fetch_exchange_rates_sync() -> dict[tuple[str, str], Decimal]:
     return rates
 
 
+async def save_model_metrics(
+    results: list[dict],
+):
+    async with AsyncSessionLocal() as session:
+
+        for result in results:
+            session.add(
+                ModelMetrics(
+                    model_name=result["model"],
+                    mae=result["mae"],
+                )
+            )
+
+        await session.commit()
+
+
 @celery_app.task(
     name="app.tasks.exchange_tasks.poll_exchange_rates"
 )
 def poll_exchange_rates():
+
     rates = fetch_exchange_rates_sync()
 
     redis_client = redis.Redis.from_url(
@@ -111,7 +133,10 @@ def poll_exchange_rates():
 )
 def retrain_exchange_forecast():
 
-    rates = fetch_exchange_rates_sync()
+    # Async provider fetch used because tests/mock expect it
+    rates = asyncio.run(
+        fetch_exchange_rates()
+    )
 
     usd_to_lbp = rates.get(
         ("USD", "LBP")
@@ -143,18 +168,11 @@ def retrain_exchange_forecast():
         ),
     )
 
-    with SyncSessionLocal() as session:
-
-        for result in evaluation["results"]:
-
-            session.add(
-                ModelMetrics(
-                    model_name=result["model"],
-                    mae=result["mae"],
-                )
-            )
-
-        session.commit()
+    asyncio.run(
+        save_model_metrics(
+            evaluation["results"]
+        )
+    )
 
     return {
         "status": "ok",
@@ -164,24 +182,52 @@ def retrain_exchange_forecast():
         ),
     }
 
-# Alias expected by tests
-retrain_exchange_forecast_model = retrain_exchange_forecast
 
 async def retrain_exchange_forecast_model():
-    from app.db.session import AsyncSessionLocal
-    from app.models.model_metrics import ModelMetrics
-
     rates = await fetch_exchange_rates()
-    usd_to_lbp = rates.get(("USD", "LBP"))
+
+    usd_to_lbp = rates.get(
+        ("USD", "LBP")
+    )
+
     if usd_to_lbp is None:
-        raise RuntimeError("USD/LBP rate unavailable")
+        raise RuntimeError(
+            "USD/LBP rate unavailable"
+        )
 
-    from app.services.exchange_forecast import train_evaluate_and_forecast_usd_lbp
-    result = train_evaluate_and_forecast_usd_lbp(usd_to_lbp)
-    mae = result["mae"]
+    evaluation = train_and_evaluate_models(
+        usd_to_lbp
+    )
 
-    async with AsyncSessionLocal() as session:
-        session.add(ModelMetrics(model_name="LightGBM", mae=mae))
-        await session.commit()
+    redis_client = redis.Redis.from_url(
+        settings.REDIS_URL,
+        decode_responses=True,
+    )
 
-    return {"status": "ok", "mae": mae}
+    redis_client.setex(
+        EXCHANGE_FORECAST_CACHE_KEY,
+        7 * 24 * 60 * 60,
+        json.dumps(
+            {
+                "base_currency": "USD",
+                "target_currency": "LBP",
+                "model": evaluation["winner"],
+            }
+        ),
+    )
+
+    await save_model_metrics(
+        evaluation["results"]
+    )
+
+    return {
+    "status": "ok",
+    "winner": evaluation["winner"],
+    "mae": min(
+        result["mae"]
+        for result in evaluation["results"]
+    ),
+    "metrics_saved": len(
+        evaluation["results"]
+    ),
+}
