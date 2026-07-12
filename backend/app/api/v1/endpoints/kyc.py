@@ -75,6 +75,18 @@ async def upload_kyc_documents(
             detail="User not found",
         )
 
+    kyc_record = await db.scalar(select(KYCRecord).where(KYCRecord.user_id == user.id))
+    if (
+        kyc_record
+        and kyc_record.status == KYCRecordStatus.pending
+        and kyc_record.selfie_url
+        and kyc_record.id_photo_url
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="KYC verification is already processing",
+        )
+
     timestamp = int(time())
     selfie_key = _build_kyc_key(user.id, "selfie", timestamp)
     id_photo_key = _build_kyc_key(user.id, "id", timestamp)
@@ -103,7 +115,6 @@ async def upload_kyc_documents(
         ),
     )
 
-    kyc_record = await db.scalar(select(KYCRecord).where(KYCRecord.user_id == user.id))
     if not kyc_record:
         kyc_record = KYCRecord(user_id=user.id)
         db.add(kyc_record)
