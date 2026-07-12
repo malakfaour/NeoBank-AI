@@ -30,8 +30,8 @@ class ConvertCurrencyResponse(BaseModel):
     amount: Decimal
     rate: Decimal
     converted_amount: Decimal
-
-
+    fee_pct: float
+    fee_amount: Decimal
 class ExchangeExecutionRequest(BaseModel):
     from_currency: Literal["USD", "LBP"]
     to_currency: Literal["USD", "LBP"]
