@@ -83,3 +83,33 @@ def train_and_forecast_usd_lbp(
     days: int = 7,
 ) -> list[dict[str, Decimal | date]]:
     return train_evaluate_and_forecast_usd_lbp(latest_rate, days)["predictions"]
+async def fetch_exchange_rates() -> dict[tuple[str, str], Decimal]:
+    """
+    Async exchange-rate fetcher for API endpoints.
+    Fetches live rates from open.er-api.com.
+    """
+    import httpx
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.get("https://open.er-api.com/v6/latest/USD")
+        response.raise_for_status()
+
+    data = response.json()
+    if data.get("result") != "success":
+        raise RuntimeError("Exchange rate provider returned unsuccessful response")
+
+    provider_rates = data.get("rates", {})
+    usd_to_lbp = provider_rates.get("LBP")
+    usd_to_eur = provider_rates.get("EUR")
+
+    if usd_to_lbp is None:
+        raise RuntimeError("LBP rate was not found")
+
+    rates = {
+        ("USD", "LBP"): Decimal(str(usd_to_lbp)),
+        ("LBP", "USD"): Decimal("1") / Decimal(str(usd_to_lbp)),
+    }
+    if usd_to_eur:
+        rates[("USD", "EUR")] = Decimal(str(usd_to_eur))
+        rates[("EUR", "USD")] = Decimal("1") / Decimal(str(usd_to_eur))
+
+    return rates

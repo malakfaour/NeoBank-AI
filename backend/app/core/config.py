@@ -42,7 +42,12 @@ class Settings(BaseSettings):
     KYC_MATCH_FLAG_THRESHOLD: float = 0.60
     KYC_LIVENESS_THRESHOLD: float = 0.7
     GROQ_API_KEY: str = ""
+<<<<<<< HEAD
 
+=======
+    FORECAST_MODEL: str = "LightGBM"
+    FORECAST_MODEL: str = "LightGBM"
+>>>>>>> d3ffa24 (feat(exchange): DEVATTECH-94 DS-2 exchange forecast — dataset, LightGBM+Prophet training, FORECAST_MODEL config, /exchange/forecast serves winner)
     REQUIRE_ACTION_TOKEN: bool = False
 
     # AWS / S3

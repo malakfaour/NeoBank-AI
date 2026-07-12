@@ -25,6 +25,7 @@ from app.schemas.exchange import (
 )
 from app.schemas.user import CurrentUser
 from app.services.audit_log import append_audit
+from app.core.config import settings
 from app.services.exchange_cache import (
     get_cached_exchange_rates,
     get_cached_exchange_rates_with_age,
@@ -32,8 +33,12 @@ from app.services.exchange_cache import (
 )
 from app.services.exchange_forecast import train_and_forecast_usd_lbp
 from app.services.market_hours import get_market_status, is_market_open
+<<<<<<< HEAD
 from app.services.wallet_status import WalletClosedError, WalletFrozenError, assert_wallet_active
 from app.tasks.exchange_tasks import fetch_exchange_rates
+=======
+from app.services.exchange_cache import fetch_exchange_rates
+>>>>>>> d3ffa24 (feat(exchange): DEVATTECH-94 DS-2 exchange forecast — dataset, LightGBM+Prophet training, FORECAST_MODEL config, /exchange/forecast serves winner)
 
 
 router = APIRouter(prefix="/exchange", tags=["exchange"])
