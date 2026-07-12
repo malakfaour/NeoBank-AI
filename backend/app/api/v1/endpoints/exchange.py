@@ -111,6 +111,7 @@ async def get_live_exchange_rate(
             "provider": "redis-cache",
             "last_updated_at": None,
             "cache_age_seconds": cache_age_seconds or 0,
+            "stale": (cache_age_seconds or 0) > 300,
         }
 
     latest_db_rate = await db.scalar(
@@ -144,6 +145,7 @@ async def get_live_exchange_rate(
         "provider": latest_db_rate.provider,
         "last_updated_at": last_updated_at,
         "cache_age_seconds": cache_age_seconds,
+        "stale": cache_age_seconds > 300,
     }
 
 

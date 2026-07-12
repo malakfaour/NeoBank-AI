@@ -90,25 +90,39 @@ async def get_latest_exchange_rate() -> Any | None:
         return json.loads(cached_data)
     except (json.JSONDecodeError, TypeError):
         return cached_data
-
 async def fetch_exchange_rates() -> dict[tuple[str, str], Decimal]:
+    """
+    Async exchange-rate fetcher for API endpoints.
+    Fetches live rates from open.er-api.com with retry + backoff.
+    Never overwrites exchange:latest on error — stale beats empty.
+    """
+    import asyncio
     import httpx
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        response = await client.get("https://open.er-api.com/v6/latest/USD")
-        response.raise_for_status()
-    data = response.json()
-    if data.get("result") != "success":
-        raise RuntimeError("Exchange rate provider returned unsuccessful response")
-    provider_rates = data.get("rates", {})
-    usd_to_lbp = provider_rates.get("LBP")
-    usd_to_eur = provider_rates.get("EUR")
-    if usd_to_lbp is None:
-        raise RuntimeError("LBP rate was not found")
-    rates = {
-        ("USD", "LBP"): Decimal(str(usd_to_lbp)),
-        ("LBP", "USD"): Decimal("1") / Decimal(str(usd_to_lbp)),
-    }
-    if usd_to_eur:
-        rates[("USD", "EUR")] = Decimal(str(usd_to_eur))
-        rates[("EUR", "USD")] = Decimal("1") / Decimal(str(usd_to_eur))
-    return rates
+
+    last_exc = None
+    for attempt in range(3):
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get("https://open.er-api.com/v6/latest/USD")
+                response.raise_for_status()
+            data = response.json()
+            if data.get("result") != "success":
+                raise RuntimeError("Exchange rate provider returned unsuccessful response")
+            provider_rates = data.get("rates", {})
+            usd_to_lbp = provider_rates.get("LBP")
+            usd_to_eur = provider_rates.get("EUR")
+            if usd_to_lbp is None:
+                raise RuntimeError("LBP rate was not found")
+            rates = {
+                ("USD", "LBP"): Decimal(str(usd_to_lbp)),
+                ("LBP", "USD"): Decimal("1") / Decimal(str(usd_to_lbp)),
+            }
+            if usd_to_eur:
+                rates[("USD", "EUR")] = Decimal(str(usd_to_eur))
+                rates[("EUR", "USD")] = Decimal("1") / Decimal(str(usd_to_eur))
+            return rates
+        except Exception as exc:
+            last_exc = exc
+            if attempt < 2:
+                await asyncio.sleep(2 ** attempt)
+    raise last_exc

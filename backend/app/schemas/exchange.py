@@ -21,6 +21,7 @@ class LiveExchangeRateResponse(BaseModel):
     provider: str | None = None
     last_updated_at: datetime | None = None
     cache_age_seconds: int
+    stale: bool = False
 
 
 class ConvertCurrencyResponse(BaseModel):
