@@ -75,6 +75,7 @@ async def create_tables():
         Base.metadata.tables["model_metrics"],
         Base.metadata.tables["notifications"],
         Base.metadata.tables["push_subscriptions"],
+        Base.metadata.tables["chat_sessions"],
         Base.metadata.tables["chatbot_logs"],
     ]
     async with engine.begin() as conn:
