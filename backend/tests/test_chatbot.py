@@ -476,3 +476,107 @@ async def test_chatbot_confirm_without_pending_action_does_not_execute(
     assert data["confirmation_required"] is False
     assert "expired" in data["reply"].lower()
     mock_execute.assert_not_called()
+
+async def test_chatbot_confirm_action_token_replay_returns_403(
+    client,
+    auth_tokens,
+    mock_redis,
+):
+    """
+    X-Action-Token single-use on chat-confirm (DEVATTECH-120): a token
+    already consumed by one confirm cannot be replayed on a second one.
+    """
+    user_id = await _get_chatbot_test_user_id()
+    action_token = "chatbot-replay-token"
+
+    session_1 = "test-replay-session-1"
+    await _store_test_pending_transfer(mock_redis, session_1, user_id)
+    await mock_redis.set(f"action_token:{user_id}", action_token, ex=300)
+
+    mock_execute = AsyncMock(return_value=_transfer_receipt())
+
+    with (
+        patch("httpx.AsyncClient.post", new=_groq_success("GENERAL", 0.1)),
+        patch(
+            "app.api.v1.endpoints.chatbot.execute_transfer_by_mobile",
+            new=mock_execute,
+        ),
+    ):
+        first = await client.post(
+            "/api/v1/chatbot/message",
+            json={"session_id": session_1, "message": "confirm"},
+            headers={
+                "Authorization": f"Bearer {auth_tokens['access_token']}",
+                "X-Action-Token": action_token,
+            },
+        )
+
+    assert first.status_code == 200, first.text
+    mock_execute.assert_awaited_once()
+
+    # A second, separate pending transfer -- replaying the same (now
+    # consumed) token against it must be rejected.
+    session_2 = "test-replay-session-2"
+    await _store_test_pending_transfer(mock_redis, session_2, user_id)
+
+    with (
+        patch("httpx.AsyncClient.post", new=_groq_success("GENERAL", 0.1)),
+        patch(
+            "app.api.v1.endpoints.chatbot.execute_transfer_by_mobile",
+            new=mock_execute,
+        ),
+    ):
+        second = await client.post(
+            "/api/v1/chatbot/message",
+            json={"session_id": session_2, "message": "confirm"},
+            headers={
+                "Authorization": f"Bearer {auth_tokens['access_token']}",
+                "X-Action-Token": action_token,
+            },
+        )
+
+    assert second.status_code == 403
+    # Still only the first call -- replay must not execute a second transfer.
+    mock_execute.assert_awaited_once()
+
+
+async def test_chatbot_confirm_another_users_action_token_returns_403(
+    client,
+    auth_tokens,
+    mock_redis,
+):
+    """
+    Cross-user token on chat-confirm (DEVATTECH-120): a token issued to a
+    different user cannot be used to confirm this user's pending transfer.
+    """
+    user_id = await _get_chatbot_test_user_id()
+    other_user_id = user_id + 999999  # doesn't need to be a real user row
+    other_users_token = "someone-elses-token"
+
+    session_id = "test-cross-user-token-session"
+    await _store_test_pending_transfer(mock_redis, session_id, user_id)
+    # Token stored under a DIFFERENT user's action_token key.
+    await mock_redis.set(f"action_token:{other_user_id}", other_users_token, ex=300)
+
+    mock_execute = AsyncMock(return_value=_transfer_receipt())
+
+    with (
+        patch("httpx.AsyncClient.post", new=_groq_success("GENERAL", 0.1)),
+        patch(
+            "app.api.v1.endpoints.chatbot.execute_transfer_by_mobile",
+            new=mock_execute,
+        ),
+    ):
+        response = await client.post(
+            "/api/v1/chatbot/message",
+            json={"session_id": session_id, "message": "confirm"},
+            headers={
+                "Authorization": f"Bearer {auth_tokens['access_token']}",
+                "X-Action-Token": other_users_token,
+            },
+        )
+
+    assert response.status_code == 403
+    mock_execute.assert_not_called()
+    # The pending action must still be there -- rejected before execution.
+    assert await mock_redis.get(f"chat_action:{session_id}") is not None
