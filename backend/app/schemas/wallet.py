@@ -20,6 +20,18 @@ class WalletResponse(BaseModel):
         from_attributes = True
 
 
+class WalletStatusEnum(str, Enum):
+    active = "active"
+    frozen = "frozen"
+    closed = "closed"
+
+
+class WalletStatusChangeResponse(BaseModel):
+    wallet_id: int
+    status: WalletStatusEnum
+    message: str
+
+
 class CardTopUpRequest(BaseModel):
     wallet_id: int = Field(..., gt=0)
     amount: Decimal = Field(..., gt=0)

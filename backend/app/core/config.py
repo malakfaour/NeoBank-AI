@@ -1,4 +1,6 @@
+from decimal import Decimal
 from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _ENV_FILE = str(Path(__file__).parent.parent.parent.parent / ".env")
@@ -38,6 +40,7 @@ class Settings(BaseSettings):
     KYC_MATCH_APPROVE_THRESHOLD: float = 0.80
     KYC_MATCH_FLAG_THRESHOLD: float = 0.60
     GROQ_API_KEY: str = ""
+
     REQUIRE_ACTION_TOKEN: bool = False
 
     # AWS / S3
@@ -48,6 +51,12 @@ class Settings(BaseSettings):
     S3_BUCKET: str = ""
     S3_REGION: str = ""
     S3_ENDPOINT_URL: str = ""
+
+    # FCM Web Push
+    FCM_PROJECT_ID: str = ""
+    FCM_CLIENT_EMAIL: str = ""
+    FCM_PRIVATE_KEY: str = ""
+    FCM_TIMEOUT_SECONDS: float = 5.0
 
     # Email
     EMAIL_PROVIDER: str = "console"  # console, smtp, sendgrid
@@ -63,11 +72,18 @@ class Settings(BaseSettings):
     TWILIO_ACCOUNT_SID: str = ""
     TWILIO_AUTH_TOKEN: str = ""
     TWILIO_FROM_NUMBER: str = ""
+    HIGH_VALUE_SMS_THRESHOLD: Decimal = Decimal("500")
 
     # Frontend
     NEXT_PUBLIC_API_URL: str = "http://localhost:8000"
 
     # Bill Payments
     BILLER_API_URL: str = "http://localhost:9000/mock-biller"
+
+    # DEVATTECH-107: per-user daily transfer cap (send_money). Default is a
+    # placeholder pending a real product/compliance figure -- override via
+    # the DAILY_TRANSFER_LIMIT_USD env var.
+    DAILY_TRANSFER_LIMIT_USD: Decimal = Decimal("10000")
+
 
 settings = Settings()
