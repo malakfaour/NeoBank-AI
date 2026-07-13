@@ -206,6 +206,50 @@ async def test_upload_avatar_resizes_and_stores_avatar(client, monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_upload_avatar_deletes_previous_avatar_after_replacement(
+    client, monkeypatch
+):
+    tokens = await _register_user(client, "avatar-replacement")
+    uploaded_keys = []
+    deleted_keys = []
+    timestamps = iter([1000, 2000])
+
+    def fake_upload_file(
+        file_source, destination_key, bucket_name=None, extra_args=None
+    ):
+        uploaded_keys.append(destination_key)
+        return destination_key
+
+    def fake_delete_file(s3_key, bucket_name=None):
+        deleted_keys.append(s3_key)
+
+    monkeypatch.setattr("app.api.v1.endpoints.users.upload_file", fake_upload_file)
+    monkeypatch.setattr("app.api.v1.endpoints.users.delete_file", fake_delete_file)
+    monkeypatch.setattr("app.api.v1.endpoints.users.time", lambda: next(timestamps))
+
+    image = Image.new("RGB", (32, 32), color="red")
+    payload = BytesIO()
+    image.save(payload, format="PNG")
+    request_files = {"avatar": ("avatar.png", payload.getvalue(), "image/png")}
+    headers = {"Authorization": f"Bearer {tokens['access_token']}"}
+
+    first_response = await client.post(
+        "/api/v1/users/me/avatar", headers=headers, files=request_files
+    )
+    second_response = await client.post(
+        "/api/v1/users/me/avatar", headers=headers, files=request_files
+    )
+
+    assert first_response.status_code == 200, first_response.text
+    assert second_response.status_code == 200, second_response.text
+    assert len(uploaded_keys) == 2
+    assert uploaded_keys[0].endswith("/avatar_1000.jpg")
+    assert uploaded_keys[1].endswith("/avatar_2000.jpg")
+    assert deleted_keys == [uploaded_keys[0]]
+    assert deleted_keys[0] != uploaded_keys[1]
+
+
+@pytest.mark.anyio
 async def test_users_me_requires_authentication(client):
     response = await client.get("/api/v1/users/me")
     assert response.status_code in {401, 403}
