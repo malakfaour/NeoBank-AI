@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 
+from app.api.v1.endpoints.biometric import router as biometric_router
 from app.api.v1.endpoints.auth import router as auth_router
 from app.api.v1.endpoints.passcode import router as passcode_router
 from app.api.v1.endpoints.sessions import router as sessions_router
@@ -35,6 +36,7 @@ router = APIRouter()
 
 router.include_router(auth_router, prefix="/auth", tags=["auth"])
 router.include_router(passcode_router, prefix="/auth/passcode", tags=["passcode"])
+router.include_router(biometric_router, prefix="/auth/biometric", tags=["biometric"])
 router.include_router(sessions_router, prefix="/auth/sessions", tags=["sessions"])
 router.include_router(kyc_router, prefix="/kyc", tags=["kyc"])
 router.include_router(chatbot_router, prefix="/chatbot", tags=["chatbot"])

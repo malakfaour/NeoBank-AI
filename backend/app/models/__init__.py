@@ -1,5 +1,6 @@
 from app.models.beneficiary import Beneficiary, BeneficiaryType
 from app.models.bill_payment import BillPayment, BillPaymentStatus, BillType
+from app.models.device_credential import DeviceCredential
 from app.models.exchange_audit_log import ExchangeAuditLog
 from app.models.exchange_rate import ExchangeRate
 from app.models.fraud_resolution import FraudResolution, FraudResolutionType
@@ -28,6 +29,7 @@ __all__ = [
     "KYCRecord",
     "ModelMetrics",
     "Notification",
+    "DeviceCredential",
     "NotificationType",
     "PushSubscription",
     "Transaction",
