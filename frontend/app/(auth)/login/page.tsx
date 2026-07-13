@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import api from "@/lib/axios";
 import { useAuthStore } from "@/store/authStore";
+import NeoLogo from "@/components/NeoLogo";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -43,14 +44,12 @@ export default function LoginPage() {
   return (
     <div style={{ minHeight: "100vh", backgroundColor: "#F5F5F5", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "20px" }}>
       <div style={{ marginBottom: "32px", textAlign: "center" }}>
-        <div style={{ fontSize: "32px", fontWeight: "800", color: "#000", letterSpacing: "-1px" }}>
-          neo<span style={{ color: "#00C853" }}>.</span>
-        </div>
-        <div style={{ color: "#999", fontSize: "13px", marginTop: "4px" }}>by NeoBank Lebanon</div>
+        <NeoLogo size={32} />
+        <div style={{ color: "#999", fontSize: "13px", marginTop: "8px" }}>by NeoBank Lebanon</div>
       </div>
 
       <div style={{ width: "100%", maxWidth: "380px", backgroundColor: "#fff", borderRadius: "24px", padding: "28px", boxShadow: "0 2px 20px rgba(0,0,0,0.08)" }}>
-        <h2 style={{ fontSize: "22px", fontWeight: "700", color: "#000", marginBottom: "4px" }}>Welcome back</h2>
+        <h2 style={{ fontSize: "22px", fontWeight: "700", color: "#000", marginBottom: "16px" }}>Welcome back</h2>
 
         {errors.general && (
           <div style={{ backgroundColor: "#FEF2F2", border: "1px solid #FECACA", borderRadius: "12px", padding: "12px 16px", color: "#DC2626", fontSize: "13px", marginBottom: "16px" }}>
@@ -84,11 +83,12 @@ export default function LoginPage() {
           style={{ width: "100%", backgroundColor: loading ? "#86EFAC" : "#00C853", color: "#fff", fontWeight: "700", fontSize: "15px", border: "none", borderRadius: "14px", padding: "14px", cursor: loading ? "not-allowed" : "pointer" }}>
           {loading ? "Signing in..." : "Sign in"}
         </button>
+
+        <p style={{ textAlign: "center", color: "#999", fontSize: "13px", marginTop: "16px" }}>
+          Don&apos;t have an account?{" "}
+          <a href="/register" style={{ color: "#00C853", fontWeight: "600", textDecoration: "none" }}>Create one</a>
+        </p>
       </div>
-      <p style={{ textAlign: "center", color: "#999", fontSize: "13px", marginTop: "16px" }}>
-  Don&apos;t have an account?{" "}
-  <a href="/register" style={{ color: "#00C853", fontWeight: "600", textDecoration: "none" }}>Create one</a>
-</p>
     </div>
   );
 }
