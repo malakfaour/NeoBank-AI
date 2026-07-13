@@ -1,4 +1,4 @@
-﻿from decimal import Decimal
+from decimal import Decimal
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict

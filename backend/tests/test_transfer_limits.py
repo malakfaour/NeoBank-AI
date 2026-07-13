@@ -1,4 +1,4 @@
-﻿"""
+"""
 Endpoint-level tests for DEVATTECH-107: transfer daily cap + velocity guard.
 
 Style follows test_money_movement.py / test_wallet_lifecycle.py: real
