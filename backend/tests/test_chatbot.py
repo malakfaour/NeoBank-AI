@@ -1,5 +1,6 @@
 import json
 from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
 import httpx
 import pytest
@@ -464,3 +465,203 @@ async def test_chatbot_confirm_without_pending_action_does_not_execute(
     assert data["confirmation_required"] is False
     assert "expired" in data["reply"].lower()
     mock_execute.assert_not_called()
+
+
+async def _register_chatbot_user(client, label: str) -> dict:
+    suffix = uuid4().hex[:10]
+    email = f"{label.lower()}-{suffix}@example.com"
+
+    response = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "full_name": f"{label} User",
+            "email": email,
+            "phone": f"+96171{suffix[:6]}",
+            "password": "TestPass123",
+        },
+    )
+    assert response.status_code == 200, response.text
+
+    login_response = await client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": email,
+            "password": "TestPass123",
+        },
+    )
+    assert login_response.status_code == 200, login_response.text
+    return login_response.json()
+
+
+async def _create_test_chat_session(
+    session_id: str,
+    user_id: int,
+    messages: list[dict[str, str]],
+) -> None:
+    from app.db.session import AsyncSessionLocal
+    from app.models.chat_session import ChatSession
+
+    async with AsyncSessionLocal() as session:
+        session.add(
+            ChatSession(
+                session_id=session_id,
+                user_id=user_id,
+                messages=messages,
+            )
+        )
+        await session.commit()
+
+
+async def test_chatbot_history_returns_owned_session_messages(client, auth_tokens):
+    session_id = "history-owned-session"
+    user_id = await _get_chatbot_test_user_id()
+    messages = [
+        {
+            "role": "user",
+            "content": "what is my balance?",
+        },
+        {
+            "role": "assistant",
+            "content": "Your balance is available in Accounts.",
+        },
+    ]
+
+    await _create_test_chat_session(
+        session_id=session_id,
+        user_id=user_id,
+        messages=messages,
+    )
+
+    history_response = await client.get(
+        "/api/v1/chatbot/history",
+        params={"session_id": session_id},
+        headers={"Authorization": f"Bearer {auth_tokens['access_token']}"},
+    )
+
+    assert history_response.status_code == 200, history_response.text
+
+    data = history_response.json()
+
+    assert data["session_id"] == session_id
+    assert data["messages"] == messages
+
+
+async def test_chatbot_history_requires_auth(client):
+    response = await client.get(
+        "/api/v1/chatbot/history",
+        params={"session_id": "missing-auth-session"},
+    )
+
+    assert response.status_code == 401
+
+
+async def test_chatbot_history_returns_404_for_missing_session(client, auth_tokens):
+    response = await client.get(
+        "/api/v1/chatbot/history",
+        params={"session_id": "does-not-exist"},
+        headers={"Authorization": f"Bearer {auth_tokens['access_token']}"},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Chat session not found"
+
+
+async def test_chatbot_history_rejects_other_users_session(client, auth_tokens):
+    owner_tokens = await _register_chatbot_user(client, "ownerhistory")
+    session_id = "history-owned-by-other-user"
+
+    await _create_test_chat_session(
+        session_id=session_id,
+        user_id=int(owner_tokens["user"]["id"]),
+        messages=[
+            {
+                "role": "user",
+                "content": "hello from owner",
+            },
+            {
+                "role": "assistant",
+                "content": "Hello owner.",
+            },
+        ],
+    )
+
+    other_user_response = await client.get(
+        "/api/v1/chatbot/history",
+        params={"session_id": session_id},
+        headers={"Authorization": f"Bearer {auth_tokens['access_token']}"},
+    )
+
+    assert other_user_response.status_code == 403
+
+
+async def test_chatbot_message_uses_20_per_minute_rate_limit(client, auth_tokens):
+    mock_rate_limit = AsyncMock()
+
+    with (
+        patch("httpx.AsyncClient.post", new=_groq_success("GENERAL", 0.4)),
+        patch(
+            "app.api.v1.endpoints.chatbot.get_chatbot_response",
+            new_callable=AsyncMock,
+            return_value="Hello!",
+        ),
+        patch(
+            "app.api.v1.endpoints.chatbot.check_rate_limit",
+            new=mock_rate_limit,
+        ),
+    ):
+        response = await client.post(
+            "/api/v1/chatbot/message",
+            json={
+                "session_id": "rate-limit-session",
+                "message": "hello",
+            },
+            headers={"Authorization": f"Bearer {auth_tokens['access_token']}"},
+        )
+
+    assert response.status_code == 200, response.text
+
+    mock_rate_limit.assert_awaited_once()
+    call_kwargs = mock_rate_limit.await_args.kwargs
+    assert call_kwargs["key_prefix"] == "chatbot_message"
+    assert call_kwargs["max_requests"] == 20
+    assert call_kwargs["window_seconds"] == 60
+
+
+async def test_chatbot_logs_never_store_raw_message_text(client, auth_tokens):
+    from sqlalchemy import select
+
+    from app.db.session import AsyncSessionLocal
+    from app.models.chatbot_log import ChatbotLog
+
+    raw_message = "my private card number is 4111111111111111"
+
+    with (
+        patch("httpx.AsyncClient.post", new=_groq_success("GENERAL", 0.4)),
+        patch(
+            "app.api.v1.endpoints.chatbot.get_chatbot_response",
+            side_effect=_mock_chatbot_response,
+        ),
+    ):
+        response = await client.post(
+            "/api/v1/chatbot/message",
+            json={
+                "session_id": "pii-log-hygiene-session",
+                "message": raw_message,
+            },
+            headers={"Authorization": f"Bearer {auth_tokens['access_token']}"},
+        )
+
+    assert response.status_code == 200, response.text
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(ChatbotLog).where(ChatbotLog.intent == "GENERAL")
+        )
+        logs = result.scalars().all()
+
+    assert logs
+    for log in logs:
+        assert not hasattr(log, "message")
+        assert not hasattr(log, "raw_message")
+        assert not hasattr(log, "prompt")
+        assert raw_message not in str(log.__dict__)
