@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_current_user
-from app.core.storage import upload_file
+from app.core.storage import delete_file, upload_file
 from app.db.session import get_db
 from app.models.notification import Notification
 from app.models.user import User
@@ -185,6 +185,7 @@ async def upload_avatar(
         )
 
     user = await _get_user_or_404(db, current_user)
+    previous_avatar_key = user.avatar_url
     avatar_bytes = await avatar.read()
     await avatar.close()
 
@@ -205,5 +206,7 @@ async def upload_avatar(
 
     user.avatar_url = avatar_key
     await db.commit()
+    if previous_avatar_key:
+        await loop.run_in_executor(None, delete_file, previous_avatar_key)
     await db.refresh(user)
     return await _build_user_me_response(db, user)
