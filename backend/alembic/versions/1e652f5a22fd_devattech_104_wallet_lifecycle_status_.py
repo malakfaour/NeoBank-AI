@@ -1,4 +1,4 @@
-﻿"""DEVATTECH-104 wallet lifecycle status and account status audit log
+"""DEVATTECH-104 wallet lifecycle status and account status audit log
 
 Revision ID: 1e652f5a22fd
 Revises: 8c1e4f2a9b77

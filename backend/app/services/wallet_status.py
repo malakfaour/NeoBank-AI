@@ -1,4 +1,4 @@
-﻿"""
+"""
 Shared guard and audit-writer for wallet lifecycle state (DEVATTECH-104).
 
 Every code path that mutates Wallet.balance must call assert_wallet_active()

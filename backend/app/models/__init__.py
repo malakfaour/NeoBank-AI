@@ -1,4 +1,4 @@
-﻿from app.models.beneficiary import Beneficiary, BeneficiaryType
+from app.models.beneficiary import Beneficiary, BeneficiaryType
 from app.models.bill_payment import BillPayment, BillPaymentStatus, BillType
 from app.models.exchange_audit_log import ExchangeAuditLog
 from app.models.exchange_rate import ExchangeRate

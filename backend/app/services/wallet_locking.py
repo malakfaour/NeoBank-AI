@@ -1,4 +1,4 @@
-﻿"""
+"""
 Locked-debit helper for endpoints that need to safely deduct from a
 SINGLE wallet.
 

@@ -1,4 +1,4 @@
-﻿from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -50,7 +50,7 @@ async def send_money(
     sender_id = int(current_user.id)
 
     # receiver_id arrives as str on the wire (schema), but the DB column is
-    # Integer â€” validate/convert explicitly rather than let it fail deep in
+    # Integer — validate/convert explicitly rather than let it fail deep in
     # a query.
     try:
         receiver_id = int(payload.receiver_id)
@@ -154,7 +154,7 @@ async def send_money(
         await db.commit()
     except IntegrityError:
         # Redis-level idempotency check raced and both requests got past it
-        # (see NOTE in app/core/redis.py) â€” the DB's unique constraint on
+        # (see NOTE in app/core/redis.py) — the DB's unique constraint on
         # idempotency_key is the real safety net. Roll back so the debit/
         # credit we staged above never lands.
         await db.rollback()
@@ -171,9 +171,9 @@ async def send_money(
     await invalidate_balance_cache(sender_id)
     await invalidate_balance_cache(receiver_id)
 
-    # --- DEVATTECH-74: audit trail â€” "created" fires first, right after the
+    # --- DEVATTECH-74: audit trail — "created" fires first, right after the
     # transaction row exists, before fraud scoring runs. fraud_score is
-    # intentionally omitted here (not known yet) â€” it's recorded on the
+    # intentionally omitted here (not known yet) — it's recorded on the
     # "fraud_scored" event below instead.
     await append_audit(
         db,
@@ -247,7 +247,7 @@ async def send_money(
 # Everything below this line is new. send_money() above is byte-for-byte
 # unchanged from the base file. New imports needed only for the endpoints
 # below are also placed here (after send_money), rather than added into the
-# original import block above â€” Python resolves names inside a function
+# original import block above — Python resolves names inside a function
 # body at call time, not at definition time, so module-level imports placed
 # after a function's def are still valid before any request is served.
 
@@ -281,10 +281,10 @@ async def get_transaction_summary(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Total amount spent (outgoing only â€” current user as sender) per
+    Total amount spent (outgoing only — current user as sender) per
     category, for the given month. Used by the dashboard spending chart.
 
-    Grouped by (category, currency), not category alone â€” summing amounts
+    Grouped by (category, currency), not category alone — summing amounts
     across different currencies (USD/LBP/USDT) into one total would be
     financially meaningless. currency is included in each row as a result.
     """
@@ -337,7 +337,7 @@ async def get_transaction_detail(
 ):
     """
     NOTE: restricted to transactions the authenticated user is a party to
-    (sender or receiver) â€” not explicit in the ticket text, but returning
+    (sender or receiver) — not explicit in the ticket text, but returning
     any user's transaction + audit trail to anyone with a guessable id
     would be a data leak. Added as a security default.
     """

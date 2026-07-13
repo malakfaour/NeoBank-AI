@@ -1,4 +1,4 @@
-﻿"""
+"""
 Endpoint-level tests for DEVATTECH-104: wallet lifecycle (freeze/unfreeze/close).
 
 Style follows test_money_movement.py: real async HTTP client + real async
