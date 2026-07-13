@@ -1,5 +1,6 @@
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -10,16 +11,11 @@ def train_and_evaluate_models(
     latest_rate,
 ) -> dict:
 
-    ml_python = (
-        PROJECT_ROOT
-        / "ml-venv"
-        / "Scripts"
-        / "python.exe"
-    )
+    ml_python = sys.executable
 
     result = subprocess.run(
         [
-            str(ml_python),
+            ml_python,
             "-m",
             "ml.exchange.forecast_models",
             str(latest_rate),
