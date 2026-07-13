@@ -1,7 +1,7 @@
 """add notification preferences and tx notification types
 
 Revision ID: b7e9d2c4f6a1
-Revises: a9c4f3e2b1d0
+Revises: 1e652f5a22fd
 Create Date: 2026-07-12
 """
 
@@ -13,7 +13,7 @@ from sqlalchemy.dialects import postgresql
 
 
 revision: str = "b7e9d2c4f6a1"
-down_revision: Union[str, None] = "a9c4f3e2b1d0"
+down_revision: Union[str, None] = "1e652f5a22fd"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
