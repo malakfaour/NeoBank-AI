@@ -20,11 +20,11 @@ from ml.kyc.face_verification import check_liveness, verify_face  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
-LIVENESS_THRESHOLD = 0.7
+
 def _run_liveness_check(selfie_path: str) -> float:
     result = check_liveness(selfie_path)
     antispoof_score = float(result["antispoof_score"])
-    if not result["is_real"] or antispoof_score < LIVENESS_THRESHOLD:
+    if not result["is_real"] or antispoof_score < settings.KYC_LIVENESS_THRESHOLD:
         raise RuntimeError(f"liveness_failed:{antispoof_score}")
     return antispoof_score
 

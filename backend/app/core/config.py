@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     DEEPFACE_MODEL: str = "ArcFace"
     KYC_MATCH_APPROVE_THRESHOLD: float = 0.80
     KYC_MATCH_FLAG_THRESHOLD: float = 0.60
+    KYC_LIVENESS_THRESHOLD: float = 0.7
     GROQ_API_KEY: str = ""
 
     REQUIRE_ACTION_TOKEN: bool = False
