@@ -8,8 +8,10 @@ from sqlalchemy.orm import Session
 
 from app.core.redis import get_redis_client
 from app.models.notification import Notification, NotificationType
+from app.models.push_subscription import PushSubscription
 from app.models.user import User
 from app.services.email_service import send_email
+from app.services.fcm_push import send_fcm_pushes
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +31,9 @@ def _notification_type_value(notification_type: NotificationType | str) -> str:
     return str(notification_type)
 
 
-def _coerce_notification_type(notification_type: NotificationType | str) -> NotificationType | str:
+def _coerce_notification_type(
+    notification_type: NotificationType | str,
+) -> NotificationType | str:
     if isinstance(notification_type, NotificationType):
         return notification_type
 
@@ -40,6 +44,47 @@ def _coerce_notification_type(notification_type: NotificationType | str) -> Noti
             return NotificationType[notification_type]
         except KeyError:
             return notification_type
+
+
+def _is_push_worthy_type(notification_type: NotificationType | str) -> bool:
+    type_value = _notification_type_value(notification_type)
+    return type_value.startswith("TX_") or type_value.startswith("KYC_")
+
+
+async def _send_best_effort_push(
+    db: AsyncSession,
+    user_id: int,
+    notification_id: int,
+    notification_type: NotificationType | str,
+    title: str,
+    message: str,
+) -> None:
+    if not _is_push_worthy_type(notification_type):
+        return
+
+    try:
+        result = await db.execute(
+            select(PushSubscription.token).where(
+                PushSubscription.user_id == user_id,
+            )
+        )
+        tokens = list(result.scalars().all())
+
+        await send_fcm_pushes(
+            tokens=tokens,
+            title=title,
+            body=message,
+            data={
+                "notification_id": notification_id,
+                "type": _notification_type_value(notification_type),
+                "user_id": user_id,
+            },
+        )
+    except Exception:
+        logger.exception(
+            "Failed to send best-effort FCM push notification to user_id=%s",
+            user_id,
+        )
 
 
 def _build_template(
@@ -116,11 +161,7 @@ def _build_template(
     else:
         message = metadata.get("message", "You have a new notification.")
         subject = "New notification"
-        body = (
-            f"Hello {full_name},\n\n"
-            f"{message}\n\n"
-            "NeoBank Lebanon Team"
-        )
+        body = f"Hello {full_name},\n\n{message}\n\nNeoBank Lebanon Team"
 
     html_body = body.replace("\n", "<br>")
 
@@ -191,6 +232,15 @@ async def _notify_with_session(
     await redis_client.publish(
         f"notifications:{user_id}",
         json.dumps(payload),
+    )
+
+    await _send_best_effort_push(
+        db=db,
+        user_id=user_id,
+        notification_id=notification_id,
+        notification_type=notification_type,
+        title=subject,
+        message=message,
     )
 
     return notification_id

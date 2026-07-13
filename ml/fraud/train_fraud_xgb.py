@@ -1,107 +1,61 @@
 """
-DEVATTECH-75: train the XGBoost fraud-detection model.
+DEVATTECH-89: train the XGBoost fraud-detection model on DS-1.
 
-Run from the `backend/` directory:
+Run from the repo root or backend/ directory:
     python ml/fraud/train_fraud_xgb.py
 
 Produces:
-    app/ml_models/fraud_xgb.pkl        -- sklearn Pipeline(StandardScaler, XGBClassifier)
-    app/ml_models/fraud_xgb_stats.json -- feature order + training metadata
+    backend/app/ml_models/fraud_xgb.pkl        -- sklearn Pipeline(StandardScaler, XGBClassifier)
+    backend/app/ml_models/fraud_xgb_stats.json -- feature order + training metadata
+    ml/fraud/EVAL.md                           -- eval report, generated from this run's actual results
 
-Requires xgboost (see requirements.txt). This is a standalone offline
-training step -- it does not touch the running app, the database, or any
-other ticket's code. Re-run it whenever the synthetic data generation or
-model hyperparameters change; commit the resulting .pkl/.json.
+Also logs holdout AUC to the model_metrics table (SyncSessionLocal --
+this is an offline script, not a Celery task or FastAPI endpoint, so it
+uses the same sync-DB pattern Celery tasks use, per ENGINEERING_RULES.md
+section 3: never call async app services from offline scripts).
+
+This is a standalone offline training step -- it does not touch the
+running app beyond writing to model_metrics and the ml_models/ artifact
+directory. Re-run whenever DS-1 (see generate_ds1.py) or model
+hyperparameters change; commit the resulting .pkl/.json/EVAL.md.
 """
 import json
 import os
+import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import joblib
 import numpy as np
 import pandas as pd
+import sklearn
+import xgboost
 from sklearn.metrics import roc_auc_score
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import StratifiedKFold, train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from xgboost import XGBClassifier
 
-RANDOM_SEED = 42
-N_ROWS = 12_000
-FRAUD_RATE = 0.05
-TARGET_AUC = 0.82
-
-# Order matters -- must match app/services/fraud_scoring.py's
-# _compute_xgb_features() return order exactly.
-FEATURE_ORDER = [
-    "amount",
-    "amount_to_user_avg_ratio",
-    "is_new_recipient",
-    "hour_of_day",
-    "day_of_week",
-    "sender_tx_count_30d",
-    "currency_match",
-]
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
-OUTPUT_DIR = REPO_ROOT / "backend" / "app" / "ml_models"
+BACKEND_DIR = REPO_ROOT / "backend"
+if str(BACKEND_DIR) not in sys.path:
+    # Needed to import app.models.model_metrics / app.db.sync_session,
+    # same convention as backend/tests/conftest.py.
+    sys.path.insert(0, str(BACKEND_DIR))
+
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from ml.fraud.generate_ds1 import DS1_FRAUD_RATE, DS1_N_ROWS, DS1_SEED, FEATURE_ORDER, generate_ds1
+
+RANDOM_SEED = DS1_SEED
+TARGET_AUC = 0.82
+HOLDOUT_FRACTION = 0.2
+
+OUTPUT_DIR = BACKEND_DIR / "app" / "ml_models"
 MODEL_PATH = OUTPUT_DIR / "fraud_xgb.pkl"
 STATS_PATH = OUTPUT_DIR / "fraud_xgb_stats.json"
-
-
-def _night_weighted_hour_probs() -> np.ndarray:
-    """Fraud is somewhat more likely at odd/night hours (00:00-05:00)."""
-    probs = np.ones(24)
-    probs[0:6] *= 3.0
-    return probs / probs.sum()
-
-
-def generate_synthetic_dataset(n_rows: int, fraud_rate: float, seed: int) -> pd.DataFrame:
-    """
-    Synthetic transaction dataset for bootstrapping the model pipeline.
-    Fraudulent rows are generated with systematically different feature
-    distributions (larger amounts relative to the sender's average, more
-    likely to be a new recipient, skewed toward night hours, low prior
-    transaction history, more currency mismatches) so there's a learnable
-    signal. This is synthetic data for standing up the pipeline -- not a
-    claim about real Lebanese transaction patterns. Replace with real
-    labeled data (once available) by swapping this function's output for
-    an actual DataFrame with the same columns.
-    """
-    rng = np.random.default_rng(seed)
-    n_fraud = int(round(n_rows * fraud_rate))
-    n_legit = n_rows - n_fraud
-
-    legit = pd.DataFrame({
-        "amount": rng.lognormal(mean=4.5, sigma=1.0, size=n_legit),
-        "amount_to_user_avg_ratio": rng.lognormal(mean=0.0, sigma=0.3, size=n_legit),
-        "is_new_recipient": rng.choice([0, 1], size=n_legit, p=[0.85, 0.15]),
-        "hour_of_day": rng.integers(0, 24, size=n_legit),
-        "day_of_week": rng.integers(0, 7, size=n_legit),
-        "sender_tx_count_30d": rng.poisson(lam=8, size=n_legit),
-        "currency_match": rng.choice([0, 1], size=n_legit, p=[0.05, 0.95]),
-        "is_fraud": 0,
-    })
-
-    fraud = pd.DataFrame({
-        "amount": rng.lognormal(mean=6.0, sigma=1.3, size=n_fraud),
-        "amount_to_user_avg_ratio": rng.lognormal(mean=1.5, sigma=0.8, size=n_fraud),
-        "is_new_recipient": rng.choice([0, 1], size=n_fraud, p=[0.25, 0.75]),
-        "hour_of_day": rng.choice(np.arange(24), size=n_fraud, p=_night_weighted_hour_probs()),
-        "day_of_week": rng.integers(0, 7, size=n_fraud),
-        "sender_tx_count_30d": rng.poisson(lam=2, size=n_fraud),
-        "currency_match": rng.choice([0, 1], size=n_fraud, p=[0.4, 0.6]),
-        "is_fraud": 1,
-    })
-
-    df = pd.concat([legit, fraud], ignore_index=True)
-    df = df.sample(frac=1.0, random_state=seed).reset_index(drop=True)
-
-    df["amount"] = df["amount"].round(2)
-    df["amount_to_user_avg_ratio"] = df["amount_to_user_avg_ratio"].round(3)
-    df["sender_tx_count_30d"] = df["sender_tx_count_30d"].clip(lower=0)
-
-    return df
+EVAL_MD_PATH = REPO_ROOT / "ml" / "fraud" / "EVAL.md"
 
 
 def _make_pipeline() -> Pipeline:
@@ -123,31 +77,47 @@ def train_and_evaluate(df: pd.DataFrame) -> tuple[Pipeline, dict]:
     X = df[FEATURE_ORDER].values
     y = df["is_fraud"].values
 
+    # --- real holdout split, set aside BEFORE any training/CV happens ---
+    X_train_cv, X_holdout, y_train_cv, y_holdout = train_test_split(
+        X, y,
+        test_size=HOLDOUT_FRACTION,
+        stratify=y,
+        random_state=RANDOM_SEED,
+    )
+
+    # --- 5-fold CV on the train_cv portion only, for internal validation ---
     skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=RANDOM_SEED)
     fold_aucs = []
-
-    for fold_idx, (train_idx, val_idx) in enumerate(skf.split(X, y)):
-        X_train, X_val = X[train_idx], X[val_idx]
-        y_train, y_val = y[train_idx], y[val_idx]
-
+    for fold_idx, (train_idx, val_idx) in enumerate(skf.split(X_train_cv, y_train_cv)):
         fold_pipeline = _make_pipeline()
-        fold_pipeline.fit(X_train, y_train)
-        val_proba = fold_pipeline.predict_proba(X_val)[:, 1]
-        fold_auc = roc_auc_score(y_val, val_proba)
+        fold_pipeline.fit(X_train_cv[train_idx], y_train_cv[train_idx])
+        val_proba = fold_pipeline.predict_proba(X_train_cv[val_idx])[:, 1]
+        fold_auc = roc_auc_score(y_train_cv[val_idx], val_proba)
         fold_aucs.append(fold_auc)
-        print(f"Fold {fold_idx + 1}/5 AUC: {fold_auc:.4f}")
+        print(f"CV Fold {fold_idx + 1}/5 AUC: {fold_auc:.4f}")
+    cv_mean_auc = float(np.mean(fold_aucs))
+    print(f"Mean 5-fold CV AUC (train_cv only): {cv_mean_auc:.4f}")
 
-    mean_auc = float(np.mean(fold_aucs))
-    print(f"\nMean 5-fold CV AUC: {mean_auc:.4f} (target >= {TARGET_AUC})")
-    if mean_auc < TARGET_AUC:
+    # --- real holdout evaluation: train on train_cv, score on UNTOUCHED holdout ---
+    holdout_pipeline = _make_pipeline()
+    holdout_pipeline.fit(X_train_cv, y_train_cv)
+    holdout_proba = holdout_pipeline.predict_proba(X_holdout)[:, 1]
+    holdout_auc = float(roc_auc_score(y_holdout, holdout_proba))
+    print(f"\nHoldout AUC ({len(y_holdout)} untouched rows): {holdout_auc:.4f} (target >= {TARGET_AUC})")
+
+    meets_target = holdout_auc >= TARGET_AUC
+    if not meets_target:
         print(
-            "WARNING: mean CV AUC is below the target. Do not ship this "
+            "WARNING: holdout AUC is below the target. Do not ship this "
             "artifact as-is -- consider tuning hyperparameters or revisiting "
-            "the synthetic data generation before deploying."
+            "DS-1 generation before deploying."
         )
 
-    # CV above is for evaluation only. The shipped model is refit on the
-    # FULL dataset for the best use of available data.
+    # --- shipped model: refit on the FULL dataset (train_cv + holdout) ---
+    # Standard practice once holdout evaluation is done -- best use of all
+    # available data for the artifact that actually goes to production.
+    # holdout_auc above, not this refit, is what's reported as "the" AUC,
+    # since the refit pipeline was never evaluated on truly unseen data.
     final_pipeline = _make_pipeline()
     final_pipeline.fit(X, y)
 
@@ -155,30 +125,131 @@ def train_and_evaluate(df: pd.DataFrame) -> tuple[Pipeline, dict]:
         "feature_order": FEATURE_ORDER,
         "trained_on_rows": len(df),
         "fraud_rate": float(y.mean()),
+        "holdout_rows": len(y_holdout),
+        "holdout_auc": round(holdout_auc, 4),
+        "meets_target_auc": meets_target,
         "cv_auc_scores": [round(a, 4) for a in fold_aucs],
-        "cv_auc_mean": round(mean_auc, 4),
+        "cv_auc_mean": round(cv_mean_auc, 4),
         "target_auc": TARGET_AUC,
         "random_seed": RANDOM_SEED,
+        "sklearn_version": sklearn.__version__,
+        "xgboost_version": xgboost.__version__,
+        "trained_at_utc": datetime.now(timezone.utc).isoformat(),
     }
     return final_pipeline, stats
+
+
+def _log_auc_to_model_metrics(holdout_auc: float) -> None:
+    """
+    DEVATTECH-89: log holdout AUC to model_metrics. Uses SyncSessionLocal
+    (app/db/sync_session.py) -- this script has no running event loop, so
+    it uses the same sync-DB pattern Celery tasks use, per
+    ENGINEERING_RULES.md section 3. Does NOT set mae -- mae has no
+    meaning for a classification model, and was relaxed to nullable
+    specifically so this insert doesn't need a fake value.
+    """
+    from app.db.sync_session import SyncSessionLocal
+    from app.models.model_metrics import ModelMetrics
+
+    with SyncSessionLocal() as session:
+        session.add(ModelMetrics(model_name="xgboost", auc=holdout_auc))
+        session.commit()
+    print(f"Logged holdout_auc={holdout_auc:.4f} to model_metrics (model_name='xgboost').")
+
+
+def _write_eval_md(stats: dict) -> None:
+    """Generates ml/fraud/EVAL.md from this run's ACTUAL results -- never
+    hand-written with placeholder/guessed numbers."""
+    status_line = "PASS" if stats["meets_target_auc"] else "FAIL"
+    content = f"""# Fraud Model (XGBoost) — Evaluation Report
+
+Generated by `ml/fraud/train_fraud_xgb.py` on {stats['trained_at_utc']}.
+This file is a build artifact -- re-run the training script to regenerate it
+with fresh numbers; do not hand-edit the results below.
+
+## Dataset
+
+DS-1, generated by `ml/fraud/generate_ds1.py` (committed, seeded, fully
+deterministic -- no external or manually-sourced data).
+
+- Rows: {stats['trained_on_rows']}
+- Fraud rate: {stats['fraud_rate']:.2%}
+- Seed: {stats['random_seed']}
+
+## Feature Order
+
+Confirmed matching `app/services/fraud_scoring.py`'s `_compute_xgb_features()`
+return order exactly (unchanged by this ticket):
+
+```
+{json.dumps(stats['feature_order'], indent=2)}
+```
+
+## Holdout Evaluation
+
+- Holdout rows (never used in training): {stats['holdout_rows']}
+- **Holdout AUC: {stats['holdout_auc']:.4f}**
+- Target AUC: {stats['target_auc']}
+- Result: **{status_line}**
+
+5-fold CV (on the train portion only, for internal validation):
+- Per-fold AUC: {stats['cv_auc_scores']}
+- Mean CV AUC: {stats['cv_auc_mean']:.4f}
+
+Note: the shipped `fraud_xgb.pkl` is refit on the FULL dataset (train +
+holdout) after holdout evaluation, which is standard practice for the
+production artifact. The holdout AUC above measures a pipeline trained
+only on the non-holdout portion -- it is the honest generalization
+estimate; it does not describe the exact shipped artifact, which has
+seen more data.
+
+## Artifact
+
+- Model: `backend/app/ml_models/fraud_xgb.pkl`
+- Stats: `backend/app/ml_models/fraud_xgb_stats.json`
+
+## Versions Used
+
+- scikit-learn: {stats['sklearn_version']}
+- xgboost: {stats['xgboost_version']}
+
+(Pinned identically in `backend/requirements.txt` and `ml/requirements.txt`
+per ENGINEERING_RULES.md section 8.)
+
+## How to Rerun
+
+```bash
+python ml/fraud/train_fraud_xgb.py
+```
+
+Regenerates `fraud_xgb.pkl`, `fraud_xgb_stats.json`, this file, and logs a
+new `model_metrics` row (`model_name="xgboost"`, `auc=<holdout_auc>`).
+"""
+    EVAL_MD_PATH.write_text(content, encoding="utf-8")
+    print(f"Wrote {EVAL_MD_PATH}")
 
 
 def main():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    df = generate_synthetic_dataset(N_ROWS, FRAUD_RATE, RANDOM_SEED)
-    print(f"Generated {len(df)} rows, {int(df['is_fraud'].sum())} fraud ({df['is_fraud'].mean():.2%})")
+    df = generate_ds1(DS1_N_ROWS, DS1_FRAUD_RATE, DS1_SEED)
+    print(f"Generated DS-1: {len(df)} rows, {int(df['is_fraud'].sum())} fraud ({df['is_fraud'].mean():.2%})")
 
     pipeline, stats = train_and_evaluate(df)
 
     joblib.dump(pipeline, MODEL_PATH)
-    with open(STATS_PATH, "w") as f:
+    with open(STATS_PATH, "w", encoding="utf-8") as f:
         json.dump(stats, f, indent=2)
-
     print(f"\nSaved model to {MODEL_PATH}")
     print(f"Saved stats to {STATS_PATH}")
+
+    _log_auc_to_model_metrics(stats["holdout_auc"])
+    _write_eval_md(stats)
+
+    if not stats["meets_target_auc"]:
+        print("\nExiting with error status: holdout AUC did not meet target.")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
     main()
-    

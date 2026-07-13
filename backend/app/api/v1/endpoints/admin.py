@@ -576,6 +576,16 @@ async def get_compliance_summary(
     )
     currently_flagged_from_month = flagged_result.scalar_one()
 
+    # DEVATTECH-90: flagged_rate as a fraction [0,1] of the month's total
+    # transaction volume (consistent with ml/fraud/threshold_tuning.json's
+    # own flagged_rate convention). Guarded against division by zero for
+    # months with no transactions at all.
+    flagged_rate = (
+        currently_flagged_from_month / total_transactions_created
+        if total_transactions_created
+        else 0.0
+    )
+
     resolutions_result = await db.execute(
         select(FraudResolution.resolution, func.count())
         .where(FraudResolution.resolved_at >= month_start, FraudResolution.resolved_at < month_end)
@@ -613,6 +623,7 @@ async def get_compliance_summary(
         month=month,
         total_transactions_created=total_transactions_created,
         currently_flagged_from_month=currently_flagged_from_month,
+        flagged_rate=round(flagged_rate, 4),
         resolutions_this_month=ResolutionCounts(**resolution_counts),
         reversed_amount_by_currency=reversed_amount_by_currency,
     )
