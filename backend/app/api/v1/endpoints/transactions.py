@@ -24,6 +24,7 @@ from app.schemas.user import CurrentUser
 from app.services.audit_log import append_audit
 from app.services.fraud_rules import CurrencyMismatchError, check_currency_match
 from app.services.rate_limiter import check_rate_limit
+from app.services.wallet_status import WalletClosedError, WalletFrozenError, assert_wallet_active
 from app.tasks.transaction_tasks import score_transaction
 from app.models.transaction_audit_log import TransactionAuditLog
 from app.models.user import User
@@ -132,6 +133,16 @@ async def send_money(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Sender or receiver has no {payload.currency} wallet",
         )
+
+    for _w in (sender_wallet, receiver_wallet):
+        try:
+            assert_wallet_active(_w)
+        except (WalletFrozenError, WalletClosedError) as e:
+            reason = "wallet_frozen" if isinstance(e, WalletFrozenError) else "wallet_closed"
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"error": reason},
+            )
 
     try:
         check_currency_match(payload.currency, sender_wallet)
@@ -285,7 +296,7 @@ async def send_money(
 # (bill payments, exchange execution) that don't write to this table yet.
 # These values are accepted as valid filters (so the endpoint doesn't 400
 # on a legitimate future value) but currently match zero rows.
-VALID_TRANSACTION_TYPES = {"send", "receive", "topup", "bill", "exchange"}
+VALID_TRANSACTION_TYPES = {"send", "receive", "topup", "bill", "exchange", "adjustment"}
 TYPES_NOT_YET_SUPPORTED = {"bill"}
 
 
@@ -295,6 +306,8 @@ def _derive_transaction_type(transaction: Transaction, user_id: int) -> str:
             return "exchange"
         if transaction.category == "Bills":
             return "bill"
+        if transaction.category == "Adjustment":
+            return "adjustment"
         return "topup"
     return "send" if transaction.sender_id == user_id else "receive"
 
@@ -462,6 +475,8 @@ async def list_transactions(
         filters.append(Transaction.category == "TopUp")
     elif type == "exchange":
         filters.append(Transaction.category == "Exchange")
+    elif type == "adjustment":
+        filters.append(Transaction.category == "Adjustment")
 
     if start_date is not None:
         filters.append(Transaction.created_at >= start_date)
@@ -522,3 +537,4 @@ async def list_transactions(
         total=total,
         total_pages=compute_total_pages(total, page_size),
     )
+

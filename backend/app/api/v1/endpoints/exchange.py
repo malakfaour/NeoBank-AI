@@ -31,6 +31,7 @@ from app.services.exchange_cache import (
 )
 from app.services.exchange_forecast import train_and_forecast_usd_lbp
 from app.services.market_hours import get_market_status, is_market_open
+from app.services.wallet_status import WalletClosedError, WalletFrozenError, assert_wallet_active
 from app.tasks.exchange_tasks import fetch_exchange_rates
 
 
@@ -247,6 +248,15 @@ async def execute_exchange(
             detail=f"{from_currency} wallet not found",
         )
 
+    try:
+        assert_wallet_active(source_wallet)
+    except (WalletFrozenError, WalletClosedError) as e:
+        reason = "wallet_frozen" if isinstance(e, WalletFrozenError) else "wallet_closed"
+        raise HTTPException(
+            status_code=422,
+            detail={"error": reason},
+        )
+
     if source_wallet.balance < payload.amount:
         raise HTTPException(
             status_code=422,
@@ -257,6 +267,15 @@ async def execute_exchange(
         raise HTTPException(
             status_code=404,
             detail=f"{to_currency} wallet not found",
+        )
+
+    try:
+        assert_wallet_active(target_wallet)
+    except (WalletFrozenError, WalletClosedError) as e:
+        reason = "wallet_frozen" if isinstance(e, WalletFrozenError) else "wallet_closed"
+        raise HTTPException(
+            status_code=422,
+            detail={"error": reason},
         )
 
     converted_amount = payload.amount * rate
@@ -345,3 +364,4 @@ async def forecast_exchange_rate(days: int = Query(7, ge=1, le=7)):
         "model": "LightGBM",
         "predictions": predictions,
     }
+
