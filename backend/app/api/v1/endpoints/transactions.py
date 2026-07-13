@@ -17,6 +17,7 @@ from app.schemas.user import CurrentUser
 from app.core.cache_utils import invalidate_balance_cache
 from app.services.audit_log import append_audit
 from app.services.fraud_rules import CurrencyMismatchError, check_currency_match
+from app.services.wallet_status import WalletClosedError, WalletFrozenError, assert_wallet_active
 from app.tasks.transaction_tasks import score_transaction
 
 from datetime import date, timedelta
@@ -100,6 +101,16 @@ async def send_money(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Sender or receiver has no {payload.currency} wallet",
         )
+
+    for _w in (sender_wallet, receiver_wallet):
+        try:
+            assert_wallet_active(_w)
+        except (WalletFrozenError, WalletClosedError) as e:
+            reason = "wallet_frozen" if isinstance(e, WalletFrozenError) else "wallet_closed"
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"error": reason},
+            )
 
     try:
         check_currency_match(payload.currency, sender_wallet)
@@ -486,3 +497,5 @@ async def list_transactions(
         total=total,
         total_pages=compute_total_pages(total, page_size),
     )
+
+
