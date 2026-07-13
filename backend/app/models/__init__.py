@@ -5,6 +5,7 @@ from app.models.exchange_audit_log import ExchangeAuditLog
 from app.models.exchange_rate import ExchangeRate
 from app.models.fraud_resolution import FraudResolution, FraudResolutionType
 from app.models.kyc_record import KYCRecord
+from app.models.kyc_audit_log import KYCAuditLog
 from app.models.model_metrics import ModelMetrics
 from app.models.notification import Notification, NotificationType
 from app.models.push_subscription import PushSubscription
@@ -27,6 +28,7 @@ __all__ = [
     "FraudResolution",
     "FraudResolutionType",
     "KYCRecord",
+    "KYCAuditLog",
     "ModelMetrics",
     "Notification",
     "DeviceCredential",

@@ -74,6 +74,7 @@ async def create_tables():
         Base.metadata.tables["fraud_resolutions"],
         Base.metadata.tables["beneficiaries"],
         Base.metadata.tables["kyc_records"],
+        Base.metadata.tables["kyc_audit_logs"],
         Base.metadata.tables["model_metrics"],
         Base.metadata.tables["notifications"],
         Base.metadata.tables["push_subscriptions"],
