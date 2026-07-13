@@ -65,3 +65,6 @@ class User(Base):
     push_subscriptions = relationship(
         "PushSubscription", back_populates="user", cascade="all, delete-orphan"
     )
+    device_credentials = relationship(
+        "DeviceCredential", back_populates="user", cascade="all, delete-orphan"
+    )

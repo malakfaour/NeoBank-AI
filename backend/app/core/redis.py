@@ -91,6 +91,19 @@ async def consume_action_token(user_id: str, token: str) -> bool:
     return stored is not None and stored == token
 
 
+async def store_biometric_challenge(user_id: str, nonce: str, ttl: int = 120) -> None:
+    """Store the user's `challenge:{user_id}` nonce with a two-minute default TTL."""
+    await redis_client.set(f"challenge:{user_id}", nonce, ex=ttl)
+
+
+async def consume_biometric_challenge(user_id: str) -> str | None:
+    """Atomically fetch and delete a single-use biometric challenge nonce."""
+    nonce = await redis_client.getdel(f"challenge:{user_id}")
+    if isinstance(nonce, bytes):
+        return nonce.decode("utf-8")
+    return nonce
+
+
 def _chat_action_key(session_id: str) -> str:
     """Redis key for a pending chatbot action. TTL is always required."""
     return f"chat_action:{session_id}"

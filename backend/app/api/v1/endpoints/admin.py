@@ -41,11 +41,12 @@ from app.schemas.admin import (
 from app.schemas.admin_kyc import (
     AdminKYCDecisionResponse,
     AdminKYCQueueItem,
+    AdminKYCQueueResponse,
     AdminKYCRejectRequest,
 )
 from app.schemas.audit_log import AuditLogEntry, AuditTrailResponse
 from app.schemas.user import CurrentUser
-from app.services.audit_log import append_audit
+from app.services.audit_log import append_audit, append_kyc_audit
 from app.services.fraud_scoring import FRAUD_FLAG_THRESHOLD
 from app.services.notifications import notify
 from app.services.wallet_locking import lock_and_credit_wallet, lock_and_debit_wallet
@@ -100,18 +101,33 @@ async def _build_decision_response(
     )
 
 
-@router.get("/kyc/queue", response_model=list[AdminKYCQueueItem])
+@router.get("/kyc/queue", response_model=AdminKYCQueueResponse)
 async def get_kyc_queue(
+    status_filter: KYCRecordStatus = Query(
+        default=KYCRecordStatus.flagged, alias="status"
+    ),
+    date_from: datetime | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
     current_user: CurrentUser = Depends(
         require_role(UserRole.compliance_officer, UserRole.admin)
     ),
     db: AsyncSession = Depends(get_db),
 ):
+    filters = [KYCRecord.status == status_filter]
+    if date_from is not None:
+        filters.append(KYCRecord.created_at >= date_from)
+
+    total = await db.scalar(
+        select(func.count()).select_from(KYCRecord).where(*filters)
+    )
     result = await db.execute(
         select(KYCRecord, User)
         .join(User, User.id == KYCRecord.user_id)
-        .where(KYCRecord.status == KYCRecordStatus.flagged)
+        .where(*filters)
         .order_by(KYCRecord.id.asc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
     )
     rows = result.all()
     loop = asyncio.get_running_loop()
@@ -135,6 +151,7 @@ async def get_kyc_queue(
                 user_id=user.id,
                 full_name=user.full_name,
                 status=record.status,
+                created_at=record.created_at,
                 match_score=record.match_score,
                 liveness_score=record.liveness_score,
                 rejection_reason=record.rejection_reason,
@@ -146,7 +163,13 @@ async def get_kyc_queue(
                 id_photo_presigned_url=id_photo_presigned_url,
             )
         )
-    return items
+    return AdminKYCQueueResponse(
+        items=items,
+        page=page,
+        page_size=page_size,
+        total=total or 0,
+        total_pages=compute_total_pages(total or 0, page_size),
+    )
 
 
 @router.patch("/kyc/{kyc_record_id}/approve", response_model=AdminKYCDecisionResponse)
@@ -164,6 +187,12 @@ async def approve_kyc(
     record.reviewed_at = datetime.now(timezone.utc)
     record.reviewed_by = int(current_user.id)
     user.kyc_status = KYCStatus.approved
+    await append_kyc_audit(
+        db,
+        kyc_record_id=record.id,
+        action="kyc_approved",
+        actor_id=int(current_user.id),
+    )
     return await _build_decision_response(
         db,
         record=record,
@@ -188,6 +217,13 @@ async def reject_kyc(
     record.reviewed_at = datetime.now(timezone.utc)
     record.reviewed_by = int(current_user.id)
     user.kyc_status = KYCStatus.rejected
+    await append_kyc_audit(
+        db,
+        kyc_record_id=record.id,
+        action="kyc_rejected",
+        actor_id=int(current_user.id),
+        metadata={"rejection_reason": body.rejection_reason},
+    )
     return await _build_decision_response(
         db,
         record=record,
@@ -211,6 +247,12 @@ async def request_kyc_resubmit(
     record.reviewed_at = datetime.now(timezone.utc)
     record.reviewed_by = int(current_user.id)
     user.kyc_status = KYCStatus.rejected
+    await append_kyc_audit(
+        db,
+        kyc_record_id=record.id,
+        action="kyc_resubmit_requested",
+        actor_id=int(current_user.id),
+    )
     return await _build_decision_response(
         db,
         record=record,

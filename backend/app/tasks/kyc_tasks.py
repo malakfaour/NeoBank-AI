@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from app.celery_app import celery_app
+from app.core.config import settings
 from app.core.storage import download_file
 from app.db.sync_session import SyncSessionLocal
 from app.models.kyc_record import KYCRecord, KYCRecordStatus
@@ -15,30 +16,15 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from ml.kyc.face_verification import verify_face  # noqa: E402
+from ml.kyc.face_verification import check_liveness, verify_face  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
 LIVENESS_THRESHOLD = 0.7
-MATCH_APPROVED_THRESHOLD = 0.8
-MATCH_FLAGGED_THRESHOLD = 0.6
-
-
 def _run_liveness_check(selfie_path: str) -> float:
-    from deepface import DeepFace
-
-    faces = DeepFace.extract_faces(
-        img_path=selfie_path,
-        anti_spoofing=True,
-        enforce_detection=True,
-    )
-    if not faces:
-        raise ValueError("No face detected in selfie")
-
-    face = faces[0]
-    is_real = bool(face.get("is_real", False))
-    antispoof_score = float(face.get("antispoof_score", 0.0))
-    if not is_real or antispoof_score < LIVENESS_THRESHOLD:
+    result = check_liveness(selfie_path)
+    antispoof_score = float(result["antispoof_score"])
+    if not result["is_real"] or antispoof_score < LIVENESS_THRESHOLD:
         raise RuntimeError(f"liveness_failed:{antispoof_score}")
     return antispoof_score
 
@@ -148,7 +134,7 @@ def process_kyc(kyc_record_id: int):
             verification = verify_face(selfie_temp.name, id_temp.name)
             match_score = float(verification["match_score"])
 
-            if match_score >= MATCH_APPROVED_THRESHOLD:
+            if match_score >= settings.KYC_MATCH_APPROVE_THRESHOLD:
                 return _persist_decision(
                     db,
                     kyc_record=kyc_record,
@@ -161,7 +147,7 @@ def process_kyc(kyc_record_id: int):
                     notification_type="KYC_APPROVED",
                 )
 
-            if match_score >= MATCH_FLAGGED_THRESHOLD:
+            if match_score >= settings.KYC_MATCH_FLAG_THRESHOLD:
                 return _persist_decision(
                     db,
                     kyc_record=kyc_record,
