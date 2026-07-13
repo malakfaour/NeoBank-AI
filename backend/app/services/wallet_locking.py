@@ -10,6 +10,14 @@ This follows the same SELECT ... FOR UPDATE principle instead.
 
 Used by: app/api/v1/endpoints/bills.py only. send_money is NOT modified
 to use this -- DEVATTECH-72 logic is unchanged, per instruction.
+
+DEVATTECH-104: both functions now call assert_wallet_active() right after
+the row lock, before any balance check/mutation, so frozen/closed wallets
+are rejected on this path too. WalletFrozenError/WalletClosedError are NOT
+ValueError subclasses -- callers must catch them separately from the
+existing "not found"/"insufficient balance" ValueError handling, since
+they map to a different response (422 wallet_frozen/wallet_closed, not
+the 404/500 paths ValueError triggers here).
 """
 from decimal import Decimal
 
@@ -17,6 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.wallet import Wallet
+from app.services.wallet_status import assert_wallet_active
 
 
 async def lock_and_debit_wallet(db: AsyncSession, wallet_id: int, amount: Decimal) -> Wallet:
@@ -37,12 +46,17 @@ async def lock_and_debit_wallet(db: AsyncSession, wallet_id: int, amount: Decima
     error) rather than letting SQLAlchemy's NoResultFound propagate keeps
     this helper's failure mode predictable and independent of the ORM,
     which matters since it may be reused by other endpoints later.
+
+    Raises WalletFrozenError / WalletClosedError (DEVATTECH-104) if the
+    wallet is not active -- see assert_wallet_active().
     """
     result = await db.execute(select(Wallet).where(Wallet.id == wallet_id).with_for_update())
     wallet = result.scalar_one_or_none()
 
     if wallet is None:
         raise ValueError(f"Wallet {wallet_id} not found")
+
+    assert_wallet_active(wallet)
 
     if wallet.balance < amount:
         raise ValueError("Insufficient balance at debit time")
@@ -67,12 +81,17 @@ async def lock_and_credit_wallet(db: AsyncSession, wallet_id: int, amount: Decim
     lock_and_debit_wallet does: a predictable application-level error
     rather than SQLAlchemy's NoResultFound, since this may be reused
     elsewhere later.
+
+    Raises WalletFrozenError / WalletClosedError (DEVATTECH-104) if the
+    wallet is not active -- see assert_wallet_active().
     """
     result = await db.execute(select(Wallet).where(Wallet.id == wallet_id).with_for_update())
     wallet = result.scalar_one_or_none()
 
     if wallet is None:
         raise ValueError(f"Wallet {wallet_id} not found")
+
+    assert_wallet_active(wallet)
 
     wallet.balance += amount
     return wallet

@@ -9,6 +9,7 @@ from app.models.notification import Notification, NotificationType
 from app.models.push_subscription import PushSubscription
 from app.models.transaction import Transaction, TransactionCurrency, TransactionStatus
 from app.models.transaction_audit_log import TransactionAuditLog
+from app.models.account_status_audit_log import AccountStatusAuditLog
 from app.models.user import User
 from app.models.wallet import Wallet
 from app.models.chat_session import ChatSession
@@ -33,8 +34,10 @@ __all__ = [
     "TransactionCurrency",
     "TransactionStatus",
     "TransactionAuditLog",
+    "AccountStatusAuditLog",
     "User",
     "Wallet",
     "ChatSession",
     "UserSession",
 ]
+
