@@ -49,6 +49,7 @@ from app.services.audit_log import append_audit
 from app.services.fraud_scoring import FRAUD_FLAG_THRESHOLD
 from app.services.notifications import notify
 from app.services.wallet_locking import lock_and_credit_wallet, lock_and_debit_wallet
+from app.services.wallet_status import WalletClosedError, WalletFrozenError
 from app.utils.transaction_query_utils import compute_total_pages, parse_summary_month
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -400,6 +401,12 @@ async def resolve_flag(
 
         try:
             await lock_and_credit_wallet(db, wallet.id, transaction.amount)
+        except (WalletFrozenError, WalletClosedError) as e:
+            reason = "wallet_frozen" if isinstance(e, WalletFrozenError) else "wallet_closed"
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"error": reason},
+            )
         except ValueError:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -576,6 +583,16 @@ async def get_compliance_summary(
     )
     currently_flagged_from_month = flagged_result.scalar_one()
 
+    # DEVATTECH-90: flagged_rate as a fraction [0,1] of the month's total
+    # transaction volume (consistent with ml/fraud/threshold_tuning.json's
+    # own flagged_rate convention). Guarded against division by zero for
+    # months with no transactions at all.
+    flagged_rate = (
+        currently_flagged_from_month / total_transactions_created
+        if total_transactions_created
+        else 0.0
+    )
+
     resolutions_result = await db.execute(
         select(FraudResolution.resolution, func.count())
         .where(FraudResolution.resolved_at >= month_start, FraudResolution.resolved_at < month_end)
@@ -613,10 +630,10 @@ async def get_compliance_summary(
         month=month,
         total_transactions_created=total_transactions_created,
         currently_flagged_from_month=currently_flagged_from_month,
+        flagged_rate=round(flagged_rate, 4),
         resolutions_this_month=ResolutionCounts(**resolution_counts),
         reversed_amount_by_currency=reversed_amount_by_currency,
     )
-
 
 
 # =====================================================================

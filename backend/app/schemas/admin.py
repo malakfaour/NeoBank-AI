@@ -54,6 +54,7 @@ class ComplianceSummaryResponse(BaseModel):
     month: str
     total_transactions_created: int
     currently_flagged_from_month: int
+    flagged_rate: float
     resolutions_this_month: ResolutionCounts
     reversed_amount_by_currency: list[ReversedAmountByCurrency]
 
