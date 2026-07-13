@@ -1,3 +1,5 @@
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 from app.schemas.transfer import TransferReceipt
@@ -28,3 +30,8 @@ class ChatbotMessageResponse(BaseModel):
     confirmation_required: bool = False
     pending_action: dict[str, str] | None = None
     transfer_receipt: TransferReceipt | None = None
+
+
+class ChatbotHistoryResponse(BaseModel):
+    session_id: str
+    messages: list[dict[str, Any]]
