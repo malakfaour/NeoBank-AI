@@ -1,30 +1,31 @@
-from fastapi import APIRouter, Depends, Header, HTTPException, status
-from sqlalchemy import select
+from datetime import date, timedelta
+from decimal import Decimal
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_current_user, require_action_token
+from app.core.cache_utils import invalidate_balance_cache
+from app.core.config import settings
 from app.core.redis import (
     cache_idempotent_response,
     get_cached_idempotent_response,
+    get_transfer_daily_total,
     hash_idempotency_key,
+    increment_transfer_daily,
 )
 from app.db.session import get_db
 from app.models.transaction import Transaction, TransactionCurrency, TransactionStatus
 from app.models.wallet import Wallet, WalletCurrency
 from app.schemas.transaction import SendMoneyRequest, SendMoneyResponse
 from app.schemas.user import CurrentUser
-from app.core.cache_utils import invalidate_balance_cache
 from app.services.audit_log import append_audit
 from app.services.fraud_rules import CurrencyMismatchError, check_currency_match
+from app.services.rate_limiter import check_rate_limit
 from app.services.wallet_status import WalletClosedError, WalletFrozenError, assert_wallet_active
 from app.tasks.transaction_tasks import score_transaction
-
-from datetime import date, timedelta
-
-from fastapi import Query
-from sqlalchemy import and_, func, or_
-
 from app.models.transaction_audit_log import TransactionAuditLog
 from app.models.user import User
 from app.schemas.transaction import (
@@ -42,6 +43,7 @@ router = APIRouter(prefix="/transactions", tags=["transactions"])
 
 @router.post("/send", response_model=SendMoneyResponse)
 async def send_money(
+    request: Request,
     payload: SendMoneyRequest,
     x_idempotency_key: str = Header(..., alias="X-Idempotency-Key"),
     current_user: CurrentUser = Depends(require_action_token),
@@ -78,6 +80,36 @@ async def send_money(
     cached_response = await get_cached_idempotent_response(sender_id, x_idempotency_key)
     if cached_response is not None:
         return SendMoneyResponse(**cached_response)
+
+    # --- DEVATTECH-107: velocity guard -- >5 transfers/min per user.
+    # key_prefix includes sender_id so check_rate_limit's key
+    # (f"sliding:{key_prefix}:{ip}") is scoped per user+IP, not purely
+    # per-IP like the pre-auth login/send_otp usages elsewhere in this
+    # file -- check_rate_limit always folds in request.client.host too,
+    # so a user switching networks mid-burst gets independent counters
+    # per IP. That's a known characteristic of reusing this shared
+    # limiter unchanged (ticket requires zero new limiting logic), not
+    # something fixed here.
+    await check_rate_limit(
+        request,
+        key_prefix=f"transfer:{sender_id}",
+        max_requests=5,
+        window_seconds=60,
+    )
+
+    # --- DEVATTECH-107: daily transfer cap. Placed after the
+    # idempotency replay check above so a retried idempotent request
+    # never consumes rate-limit or daily-cap budget for a transfer
+    # that already happened. ---
+    daily_total = await get_transfer_daily_total(sender_id)
+    if daily_total + payload.amount > settings.DAILY_TRANSFER_LIMIT_USD:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error": "daily_limit_exceeded",
+                "remaining": str(max(settings.DAILY_TRANSFER_LIMIT_USD - daily_total, Decimal("0"))),
+            },
+        )
 
     # --- locked wallet fetch ---
     # Both wallets are locked in ONE statement, ordered by Wallet.id. Any two
@@ -170,6 +202,10 @@ async def send_money(
     # fresh data instead of a stale pre-transfer value.
     await invalidate_balance_cache(sender_id)
     await invalidate_balance_cache(receiver_id)
+
+    # --- DEVATTECH-107: daily transfer total, incremented only after a
+    # real (non-replayed) transfer actually commits ---
+    await increment_transfer_daily(sender_id, payload.amount)
 
     # --- DEVATTECH-74: audit trail — "created" fires first, right after the
     # transaction row exists, before fraud scoring runs. fraud_score is
@@ -501,5 +537,4 @@ async def list_transactions(
         total=total,
         total_pages=compute_total_pages(total, page_size),
     )
-
 
