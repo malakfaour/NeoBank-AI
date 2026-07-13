@@ -2,7 +2,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class FlaggedTransactionItem(BaseModel):
@@ -54,6 +54,7 @@ class ComplianceSummaryResponse(BaseModel):
     month: str
     total_transactions_created: int
     currently_flagged_from_month: int
+    flagged_rate: float
     resolutions_this_month: ResolutionCounts
     reversed_amount_by_currency: list[ReversedAmountByCurrency]
 
@@ -86,3 +87,48 @@ class ModelMetricItem(BaseModel):
     model_name: str
     mae: float
     trained_at: datetime
+
+
+class AdminUserSearchItem(BaseModel):
+    id: int
+    full_name: str
+    email: str
+    phone: str
+    kyc_status: str
+    role: str
+
+
+class AdminUserSearchResponse(BaseModel):
+    items: list[AdminUserSearchItem]
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
+
+
+class AdminWalletItem(BaseModel):
+    id: int
+    currency: str
+    balance: Decimal
+    account_number: str | None
+    iban: str | None
+
+
+class AdminUserWalletsResponse(BaseModel):
+    user_id: int
+    items: list[AdminWalletItem]
+
+
+class AdminWalletAdjustRequest(BaseModel):
+    amount: Decimal = Field(..., gt=0)
+    direction: Literal["credit", "debit"]
+    reason: str = Field(..., min_length=1, max_length=500)
+
+
+class AdminWalletAdjustResponse(BaseModel):
+    wallet_id: int
+    transaction_id: int
+    direction: str
+    amount: Decimal
+    new_balance: Decimal
+    reason: str

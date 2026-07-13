@@ -37,7 +37,12 @@ _xgb_pipeline = None
 _xgb_stats = None
 
 logger = logging.getLogger(__name__)
-FRAUD_FLAG_THRESHOLD = 0.75
+# DEVATTECH-90: justified from ml/fraud/tune_threshold.py's holdout
+# evaluation (evaluation-only pipeline, never touched fraud_xgb.pkl) --
+# precision=0.9909, recall=0.9083, F1=0.9478, flagged_rate=4.58% at this
+# threshold (max-F1 among 14 candidates swept 0.30-0.95). Full sweep
+# results: ml/fraud/threshold_tuning.json.
+FRAUD_FLAG_THRESHOLD = 0.45
 
 
 def _load_isolation_forest():
@@ -173,7 +178,7 @@ def score_with_isolation_forest(db: Session, transaction: Transaction) -> float:
     # contract defined in this module and consumed by
     # app/tasks/transaction_tasks.py's score_transaction task.
     raw_score = model.decision_function([features])[0]
-    fraud_score = max(0.0, min(1.0, 0.5 - raw_score))
+    fraud_score = float(max(0.0, min(1.0, 0.5 - raw_score)))
     return fraud_score
 
 def _compute_xgb_features(db: Session, transaction: Transaction) -> list[float]:

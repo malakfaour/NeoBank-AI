@@ -26,6 +26,7 @@ services:
     build: ./backend
     volumes:
       - ./backend:/app
+      - ./ml:/app/ml
     env_file:
       - .env
     environment:
@@ -53,6 +54,7 @@ services:
     build: ./backend
     volumes:
       - ./backend:/app
+      - ./ml:/app/ml
     env_file:
       - .env
     environment:

@@ -103,3 +103,49 @@ jobs:
 
       - name: Build services
         run: docker compose build
+
+  postgres-e2e-test:
+    name: Postgres E2E Money-Path Test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: e2e_test
+          POSTGRES_PASSWORD: e2e_test
+          POSTGRES_DB: e2e_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U e2e_test -d e2e_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          cd backend
+          pip install -r requirements.txt
+
+      - name: Run Alembic migrations against isolated Postgres service
+        env:
+          DATABASE_URL: postgresql+asyncpg://e2e_test:e2e_test@localhost:5432/e2e_test
+          DATABASE_URL_DIRECT: postgresql+asyncpg://e2e_test:e2e_test@localhost:5432/e2e_test
+          JWT_SECRET: ci_postgres_e2e_migration_secret_32chars_min
+        run: |
+          cd backend
+          alembic upgrade head
+
+      - name: Run Postgres E2E suite
+        env:
+          POSTGRES_TEST_URL: postgresql://e2e_test:e2e_test@localhost:5432/e2e_test
+        run: |
+          cd backend
+          python -m pytest tests_postgres -m postgres -q

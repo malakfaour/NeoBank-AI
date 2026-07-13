@@ -14,6 +14,7 @@ redis_client = aioredis.from_url(
 )
 
 IDEMPOTENCY_TTL_SECONDS = 24 * 60 * 60
+CHAT_ACTION_TTL_SECONDS = 5 * 60
 
 
 def get_redis_client():
@@ -78,6 +79,8 @@ async def store_action_token(user_id: str, token: str, ttl: int = 300) -> None:
 
 async def get_action_token(user_id: str) -> str | None:
     return await redis_client.get(f"action_token:{user_id}")
+
+
 async def consume_action_token(user_id: str, token: str) -> bool:
     """
     Atomically fetch-and-delete the action token for user_id (Redis GETDEL).
@@ -86,6 +89,50 @@ async def consume_action_token(user_id: str, token: str) -> bool:
     """
     stored = await redis_client.getdel(f"action_token:{user_id}")
     return stored is not None and stored == token
+
+
+async def store_biometric_challenge(user_id: str, nonce: str, ttl: int = 120) -> None:
+    """Store the user's `challenge:{user_id}` nonce with a two-minute default TTL."""
+    await redis_client.set(f"challenge:{user_id}", nonce, ex=ttl)
+
+
+async def consume_biometric_challenge(user_id: str) -> str | None:
+    """Atomically fetch and delete a single-use biometric challenge nonce."""
+    nonce = await redis_client.getdel(f"challenge:{user_id}")
+    if isinstance(nonce, bytes):
+        return nonce.decode("utf-8")
+    return nonce
+
+
+def _chat_action_key(session_id: str) -> str:
+    """Redis key for a pending chatbot action. TTL is always required."""
+    return f"chat_action:{session_id}"
+
+
+async def store_chat_pending_action(
+    session_id: str,
+    payload: dict,
+    ttl: int = CHAT_ACTION_TTL_SECONDS,
+) -> None:
+    await redis_client.set(
+        _chat_action_key(session_id),
+        json.dumps(payload),
+        ex=ttl,
+    )
+
+
+async def get_chat_pending_action(session_id: str) -> dict | None:
+    raw_payload = await redis_client.get(_chat_action_key(session_id))
+
+    if raw_payload is None:
+        return None
+
+    return json.loads(raw_payload)
+
+
+async def delete_chat_pending_action(session_id: str) -> None:
+    await redis_client.delete(_chat_action_key(session_id))
+
 
 def _passcode_attempts_key(user_id: str) -> str:
     return f"passcode_attempts:{user_id}"
@@ -147,6 +194,7 @@ async def get_idempotent_response(key: str) -> dict | None:
     result = await redis_client.get(f"idempotent:{key}")
     return json.loads(result) if result else None
 
+
 # NBL-411: max total card top-ups per user per UTC day.
 TOPUP_DAILY_LIMIT = Decimal("1000")
 
@@ -176,6 +224,47 @@ async def increment_topup_daily(user_id: int, amount: Decimal) -> Decimal:
     same day just refresh the same expiry, which is a harmless no-op.
     """
     key = _topup_daily_key(user_id)
+    amount_cents = int((amount * 100).to_integral_value(rounding=ROUND_HALF_UP))
+
+    now = datetime.now(timezone.utc)
+    next_midnight = (now + timedelta(days=1)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    ttl_seconds = int((next_midnight - now).total_seconds())
+
+    pipe = redis_client.pipeline()
+    pipe.incrby(key, amount_cents)
+    pipe.expire(key, ttl_seconds)
+    results = await pipe.execute()
+    return Decimal(results[0]) / 100
+
+
+def _transfer_daily_key(user_id: int) -> str:
+    return f"transfer_daily:{user_id}"
+
+
+async def get_transfer_daily_total(user_id: int) -> Decimal:
+    """
+    Current UTC-day transfer total for user_id, in dollars (DEVATTECH-107).
+    Mirrors get_topup_daily_total() -- same integer-cents storage, same
+    UTC-midnight TTL behavior. The limit itself lives in
+    settings.DAILY_TRANSFER_LIMIT_USD, not a module constant here (unlike
+    TOPUP_DAILY_LIMIT), per the ticket's "DAILY_TRANSFER_LIMIT_USD config"
+    wording.
+    """
+    cents = await redis_client.get(_transfer_daily_key(user_id))
+    return Decimal(cents) / 100 if cents is not None else Decimal("0")
+
+
+async def increment_transfer_daily(user_id: int, amount: Decimal) -> Decimal:
+    """
+    Atomically add `amount` (dollars) to today's transfer total for
+    user_id and return the new total (DEVATTECH-107 daily limit). Exact
+    same pattern as increment_topup_daily() -- integer cents so INCRBY
+    stays atomic/exact, TTL recomputed each call to expire at next UTC
+    midnight.
+    """
+    key = _transfer_daily_key(user_id)
     amount_cents = int((amount * 100).to_integral_value(rounding=ROUND_HALF_UP))
 
     now = datetime.now(timezone.utc)

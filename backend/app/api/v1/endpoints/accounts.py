@@ -1,4 +1,4 @@
-﻿import asyncio
+import asyncio
 from uuid import uuid4
 
 import httpx
@@ -20,15 +20,16 @@ from app.models.transaction import (
     TransactionCurrency,
     TransactionStatus,
 )
-from app.models.user import KYCStatus, User
-from app.models.wallet import Wallet
+from app.models.user import KYCStatus, User, UserRole
+from app.models.wallet import Wallet, WalletStatus
 from app.schemas.user import CurrentUser
-from app.schemas.wallet import CardTopUpRequest, CardTopUpResponse
+from app.schemas.wallet import CardTopUpRequest, CardTopUpResponse, WalletStatusChangeResponse
 from app.services.account_service import (
     create_wallets_for_user,
     get_user_balances,
 )
 from app.services.audit_log import append_audit
+from app.services.wallet_status import WalletClosedError, WalletFrozenError, assert_wallet_active, record_status_change
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
 
@@ -188,6 +189,14 @@ async def card_top_up(
         select(Wallet).where(Wallet.id == wallet.id).with_for_update()
     )
     wallet = result.scalar_one()
+    try:
+        assert_wallet_active(wallet)
+    except (WalletFrozenError, WalletClosedError) as e:
+        reason = "wallet_frozen" if isinstance(e, WalletFrozenError) else "wallet_closed"
+        raise HTTPException(
+            status_code=422,
+            detail={"error": reason},
+        )
 
     wallet.balance = wallet.balance + payload.amount
 
@@ -297,3 +306,131 @@ async def validate_recipient(
         "account_type": "individual",
         "kyc_approved": user.kyc_status == KYCStatus.approved,
     }
+
+
+
+
+async def _get_owned_or_admin_wallet(wallet_id: int, current_user: CurrentUser, db: AsyncSession) -> Wallet:
+    """
+    Shared ownership/role check for lifecycle endpoints (DEVATTECH-104).
+    "Owner or admin": the wallet's own user, or a user with admin/
+    compliance_officer role. Not using require_role() alone since that
+    would reject the wallet's own owner.
+    """
+    result = await db.execute(select(Wallet).where(Wallet.id == wallet_id))
+    wallet = result.scalar_one_or_none()
+    if wallet is None:
+        raise HTTPException(status_code=404, detail="Wallet not found")
+
+    is_owner = wallet.user_id == int(current_user.id)
+    is_admin = current_user.role in (UserRole.admin, UserRole.compliance_officer)
+    if not (is_owner or is_admin):
+        raise HTTPException(status_code=403, detail="Not authorized for this wallet")
+
+    return wallet
+
+
+@router.post("/{wallet_id}/freeze", response_model=WalletStatusChangeResponse)
+async def freeze_wallet(
+    wallet_id: int,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await _get_owned_or_admin_wallet(wallet_id, current_user, db)
+
+    result = await db.execute(select(Wallet).where(Wallet.id == wallet_id).with_for_update())
+    wallet = result.scalar_one()
+
+    if wallet.status == WalletStatus.closed:
+        raise HTTPException(status_code=422, detail={"error": "wallet_closed"})
+
+    if wallet.status != WalletStatus.frozen:
+        wallet.status = WalletStatus.frozen
+        await db.commit()
+        await record_status_change(
+            db,
+            wallet_id=wallet.id,
+            action="frozen",
+            actor_id=int(current_user.id),
+        )
+        await invalidate_balance_cache(wallet.user_id)
+
+    return WalletStatusChangeResponse(
+        wallet_id=wallet.id,
+        status=wallet.status.value,
+        message="Wallet frozen",
+    )
+
+
+@router.post("/{wallet_id}/unfreeze", response_model=WalletStatusChangeResponse)
+async def unfreeze_wallet(
+    wallet_id: int,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await _get_owned_or_admin_wallet(wallet_id, current_user, db)
+
+    result = await db.execute(select(Wallet).where(Wallet.id == wallet_id).with_for_update())
+    wallet = result.scalar_one()
+
+    if wallet.status == WalletStatus.closed:
+        raise HTTPException(status_code=422, detail={"error": "wallet_closed"})
+
+    if wallet.status != WalletStatus.active:
+        wallet.status = WalletStatus.active
+        await db.commit()
+        await record_status_change(
+            db,
+            wallet_id=wallet.id,
+            action="unfrozen",
+            actor_id=int(current_user.id),
+        )
+        await invalidate_balance_cache(wallet.user_id)
+
+    return WalletStatusChangeResponse(
+        wallet_id=wallet.id,
+        status=wallet.status.value,
+        message="Wallet unfrozen",
+    )
+
+
+@router.post("/{wallet_id}/close", response_model=WalletStatusChangeResponse)
+async def close_wallet(
+    wallet_id: int,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await _get_owned_or_admin_wallet(wallet_id, current_user, db)
+
+    result = await db.execute(select(Wallet).where(Wallet.id == wallet_id).with_for_update())
+    wallet = result.scalar_one()
+
+    if wallet.status == WalletStatus.closed:
+        return WalletStatusChangeResponse(
+            wallet_id=wallet.id,
+            status=wallet.status.value,
+            message="Wallet already closed",
+        )
+
+    if wallet.balance != 0:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "wallet_balance_not_zero", "balance": str(wallet.balance)},
+        )
+
+    wallet.status = WalletStatus.closed
+    await db.commit()
+    await record_status_change(
+        db,
+        wallet_id=wallet.id,
+        action="closed",
+        actor_id=int(current_user.id),
+    )
+    await invalidate_balance_cache(wallet.user_id)
+
+    return WalletStatusChangeResponse(
+        wallet_id=wallet.id,
+        status=wallet.status.value,
+        message="Wallet closed",
+    )
+

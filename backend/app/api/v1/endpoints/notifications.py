@@ -9,9 +9,12 @@ from app.core.redis import get_redis_client, is_blacklisted
 from app.core.security import decode_token
 from app.db.session import get_db
 from app.models.notification import Notification
+from app.models.push_subscription import PushSubscription
 from app.schemas.notification import (
     NotificationPageResponse,
     NotificationResponse,
+    PushSubscriptionCreate,
+    PushSubscriptionResponse,
     ReadAllNotificationsResponse,
 )
 from app.schemas.user import CurrentUser
@@ -125,6 +128,41 @@ async def stream_notifications(
     )
 
 
+@router.post("/push/subscribe", response_model=PushSubscriptionResponse)
+async def subscribe_push_notifications(
+    payload: PushSubscriptionCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    user_id = get_user_id(current_user)
+    token = payload.token.strip()
+
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Push token cannot be blank",
+        )
+
+    result = await db.execute(
+        select(PushSubscription).where(PushSubscription.token == token)
+    )
+    subscription = result.scalar_one_or_none()
+
+    if subscription is None:
+        subscription = PushSubscription(
+            user_id=user_id,
+            token=token,
+        )
+        db.add(subscription)
+    else:
+        subscription.user_id = user_id
+
+    await db.commit()
+    await db.refresh(subscription)
+
+    return subscription
+
+
 @router.get("", response_model=NotificationPageResponse)
 async def list_notifications(
     page: int = Query(1, ge=1),
@@ -141,9 +179,7 @@ async def list_notifications(
     if unread_only:
         filters.append(Notification.read.is_(False))
 
-    total_result = await db.execute(
-        select(func.count(Notification.id)).where(*filters)
-    )
+    total_result = await db.execute(select(func.count(Notification.id)).where(*filters))
     total = total_result.scalar_one()
 
     notifications_result = await db.execute(

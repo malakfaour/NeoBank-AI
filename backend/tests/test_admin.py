@@ -91,12 +91,14 @@ def test_compliance_summary_response_shape():
         month="2026-07",
         total_transactions_created=1450,
         currently_flagged_from_month=12,
+        flagged_rate=0.0083,
         resolutions_this_month=ResolutionCounts(legitimate=8, confirmed_fraud=3),
         reversed_amount_by_currency=[
             ReversedAmountByCurrency(currency="USD", total_amount=Decimal("1240.50"), count=2),
             ReversedAmountByCurrency(currency="LBP", total_amount=Decimal("980000.00"), count=1),
         ],
     )
+    assert response.flagged_rate == 0.0083
     assert response.resolutions_this_month.legitimate == 8
     assert response.resolutions_this_month.confirmed_fraud == 3
     assert len(response.reversed_amount_by_currency) == 2

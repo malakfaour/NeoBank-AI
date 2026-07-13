@@ -1,0 +1,29 @@
+{
+  "feature_order": [
+    "amount",
+    "amount_to_user_avg_ratio",
+    "is_new_recipient",
+    "hour_of_day",
+    "day_of_week",
+    "sender_tx_count_30d",
+    "currency_match"
+  ],
+  "trained_on_rows": 12000,
+  "fraud_rate": 0.05,
+  "holdout_rows": 2400,
+  "holdout_auc": 0.9995,
+  "meets_target_auc": true,
+  "cv_auc_scores": [
+    0.9983,
+    0.9995,
+    0.9969,
+    0.9995,
+    0.9976
+  ],
+  "cv_auc_mean": 0.9983,
+  "target_auc": 0.82,
+  "random_seed": 42,
+  "sklearn_version": "1.9.0",
+  "xgboost_version": "2.0.0",
+  "trained_at_utc": "2026-07-09T22:11:57.324456+00:00"
+}

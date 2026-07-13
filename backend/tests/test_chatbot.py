@@ -17,6 +17,7 @@ async def _mock_chatbot_response(message, session_id, user_id, db):
 def _groq_success(intent: str, confidence: float):
     """Only fakes calls to the Groq endpoint; everything else (the test
     client's own calls into the app) passes through to the real post()."""
+
     async def _post(self, url, *args, **kwargs):
         if str(url) == GROQ_API_URL:
             return httpx.Response(
@@ -51,16 +52,22 @@ def _groq_unreachable():
 @pytest.fixture
 async def auth_tokens(client):
     """Register and login a test user, return tokens."""
-    await client.post("/api/v1/auth/register", json={
-        "full_name": "Chatbot Test User",
-        "email": "chatbottest@neobank.com",
-        "phone": "+96170000099",
-        "password": "TestPass123",
-    })
-    response = await client.post("/api/v1/auth/login", json={
-        "email": "chatbottest@neobank.com",
-        "password": "TestPass123",
-    })
+    await client.post(
+        "/api/v1/auth/register",
+        json={
+            "full_name": "Chatbot Test User",
+            "email": "chatbottest@neobank.com",
+            "phone": "+96170000099",
+            "password": "TestPass123",
+        },
+    )
+    response = await client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": "chatbottest@neobank.com",
+            "password": "TestPass123",
+        },
+    )
     return response.json()
 
 
@@ -85,11 +92,7 @@ async def test_chatbot_general_intent_happy_path(
                 "session_id": "test-general-session",
                 "message": "hi there",
             },
-            headers={
-                "Authorization": (
-                    f"Bearer {auth_tokens['access_token']}"
-                )
-            },
+            headers={"Authorization": (f"Bearer {auth_tokens['access_token']}")},
         )
 
     assert response.status_code == 200
@@ -101,6 +104,7 @@ async def test_chatbot_general_intent_happy_path(
     assert data["intent"] == "GENERAL"
     assert data["confidence"] == 0.4
     assert data["confirmation_required"] is False
+
 
 async def test_chatbot_requires_auth(client):
     """Auth rejected: no Authorization header returns 401."""
@@ -129,13 +133,9 @@ async def test_chatbot_transfer_intent_requires_confirmation(
             "/api/v1/chatbot/message",
             json={
                 "session_id": "test-transfer-session",
-                "message": "send 100 to Sara",
+                "message": "send 100 USD to +96170123456",
             },
-            headers={
-                "Authorization": (
-                    f"Bearer {auth_tokens['access_token']}"
-                )
-            },
+            headers={"Authorization": (f"Bearer {auth_tokens['access_token']}")},
         )
 
     assert response.status_code == 200
@@ -147,6 +147,7 @@ async def test_chatbot_transfer_intent_requires_confirmation(
     assert data["confidence"] == 0.92
     assert data["confirmation_required"] is True
     assert "confirm" in data["reply"].lower()
+
 
 async def test_chatbot_groq_failure_falls_back_to_general(
     client,
@@ -169,11 +170,7 @@ async def test_chatbot_groq_failure_falls_back_to_general(
                 "session_id": "test-fallback-session",
                 "message": "what's my balance",
             },
-            headers={
-                "Authorization": (
-                    f"Bearer {auth_tokens['access_token']}"
-                )
-            },
+            headers={"Authorization": (f"Bearer {auth_tokens['access_token']}")},
         )
 
     assert response.status_code == 200
@@ -185,6 +182,7 @@ async def test_chatbot_groq_failure_falls_back_to_general(
     assert data["intent"] == "GENERAL"
     assert data["confidence"] == 0.0
     assert data["confirmation_required"] is False
+
 
 async def test_chatbot_logs_intent_classification(client, auth_tokens):
     """Chatbot message saves intent classification into chatbot_logs."""
@@ -203,7 +201,10 @@ async def test_chatbot_logs_intent_classification(client, auth_tokens):
     ):
         response = await client.post(
             "/api/v1/chatbot/message",
-            json={"message": "what is my balance?", "session_id": "test-intent-session"},
+            json={
+                "message": "what is my balance?",
+                "session_id": "test-intent-session",
+            },
             headers={"Authorization": f"Bearer {auth_tokens['access_token']}"},
         )
 
@@ -231,3 +232,247 @@ async def test_chatbot_banned_ip_returns_429(client, auth_tokens, mock_redis):
 
     assert response.status_code == 429
     assert "banned" in response.json()["detail"].lower()
+
+async def _get_chatbot_test_user_id() -> int:
+    from sqlalchemy import select
+
+    from app.db.session import AsyncSessionLocal
+    from app.models.user import User
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(User).where(User.email == "chatbottest@neobank.com")
+        )
+        user = result.scalar_one()
+        return user.id
+
+
+async def _store_test_pending_transfer(
+    mock_redis, session_id: str, user_id: int
+) -> None:
+    await mock_redis.set(
+        f"chat_action:{session_id}",
+        json.dumps(
+            {
+                "type": "transfer",
+                "method": "mobile",
+                "recipient": "+96170123456",
+                "receiver_phone": "+96170123456",
+                "amount": "10",
+                "currency": "USD",
+                "user_id": user_id,
+                "idempotency_key": f"chatbot:{session_id}:test",
+            }
+        ),
+        ex=300,
+    )
+
+
+def _transfer_receipt():
+    from datetime import datetime, timezone
+    from decimal import Decimal
+
+    from app.schemas.transfer import TransferReceipt
+
+    return TransferReceipt(
+        transaction_id=123,
+        amount=Decimal("10"),
+        currency="USD",
+        receiver_display_name="Receiver User",
+        sender_new_balance=Decimal("90"),
+        timestamp=datetime.now(timezone.utc),
+    )
+
+
+async def test_chatbot_transfer_intent_stores_pending_action(
+    client,
+    auth_tokens,
+    mock_redis,
+):
+    session_id = "test-transfer-store-session"
+
+    with patch(
+        "httpx.AsyncClient.post",
+        new=_groq_success("TRANSFER_INTENT", 0.92),
+    ):
+        response = await client.post(
+            "/api/v1/chatbot/message",
+            json={
+                "session_id": session_id,
+                "message": "send 10 USD to +96170123456",
+            },
+            headers={
+                "Authorization": f"Bearer {auth_tokens['access_token']}",
+            },
+        )
+
+    assert response.status_code == 200, response.text
+
+    data = response.json()
+
+    assert data["confirmation_required"] is True
+    assert data["pending_action"] == {
+        "type": "transfer",
+        "method": "mobile",
+        "recipient": "+96170123456",
+        "amount": "10",
+        "currency": "USD",
+    }
+    assert data["transfer_receipt"] is None
+
+    raw_pending = await mock_redis.get(f"chat_action:{session_id}")
+    assert raw_pending is not None
+
+    pending_action = json.loads(raw_pending)
+    assert pending_action["type"] == "transfer"
+    assert pending_action["method"] == "mobile"
+    assert pending_action["receiver_phone"] == "+96170123456"
+    assert pending_action["amount"] == "10"
+    assert pending_action["currency"] == "USD"
+
+
+async def test_chatbot_confirm_without_action_token_does_not_execute(
+    client,
+    auth_tokens,
+    mock_redis,
+):
+    session_id = "test-confirm-missing-token-session"
+    user_id = await _get_chatbot_test_user_id()
+
+    await _store_test_pending_transfer(mock_redis, session_id, user_id)
+
+    mock_execute = AsyncMock(return_value=_transfer_receipt())
+
+    with (
+        patch("httpx.AsyncClient.post", new=_groq_success("GENERAL", 0.1)),
+        patch(
+            "app.api.v1.endpoints.chatbot.execute_transfer_by_mobile",
+            new=mock_execute,
+        ),
+    ):
+        response = await client.post(
+            "/api/v1/chatbot/message",
+            json={
+                "session_id": session_id,
+                "message": "confirm",
+            },
+            headers={
+                "Authorization": f"Bearer {auth_tokens['access_token']}",
+            },
+        )
+
+    assert response.status_code == 403
+    mock_execute.assert_not_called()
+
+    assert await mock_redis.get(f"chat_action:{session_id}") is not None
+
+
+async def test_chatbot_confirm_with_valid_action_token_executes_transfer_service(
+    client,
+    auth_tokens,
+    mock_redis,
+):
+    session_id = "test-confirm-valid-token-session"
+    user_id = await _get_chatbot_test_user_id()
+    action_token = "chatbot-action-token"
+
+    await _store_test_pending_transfer(mock_redis, session_id, user_id)
+    await mock_redis.set(f"action_token:{user_id}", action_token, ex=300)
+
+    mock_execute = AsyncMock(return_value=_transfer_receipt())
+
+    with (
+        patch("httpx.AsyncClient.post", new=_groq_success("GENERAL", 0.1)),
+        patch(
+            "app.api.v1.endpoints.chatbot.execute_transfer_by_mobile",
+            new=mock_execute,
+        ),
+    ):
+        response = await client.post(
+            "/api/v1/chatbot/message",
+            json={
+                "session_id": session_id,
+                "message": "confirm",
+            },
+            headers={
+                "Authorization": f"Bearer {auth_tokens['access_token']}",
+                "X-Action-Token": action_token,
+            },
+        )
+
+    assert response.status_code == 200, response.text
+
+    data = response.json()
+
+    assert data["confirmation_required"] is False
+    assert data["pending_action"] is None
+    assert data["transfer_receipt"]["transaction_id"] == 123
+    assert data["transfer_receipt"]["receiver_display_name"] == "Receiver User"
+
+    mock_execute.assert_awaited_once()
+    assert await mock_redis.get(f"chat_action:{session_id}") is None
+    assert await mock_redis.get(f"action_token:{user_id}") is None
+
+
+async def test_chatbot_cancel_discards_pending_action(
+    client,
+    auth_tokens,
+    mock_redis,
+):
+    session_id = "test-cancel-pending-session"
+    user_id = await _get_chatbot_test_user_id()
+
+    await _store_test_pending_transfer(mock_redis, session_id, user_id)
+
+    with patch("httpx.AsyncClient.post", new=_groq_success("GENERAL", 0.1)):
+        response = await client.post(
+            "/api/v1/chatbot/message",
+            json={
+                "session_id": session_id,
+                "message": "cancel",
+            },
+            headers={
+                "Authorization": f"Bearer {auth_tokens['access_token']}",
+            },
+        )
+
+    assert response.status_code == 200, response.text
+
+    data = response.json()
+
+    assert data["confirmation_required"] is False
+    assert "cancelled" in data["reply"].lower()
+    assert await mock_redis.get(f"chat_action:{session_id}") is None
+
+
+async def test_chatbot_confirm_without_pending_action_does_not_execute(
+    client,
+    auth_tokens,
+):
+    mock_execute = AsyncMock(return_value=_transfer_receipt())
+
+    with (
+        patch("httpx.AsyncClient.post", new=_groq_success("GENERAL", 0.1)),
+        patch(
+            "app.api.v1.endpoints.chatbot.execute_transfer_by_mobile",
+            new=mock_execute,
+        ),
+    ):
+        response = await client.post(
+            "/api/v1/chatbot/message",
+            json={
+                "session_id": "test-expired-pending-session",
+                "message": "confirm",
+            },
+            headers={
+                "Authorization": f"Bearer {auth_tokens['access_token']}",
+            },
+        )
+
+    assert response.status_code == 200, response.text
+
+    data = response.json()
+
+    assert data["confirmation_required"] is False
+    assert "expired" in data["reply"].lower()
+    mock_execute.assert_not_called()

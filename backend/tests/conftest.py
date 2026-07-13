@@ -41,7 +41,9 @@ os.environ["SMTP_PASSWORD"] = "test_password"
 os.environ["TWILIO_ACCOUNT_SID"] = "test_sid"
 os.environ["TWILIO_AUTH_TOKEN"] = "test_token"
 os.environ["TWILIO_FROM_NUMBER"] = "+15555555555"
-os.environ["PAYMENT_GATEWAY_URL"] = "https://sandbox.paymentgateway.example.com/v1/charge"
+os.environ["PAYMENT_GATEWAY_URL"] = (
+    "https://sandbox.paymentgateway.example.com/v1/charge"
+)
 
 from app.db.base import Base  # noqa: E402
 from app.db.session import engine  # noqa: E402
@@ -62,15 +64,20 @@ async def create_tables():
         Base.metadata.tables["wallets"],
         Base.metadata.tables["user_sessions"],
         Base.metadata.tables["transactions"],
+        Base.metadata.tables["device_credentials"],
         Base.metadata.tables["transaction_audit_logs"],
+        Base.metadata.tables["account_status_audit_logs"],
         Base.metadata.tables["bill_payments"],
         Base.metadata.tables["exchange_rates"],
         Base.metadata.tables["exchange_audit_logs"],
         Base.metadata.tables["fraud_resolutions"],
         Base.metadata.tables["beneficiaries"],
         Base.metadata.tables["kyc_records"],
+        Base.metadata.tables["kyc_audit_logs"],
         Base.metadata.tables["model_metrics"],
         Base.metadata.tables["notifications"],
+        Base.metadata.tables["push_subscriptions"],
+        Base.metadata.tables["chat_sessions"],
         Base.metadata.tables["chatbot_logs"],
     ]
     async with engine.begin() as conn:
@@ -87,14 +94,15 @@ async def create_tables():
 @pytest.fixture(autouse=True)
 async def mock_redis():
     fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
-    with patch("app.core.redis.redis_client", fake), \
-         patch("app.core.cache_utils.redis_client", fake), \
-         patch("app.main.redis_client", fake), \
-         patch("app.services.exchange_cache.redis_client", fake), \
-         patch("app.services.otp.redis_client", fake), \
-         patch("app.services.rate_limiter.redis_client", fake):
+    with (
+        patch("app.core.redis.redis_client", fake),
+        patch("app.core.cache_utils.redis_client", fake),
+        patch("app.main.redis_client", fake),
+        patch("app.services.exchange_cache.redis_client", fake),
+        patch("app.services.otp.redis_client", fake),
+        patch("app.services.rate_limiter.redis_client", fake),
+    ):
         yield fake
-
 
 
 class _FakeGatewayResponse:
@@ -145,12 +153,14 @@ def mock_payment_gateway(monkeypatch):
         _FakeGatewayClient,
     )
 
+
 @pytest_asyncio.fixture
 async def client():
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as ac:
         yield ac
+
 
 @pytest_asyncio.fixture
 async def db_session():
