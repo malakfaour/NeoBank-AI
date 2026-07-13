@@ -45,16 +45,52 @@ router = APIRouter(prefix="/exchange", tags=["exchange"])
 logger = logging.getLogger(__name__)
 
 
-async def get_rates_from_cache_or_provider() -> dict[tuple[str, str], Decimal]:
+async def get_rates_from_cache_or_provider(
+    db: AsyncSession | None = None,
+) -> dict[tuple[str, str], Decimal]:
+
     cached_rates = await get_cached_exchange_rates()
 
     if cached_rates is not None:
         return cached_rates
 
-    rates = await fetch_exchange_rates()
-    await set_cached_exchange_rates(rates)
+    try:
+        rates = await fetch_exchange_rates()
 
-    return rates
+        await set_cached_exchange_rates(
+            rates
+        )
+
+        return rates
+
+    except Exception:
+
+        if db is not None:
+            result = await db.execute(
+                select(ExchangeRate)
+                .order_by(
+                    ExchangeRate.last_updated_at.desc()
+                )
+            )
+
+            latest_rates = {}
+
+            for row in result.scalars().all():
+                pair = (
+                    row.base_currency,
+                    row.target_currency,
+                )
+
+                if pair not in latest_rates:
+                    latest_rates[pair] = row.rate
+
+            if latest_rates:
+                return latest_rates
+
+        raise HTTPException(
+            status_code=503,
+            detail="Exchange rate provider unavailable",
+        )
 
 
 @router.get("/market-status")
@@ -154,6 +190,7 @@ async def convert_currency(
     amount: Decimal = Query(..., gt=0),
     from_currency: str = Query(..., min_length=3, max_length=3),
     to_currency: str = Query(..., min_length=3, max_length=3),
+    db: AsyncSession = Depends(get_db),
 ):
     from_currency = from_currency.upper()
     to_currency = to_currency.upper()
@@ -174,7 +211,6 @@ async def convert_currency(
         )
 
     rates = await get_rates_from_cache_or_provider()
-
     rate = rates.get(
         (from_currency, to_currency)
     )
@@ -200,6 +236,8 @@ async def convert_currency(
         "fee_pct": settings.FEE_PCT,
         "fee_amount": fee_amount,
     }
+
+
 @router.post("/execute", response_model=ExchangeExecutionResponse)
 async def execute_exchange(
     payload: ExchangeExecutionRequest,
@@ -472,6 +510,8 @@ async def execute_exchange(
         "converted_amount": converted_amount,
         "message": "Exchange executed successfully",
     }
+
+
 @router.get("/rates/history")
 async def get_exchange_rates_history(
     days: int = Query(30, ge=1, le=90),
@@ -501,30 +541,32 @@ async def get_exchange_rates_history(
         for row in rows
     ]
 
+
 @router.get("/forecast", response_model=ExchangeForecastResponse)
 async def forecast_exchange_rate(
     days: int = Query(7, ge=1, le=7),
+    db: AsyncSession = Depends(get_db),
 ):
-     rates = await get_rates_from_cache_or_provider()
+    rates = await get_rates_from_cache_or_provider()
 
-     latest_rate = rates.get(("USD", "LBP"))
+    latest_rate = rates.get(("USD", "LBP"))
 
-     if latest_rate is None:
+    if latest_rate is None:
         raise HTTPException(
             status_code=400,
             detail="USD to LBP rate is not available for forecasting",
         )
 
-     predictions = await run_in_threadpool(
+    predictions = await run_in_threadpool(
         train_and_forecast_usd_lbp,
         latest_rate,
         days,
     )
 
-     return {
+    return {
         "base_currency": "USD",
         "target_currency": "LBP",
         "days": days,
-        "model": "LightGBM",
+        "model": settings.FORECAST_MODEL,
         "predictions": predictions,
     }
