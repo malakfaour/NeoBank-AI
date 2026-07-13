@@ -42,3 +42,4 @@ class User(Base):
     wallets = relationship("Wallet", back_populates="user", cascade="all, delete-orphan")
     beneficiaries = relationship("Beneficiary", back_populates="user", cascade="all, delete-orphan")
     notifications = relationship("Notification", back_populates="user", cascade="all, delete-orphan")
+    push_subscriptions = relationship("PushSubscription", back_populates="user", cascade="all, delete-orphan")

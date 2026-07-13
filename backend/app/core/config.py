@@ -50,6 +50,12 @@ class Settings(BaseSettings):
     S3_REGION: str = ""
     S3_ENDPOINT_URL: str = ""
 
+    # FCM Web Push
+    FCM_PROJECT_ID: str = ""
+    FCM_CLIENT_EMAIL: str = ""
+    FCM_PRIVATE_KEY: str = ""
+    FCM_TIMEOUT_SECONDS: float = 5.0
+
     # Email
     EMAIL_PROVIDER: str = "console"  # console, smtp, sendgrid
     EMAIL_FROM: str = "NeoBank Lebanon <no-reply@neobank.local>"
