@@ -286,7 +286,7 @@ async def get_flagged_transactions(
         the two real, independent flagging signals per DEVATTECH-84/87 --
         a transaction can be ML-flagged, rule-flagged, both, or neither.
     FRAUD_FLAG_THRESHOLD is imported from app/services/fraud_scoring.py
-    (never hardcoded), per ENGINEERING_RULES.md Â§7.
+    (never hardcoded), per ENGINEERING_RULES.md §7.
     """
     filter_condition = or_(
         Transaction.status == TransactionStatus.flagged,
