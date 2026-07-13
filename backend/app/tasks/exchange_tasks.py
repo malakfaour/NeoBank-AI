@@ -1,9 +1,11 @@
 import asyncio
 import json
+from datetime import datetime, timezone
 from decimal import Decimal
 
 import httpx
 import redis
+from sqlalchemy import select
 
 from app.celery_app import celery_app
 from app.core.config import settings
@@ -16,6 +18,11 @@ from app.services.exchange_cache import (
 from app.services.exchange_ml_service import (
     train_and_evaluate_models,
 )
+from app.services.model_artifact import (
+    backup_current_model,
+    atomic_save,
+    rollback_model,
+)
 
 
 EXCHANGE_API_URL = "https://open.er-api.com/v6/latest/USD"
@@ -23,6 +30,8 @@ EXCHANGE_API_URL = "https://open.er-api.com/v6/latest/USD"
 EXCHANGE_FORECAST_CACHE_KEY = (
     "exchange:forecast:usd_lbp:7_days"
 )
+
+BEAT_LAST_RUN_KEY = "beat:last_run"
 
 
 def decimal_to_str_rates(
@@ -35,21 +44,19 @@ def decimal_to_str_rates(
 
 
 def fetch_exchange_rates_sync() -> dict[tuple[str, str], Decimal]:
-    """
-    Sync exchange-rate fetcher for Celery polling task.
-    """
 
     with httpx.Client(timeout=10.0) as client:
         response = client.get(
             EXCHANGE_API_URL
         )
+
         response.raise_for_status()
 
     data = response.json()
 
     if data.get("result") != "success":
         raise RuntimeError(
-            "Exchange rate provider returned unsuccessful response"
+            "Exchange provider failed"
         )
 
     provider_rates = data.get(
@@ -58,11 +65,10 @@ def fetch_exchange_rates_sync() -> dict[tuple[str, str], Decimal]:
     )
 
     usd_to_lbp = provider_rates.get("LBP")
-    usd_to_eur = provider_rates.get("EUR")
 
     if usd_to_lbp is None:
         raise RuntimeError(
-            "LBP rate was not found"
+            "LBP rate missing"
         )
 
     rates = {
@@ -73,22 +79,72 @@ def fetch_exchange_rates_sync() -> dict[tuple[str, str], Decimal]:
         / Decimal(str(usd_to_lbp)),
     }
 
-    if usd_to_eur:
-        rates[("USD", "EUR")] = Decimal(
-            str(usd_to_eur)
-        )
-
-        rates[("EUR", "USD")] = (
-            Decimal("1")
-            / Decimal(str(usd_to_eur))
-        )
-
     return rates
+
+
+def update_beat_heartbeat():
+
+    redis_client = redis.Redis.from_url(
+        settings.REDIS_URL,
+        decode_responses=True,
+    )
+
+    redis_client.setex(
+        BEAT_LAST_RUN_KEY,
+        7 * 24 * 60 * 60,
+        datetime.now(
+            timezone.utc
+        ).isoformat(),
+    )
+
+
+async def get_previous_mae():
+
+    async with AsyncSessionLocal() as session:
+
+        result = await session.execute(
+            select(ModelMetrics)
+            .where(
+                ModelMetrics.model_name == "LightGBM"
+            )
+            .order_by(
+                ModelMetrics.trained_at.desc()
+            )
+            .limit(1)
+        )
+
+        row = result.scalar_one_or_none()
+
+        if row is None:
+            return None
+
+        return row.mae
+
+
+async def apply_model_safety(
+    new_mae: float,
+) -> str:
+
+    previous_mae = await get_previous_mae()
+
+    backup_current_model()
+
+    if (
+        previous_mae is not None
+        and new_mae > previous_mae * 1.2
+    ):
+        rollback_model()
+        return "rollback"
+
+    atomic_save()
+
+    return "accepted"
 
 
 async def save_model_metrics(
     results: list[dict],
 ):
+
     async with AsyncSessionLocal() as session:
 
         for result in results:
@@ -133,7 +189,6 @@ def poll_exchange_rates():
 )
 def retrain_exchange_forecast():
 
-    # Async provider fetch used because tests/mock expect it
     rates = asyncio.run(
         fetch_exchange_rates()
     )
@@ -144,12 +199,25 @@ def retrain_exchange_forecast():
 
     if usd_to_lbp is None:
         raise RuntimeError(
-            "USD/LBP rate unavailable"
+            "USD/LBP unavailable"
         )
 
     evaluation = train_and_evaluate_models(
         usd_to_lbp
     )
+
+    new_mae = min(
+        item["mae"]
+        for item in evaluation["results"]
+    )
+
+    model_status = asyncio.run(
+        apply_model_safety(
+            new_mae
+        )
+    )
+
+    update_beat_heartbeat()
 
     redis_client = redis.Redis.from_url(
         settings.REDIS_URL,
@@ -164,6 +232,8 @@ def retrain_exchange_forecast():
                 "base_currency": "USD",
                 "target_currency": "LBP",
                 "model": evaluation["winner"],
+                "mae": new_mae,
+                "model_status": model_status,
             }
         ),
     )
@@ -177,6 +247,8 @@ def retrain_exchange_forecast():
     return {
         "status": "ok",
         "winner": evaluation["winner"],
+        "mae": new_mae,
+        "model_status": model_status,
         "metrics_saved": len(
             evaluation["results"]
         ),
@@ -184,6 +256,7 @@ def retrain_exchange_forecast():
 
 
 async def retrain_exchange_forecast_model():
+
     rates = await fetch_exchange_rates()
 
     usd_to_lbp = rates.get(
@@ -192,16 +265,33 @@ async def retrain_exchange_forecast_model():
 
     if usd_to_lbp is None:
         raise RuntimeError(
-            "USD/LBP rate unavailable"
+            "USD/LBP unavailable"
         )
 
     evaluation = train_and_evaluate_models(
         usd_to_lbp
     )
 
+    new_mae = min(
+        result["mae"]
+        for result in evaluation["results"]
+    )
+
+    model_status = await apply_model_safety(
+        new_mae
+    )
+
     redis_client = redis.Redis.from_url(
         settings.REDIS_URL,
         decode_responses=True,
+    )
+
+    redis_client.setex(
+        BEAT_LAST_RUN_KEY,
+        7 * 24 * 60 * 60,
+        datetime.now(
+            timezone.utc
+        ).isoformat(),
     )
 
     redis_client.setex(
@@ -212,6 +302,8 @@ async def retrain_exchange_forecast_model():
                 "base_currency": "USD",
                 "target_currency": "LBP",
                 "model": evaluation["winner"],
+                "mae": new_mae,
+                "model_status": model_status,
             }
         ),
     )
@@ -221,13 +313,11 @@ async def retrain_exchange_forecast_model():
     )
 
     return {
-    "status": "ok",
-    "winner": evaluation["winner"],
-    "mae": min(
-        result["mae"]
-        for result in evaluation["results"]
-    ),
-    "metrics_saved": len(
-        evaluation["results"]
-    ),
-}
+        "status": "ok",
+        "winner": evaluation["winner"],
+        "mae": new_mae,
+        "model_status": model_status,
+        "metrics_saved": len(
+            evaluation["results"]
+        ),
+    }
