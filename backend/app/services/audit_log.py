@@ -2,6 +2,28 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.models.transaction_audit_log import TransactionAuditLog
+from app.models.kyc_audit_log import KYCAuditLog
+
+
+async def append_kyc_audit(
+    db: AsyncSession,
+    *,
+    kyc_record_id: int,
+    action: str,
+    actor_id: int | None,
+    metadata: dict | None = None,
+) -> KYCAuditLog:
+    """Insert and commit one append-only KYC decision audit entry."""
+    audit_entry = KYCAuditLog(
+        kyc_record_id=kyc_record_id,
+        action=action,
+        actor_id=actor_id,
+        event_metadata=metadata,
+    )
+    db.add(audit_entry)
+    await db.commit()
+    await db.refresh(audit_entry)
+    return audit_entry
 
 
 async def append_audit(

@@ -1,6 +1,7 @@
 import enum
 from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Enum as SAEnum
 from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
 
 from app.db.base import Base
 
@@ -23,6 +24,7 @@ class KYCRecord(Base):
     liveness_score = Column(Float, nullable=True)
     status = Column(SAEnum(KYCRecordStatus), nullable=False, default=KYCRecordStatus.pending)
     rejection_reason = Column(String(255), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     reviewed_at = Column(DateTime(timezone=True), nullable=True)
     reviewed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
 
