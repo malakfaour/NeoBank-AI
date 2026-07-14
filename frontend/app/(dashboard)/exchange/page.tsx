@@ -6,6 +6,7 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "rec
 import api from "@/lib/axios";
 
 interface MarketStatus { is_open: boolean; reason?: string; }
+interface HistoryPoint { date: string; rate: number; provider: string; }
 interface ForecastPoint { date: string; predicted_rate: number; }
 type Step = "form" | "passcode" | "confirm" | "receipt";
 
@@ -33,6 +34,8 @@ export default function ExchangePage() {
   const [rate, setRate] = useState<number | null>(null);
   const [marketStatus, setMarketStatus] = useState<MarketStatus | null>(null);
   const [forecast, setForecast] = useState<ForecastPoint[]>([]);
+  const [history, setHistory] = useState<HistoryPoint[]>([]);
+const [isStale, setIsStale] = useState(false);
   const [passcode, setPasscode] = useState("");
   const [actionToken, setActionToken] = useState("");
   const [loading, setLoading] = useState(false);
@@ -42,13 +45,17 @@ export default function ExchangePage() {
 
   useEffect(() => {
     api.get("/exchange/market-status").then((r) => setMarketStatus(r.data)).catch(() => {});
+    api.get("/exchange/rates/history?days=30").then((r) => setHistory(r.data ?? [])).catch(() => {});
     api.get("/exchange/forecast").then((r) => setForecast(r.data.predictions ?? [])).catch(() => {});
-    api.get("/exchange/rates").then((r) => {
+   api.get("/exchange/rates").then((r) => {
   const rates: { base_currency: string; target_currency: string; rate: number }[] = r.data;
   const r1 = rates.find((x) => x.base_currency === "USD" && x.target_currency === "LBP");
   if (r1) setRate(r1.rate);
   else setError("Exchange rate unavailable. Try again later.");
 }).catch(() => setError("Could not load exchange rates. Please try again."));
+api.get("/exchange/rates/live").then((r) => {
+  if (r.data.cache_age_seconds > 300) setIsStale(true);
+}).catch(() => {});
   }, []);
 
   const swap = () => {
@@ -155,19 +162,39 @@ export default function ExchangePage() {
         </div>
       </div>
 
-      {forecast.length > 0 && (
-        <div style={{ backgroundColor: "#fff", borderRadius: "20px", padding: "20px", marginBottom: "16px" }}>
-          <p style={{ color: "#aaa", fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "12px" }}>7-Day USD/LBP Forecast</p>
-          <ResponsiveContainer width="100%" height={140}>
-            <LineChart data={forecast}>
-              <XAxis dataKey="date" tick={{ fontSize: 10 }} tickFormatter={(v) => String(v).slice(5)} />
-              <YAxis tick={{ fontSize: 10 }} width={60} />
-              <Tooltip formatter={(v) => (typeof v === "number" ? v.toLocaleString() : String(v))} />
-              <Line type="monotone" dataKey="predicted_rate" stroke="#00C853" strokeWidth={2} dot={false} />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-      )}
+ {(forecast.length > 0 || history.length > 0) && (
+  <div style={{ backgroundColor: "#fff", borderRadius: "20px", padding: "20px", marginBottom: "16px" }}>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+      <p style={{ color: "#aaa", fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+        USD/LBP Rate History + Forecast
+      </p>
+      {isStale && <p style={{ fontSize: "11px", color: "#F59E0B", fontWeight: "600" }}>⚠ Stale data</p>}
+    </div>
+    <div style={{ display: "flex", gap: "16px", marginBottom: "8px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+        <div style={{ width: "12px", height: "2px", backgroundColor: "#3B82F6" }} />
+        <p style={{ fontSize: "11px", color: "#aaa" }}>Historical</p>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+        <div style={{ width: "12px", height: "2px", backgroundColor: "#00C853" }} />
+        <p style={{ fontSize: "11px", color: "#aaa" }}>Forecast</p>
+      </div>
+    </div>
+    <ResponsiveContainer width="100%" height={160}>
+      <LineChart>
+        <XAxis dataKey="date" tick={{ fontSize: 10 }} tickFormatter={(v) => String(v).slice(5)} />
+        <YAxis tick={{ fontSize: 10 }} width={60} />
+        <Tooltip formatter={(v) => (typeof v === "number" ? v.toLocaleString() : String(v))} />
+        {history.length > 0 && (
+          <Line data={history} type="monotone" dataKey="rate" stroke="#3B82F6" strokeWidth={2} dot={false} name="Historical" />
+        )}
+        {forecast.length > 0 && (
+          <Line data={forecast} type="monotone" dataKey="predicted_rate" stroke="#00C853" strokeWidth={2} dot={false} strokeDasharray="5 5" name="Forecast" />
+        )}
+      </LineChart>
+    </ResponsiveContainer>
+  </div>
+)}
 
       {error && <p style={{ color: "#EF4444", fontSize: "13px", marginBottom: "12px" }}>{error}</p>}
 
