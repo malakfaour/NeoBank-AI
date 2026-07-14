@@ -62,7 +62,9 @@ class LedgerDirection(str, enum.Enum):
 class Transaction(Base):
     __tablename__ = "transactions"
     __table_args__ = (
-        Index("ix_transactions_sender_created_at", "sender_id", "created_at"),
+    Index("ix_transactions_sender_created_at", "sender_id", "created_at"),
+    Index("ix_transactions_receiver_created_at", "receiver_id", "created_at"),
+    Index("ix_transactions_status", "status"),
     )
 
     id = Column(Integer, primary_key=True, index=True)
