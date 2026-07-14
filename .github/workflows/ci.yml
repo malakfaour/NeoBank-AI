@@ -26,6 +26,8 @@ jobs:
 
       - name: Check Alembic head count
         run: python backend/scripts/check_single_alembic_head.py
+      - name: Check env.example matches config.py
+        run: python backend/scripts/check_env_example.py
 
       - name: Ruff lint
         run: |

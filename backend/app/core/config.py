@@ -31,6 +31,7 @@ class Settings(BaseSettings):
 
     # App
     APP_ENV: str = "development"
+    LOG_FORMAT: str = "text"  # "text" (dev) or "json" (prod) -- DEVATTECH-122
 
     # Payment Gateway (Member 4 - top-up, NBL-411)
     PAYMENT_GATEWAY_URL: str = ""
