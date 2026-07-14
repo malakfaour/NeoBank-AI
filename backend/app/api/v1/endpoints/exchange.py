@@ -542,7 +542,7 @@ async def get_exchange_rates_history(
     return [
         {
             "date": row.last_updated_at.date(),
-            "predicted_rate": row.rate,
+            "rate": row.rate,
             "provider": row.provider,
         }
         for row in rows

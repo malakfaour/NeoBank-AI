@@ -374,7 +374,6 @@ async def test_retrain_exchange_forecast_persists_model_metrics(monkeypatch):
     assert metrics_rows[-1].mae == result["mae"]
 
 
-<<<<<<< HEAD
 @pytest.mark.anyio
 async def test_execute_exchange_creates_both_debit_and_credit_ledger_legs(client, monkeypatch):
     """
@@ -472,8 +471,6 @@ async def test_execute_exchange_creates_both_debit_and_credit_ledger_legs(client
     assert credit_leg.status.value == "completed"
     assert credit_leg.sender_id == user.id
     assert credit_leg.receiver_id == user.id
-=======
->>>>>>> 67cd178 (fix(exchange): address PR review comments)
 @pytest.mark.anyio
 async def test_retrain_exchange_forecast_rolls_back_worse_model(monkeypatch):
 
@@ -545,9 +542,6 @@ async def test_retrain_exchange_forecast_rolls_back_worse_model(monkeypatch):
     assert result["status"] == "ok"
     assert result["mae"] == 150.0
     assert rollback_called is True
-<<<<<<< HEAD
-=======
-
 
 @pytest.mark.anyio
 async def test_exchange_rates_history_returns_predicted_rate(client):
@@ -595,6 +589,5 @@ async def test_exchange_rates_history_returns_predicted_rate(client):
 
     assert len(body) >= 1
     assert "date" in body[0]
-    assert "predicted_rate" in body[0]
-    assert body[-1]["predicted_rate"] == 90000.0
->>>>>>> 67cd178 (fix(exchange): address PR review comments)
+    assert "rate" in body[0]
+    assert body[-1]["rate"] == 90000.0
