@@ -39,7 +39,10 @@ const [biometricError, setBiometricError] = useState("");
   const [sheetNew, setSheetNew] = useState("");
   const [sheetLoading, setSheetLoading] = useState(false);
   const [sheetError, setSheetError] = useState("");
-
+const [statementMonth, setStatementMonth] = useState("");
+const [statementFormat, setStatementFormat] = useState<"csv" | "pdf">("pdf");
+const [statementLoading, setStatementLoading] = useState(false);
+const [statementError, setStatementError] = useState("");
 useEffect(() => {
   api.get("/users/me").then((r) => {
       setLocalUser(r.data);
@@ -127,7 +130,17 @@ const handleBiometricToggle = async () => {
     setSheet(s); setSheetVal(""); setSheetOtp("");
     setSheetCurrent(""); setSheetNew(""); setSheetError("");
   };
-
+const handleDownloadStatement = async () => {
+  if (!statementMonth) return;
+  setStatementLoading(true);
+  setStatementError("");
+  try {
+    const res = await api.get(`/transactions/statement?month=${statementMonth}&format=${statementFormat}`);
+    window.open(res.data.presigned_url, "_blank");
+  } catch {
+    setStatementError("Could not generate statement. Try again.");
+  } finally { setStatementLoading(false); }
+};
   const initials = user?.full_name?.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase() ?? "?";
 
   if (loading) return (
@@ -218,7 +231,26 @@ const handleBiometricToggle = async () => {
 </div>
         {biometricError && <p style={{ color: "#EF4444", fontSize: "12px", padding: "0 16px 12px" }}>{biometricError}</p>}
       </div>
-
+{/* Account Statement */}
+<div style={{ backgroundColor: "#fff", borderRadius: "20px", marginBottom: "16px", overflow: "hidden" }}>
+  <p style={{ color: "#aaa", fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px", padding: "16px 16px 8px" }}>Account Statement</p>
+  <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: "12px" }}>
+    <div style={{ display: "flex", gap: "8px" }}>
+      <input type="month" value={statementMonth} onChange={(e) => setStatementMonth(e.target.value)}
+        style={{ flex: 1, border: "1.5px solid #E5E7EB", borderRadius: "12px", padding: "10px 12px", fontSize: "14px", outline: "none" }} />
+      <select value={statementFormat} onChange={(e) => setStatementFormat(e.target.value as "csv" | "pdf")}
+        style={{ border: "1.5px solid #E5E7EB", borderRadius: "12px", padding: "10px 12px", fontSize: "14px", outline: "none", backgroundColor: "#fff" }}>
+        <option value="pdf">PDF</option>
+        <option value="csv">CSV</option>
+      </select>
+    </div>
+    {statementError && <p style={{ color: "#EF4444", fontSize: "12px" }}>{statementError}</p>}
+    <button onClick={handleDownloadStatement} disabled={!statementMonth || statementLoading}
+      style={{ width: "100%", backgroundColor: !statementMonth ? "#E5E7EB" : "#00C853", color: !statementMonth ? "#999" : "#fff", fontWeight: "700", fontSize: "14px", border: "none", borderRadius: "12px", padding: "12px", cursor: !statementMonth ? "not-allowed" : "pointer" }}>
+      {statementLoading ? "Generating..." : "Download Statement"}
+    </button>
+  </div>
+</div>
       {/* Sheet overlay */}
       {sheet !== "none" && (
         <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.4)", zIndex: 100, display: "flex", alignItems: "flex-end" }}
@@ -263,7 +295,9 @@ const handleBiometricToggle = async () => {
                   {sheetLoading ? "Saving..." : "Change Passcode"}
                 </button>
               </>
+              
             )}
+            
           </div>
         </div>
       )}
