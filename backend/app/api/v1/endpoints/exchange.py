@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import uuid4
@@ -12,7 +13,7 @@ from app.api.dependencies import require_action_token
 from app.db.session import get_db
 from app.models.exchange_audit_log import ExchangeAuditLog
 from app.models.exchange_rate import ExchangeRate
-from app.models.transaction import Transaction, TransactionCurrency, TransactionStatus
+from app.models.transaction import Transaction, TransactionCurrency, TransactionStatus, ExchangeLegType
 from app.models.wallet import Wallet, WalletCurrency
 from app.schemas.exchange import (
     ConvertCurrencyResponse,
@@ -31,10 +32,12 @@ from app.services.exchange_cache import (
 )
 from app.services.exchange_forecast import train_and_forecast_usd_lbp
 from app.services.market_hours import get_market_status, is_market_open
+from app.services.wallet_status import WalletClosedError, WalletFrozenError, assert_wallet_active
 from app.tasks.exchange_tasks import fetch_exchange_rates
 
 
 router = APIRouter(prefix="/exchange", tags=["exchange"])
+logger = logging.getLogger(__name__)
 
 
 async def get_rates_from_cache_or_provider() -> dict[tuple[str, str], Decimal]:
@@ -247,6 +250,15 @@ async def execute_exchange(
             detail=f"{from_currency} wallet not found",
         )
 
+    try:
+        assert_wallet_active(source_wallet)
+    except (WalletFrozenError, WalletClosedError) as e:
+        reason = "wallet_frozen" if isinstance(e, WalletFrozenError) else "wallet_closed"
+        raise HTTPException(
+            status_code=422,
+            detail={"error": reason},
+        )
+
     if source_wallet.balance < payload.amount:
         raise HTTPException(
             status_code=422,
@@ -259,6 +271,15 @@ async def execute_exchange(
             detail=f"{to_currency} wallet not found",
         )
 
+    try:
+        assert_wallet_active(target_wallet)
+    except (WalletFrozenError, WalletClosedError) as e:
+        reason = "wallet_frozen" if isinstance(e, WalletFrozenError) else "wallet_closed"
+        raise HTTPException(
+            status_code=422,
+            detail={"error": reason},
+        )
+
     converted_amount = payload.amount * rate
 
     # Move money
@@ -266,16 +287,41 @@ async def execute_exchange(
     target_wallet.balance += converted_amount
 
     exchange_id = uuid4()
-    transaction = Transaction(
+
+    # Ledger fix (Issue 1 of 3, DEVATTECH-92 prerequisite): TWO Transaction
+    # rows now record this exchange -- a debit leg in the source currency
+    # and a credit leg in the target currency -- distinguished by
+    # exchange_leg, so balance reconstruction can identify each leg
+    # directly from transaction data. category="Exchange" is unchanged on
+    # both rows, per instruction -- existing category-based logic
+    # elsewhere (transactions.py's type derivation/filtering) is
+    # untouched and continues to work unmodified. Distinct
+    # idempotency_key suffixes (":debit" / ":credit") are required only
+    # to satisfy the column's UNIQUE constraint -- nothing reads or
+    # parses this suffix; exchange_leg is the actual, reliable signal.
+    debit_transaction = Transaction(
         sender_id=user_id,
         receiver_id=user_id,
         amount=payload.amount,
         currency=TransactionCurrency(from_currency),
         category="Exchange",
         status=TransactionStatus.completed,
-        idempotency_key=f"exchange:{exchange_id.hex}",
+        exchange_leg=ExchangeLegType.debit,
+        idempotency_key=f"exchange:{exchange_id.hex}:debit",
     )
-    db.add(transaction)
+    db.add(debit_transaction)
+
+    credit_transaction = Transaction(
+        sender_id=user_id,
+        receiver_id=user_id,
+        amount=converted_amount,
+        currency=TransactionCurrency(to_currency),
+        category="Exchange",
+        status=TransactionStatus.completed,
+        exchange_leg=ExchangeLegType.credit,
+        idempotency_key=f"exchange:{exchange_id.hex}:credit",
+    )
+    db.add(credit_transaction)
 
     audit_log = ExchangeAuditLog(
         exchange_id=str(exchange_id),
@@ -292,22 +338,78 @@ async def execute_exchange(
     db.add(audit_log)
 
     await db.commit()
-    await db.refresh(transaction)
+    await db.refresh(debit_transaction)
+    await db.refresh(credit_transaction)
 
     await invalidate_balance_cache(user_id)
-    await append_audit(
-        db,
-        transaction_id=transaction.id,
-        action="exchange_completed",
-        actor_id=user_id,
-        metadata={
-            "from_currency": from_currency,
-            "to_currency": to_currency,
-            "rate": str(rate),
-            "converted_amount": str(converted_amount),
-        },
-    )
+    # Real, separate audit entries for BOTH legs -- one append_audit()
+    # call per Transaction, since TransactionAuditLog.transaction_id is a
+    # required, single-target FK (one entry cannot cover two
+    # transactions). Without this, GET /admin/transactions/{id}/audit-trail
+    # for the credit leg's id would return zero rows -- confirmed gap,
+    # fixed here. Each entry's metadata records which leg it is and the
+    # paired transaction's id, so either leg's audit trail can be traced
+    # to its counterpart.
+    #
+    # Both calls are best-effort follow-ups, same convention as
+    # bills.py's pay_bill and admin.py's resolve_flag: append_audit()
+    # commits internally/independently of the exchange's own commit
+    # above, so by this point the exchange has ALREADY succeeded and is
+    # durably committed. An uncaught exception in either audit write must
+    # not surface as a 500 to the client for a request that actually
+    # succeeded -- that would falsely tell the user their exchange
+    # failed and could invite a duplicate attempt. Logged at ERROR level
+    # for manual follow-up instead of propagating.
+    try:
+        await append_audit(
+            db,
+            transaction_id=debit_transaction.id,
+            action="exchange_completed",
+            actor_id=user_id,
+            metadata={
+                "from_currency": from_currency,
+                "to_currency": to_currency,
+                "rate": str(rate),
+                "converted_amount": str(converted_amount),
+                "leg": "debit",
+                "paired_transaction_id": credit_transaction.id,
+            },
+        )
+    except Exception:
+        logger.error(
+            "Exchange %s succeeded but debit-leg audit write failed for "
+            "transaction %s (user %s). Manual audit backfill may be required.",
+            exchange_id, debit_transaction.id, user_id,
+            exc_info=True,
+        )
 
+    try:
+        await append_audit(
+            db,
+            transaction_id=credit_transaction.id,
+            action="exchange_completed",
+            actor_id=user_id,
+            metadata={
+                "from_currency": from_currency,
+                "to_currency": to_currency,
+                "rate": str(rate),
+                "converted_amount": str(converted_amount),
+                "leg": "credit",
+                "paired_transaction_id": debit_transaction.id,
+            },
+        )
+    except Exception:
+        logger.error(
+            "Exchange %s succeeded but credit-leg audit write failed for "
+            "transaction %s (user %s). Manual audit backfill may be required.",
+            exchange_id, credit_transaction.id, user_id,
+            exc_info=True,
+        )
+
+    # Response shape is UNCHANGED -- ExchangeExecutionResponse is not
+    # modified, per instruction. The two transaction ids exist in the DB
+    # and in the audit metadata above; DEVATTECH-92 reads directly from
+    # the DB, not through this response.
     return {
         "exchange_id": exchange_id,
         "status": "executed",

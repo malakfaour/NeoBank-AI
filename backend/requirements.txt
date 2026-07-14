@@ -27,6 +27,8 @@ cryptography==49.0.0
 dkimpy==1.1.8
 dnspython==2.8.0
 deepface==0.0.96
+tensorflow==2.21.0
+tf-keras==2.21.0
 ecdsa==0.19.2
 emails==1.1.2
 fakeredis==2.36.2

@@ -4,6 +4,24 @@ import tempfile
 from pathlib import Path
 
 
+def check_liveness(selfie_path: str) -> dict[str, bool | float]:
+    """Run DeepFace anti-spoofing and return its real/spoof decision and score."""
+    from deepface import DeepFace
+
+    faces = DeepFace.extract_faces(
+        img_path=selfie_path,
+        anti_spoofing=True,
+        enforce_detection=True,
+    )
+    if not faces:
+        raise ValueError("No face detected in selfie")
+    face = faces[0]
+    return {
+        "is_real": bool(face.get("is_real", False)),
+        "antispoof_score": float(face.get("antispoof_score", 0.0)),
+    }
+
+
 def _detect_face_region(image_path: str):
     import cv2
 

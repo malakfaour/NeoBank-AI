@@ -68,7 +68,10 @@ def upload_file(
 ) -> str:
     client = _require_storage_client()
     resolved_bucket = bucket_name or _get_bucket_name()
-    resolved_extra_args = extra_args or {}
+    resolved_extra_args = {
+        **(extra_args or {}),
+        "ServerSideEncryption": "AES256",
+    }
 
     if isinstance(file_source, bytes):
         client.put_object(
@@ -97,10 +100,16 @@ def download_file(
     return destination_path
 
 
+def delete_file(s3_key: str, bucket_name: str | None = None) -> None:
+    client = _require_storage_client()
+    resolved_bucket = bucket_name or _get_bucket_name()
+    client.delete_object(Bucket=resolved_bucket, Key=s3_key)
+
+
 def get_presigned_url(s3_key: str, ttl_seconds: int = 3600) -> str:
     client = _require_storage_client()
     return client.generate_presigned_url(
         "get_object",
         Params={"Bucket": _get_bucket_name(), "Key": s3_key},
-        ExpiresIn=ttl_seconds,
+        ExpiresIn=min(ttl_seconds, 3600),
     )

@@ -226,3 +226,4 @@ ml/fraud/artifacts/
 test_neobank.db
 *.db
 /00ec1be9d686_initial_schema.py[}]
+ml/kyc/eval_data/

@@ -11,6 +11,7 @@ class AdminKYCQueueItem(BaseModel):
     user_id: int
     full_name: str
     status: KYCRecordStatus
+    created_at: datetime
     match_score: float | None
     liveness_score: float | None
     rejection_reason: str | None
@@ -22,6 +23,14 @@ class AdminKYCQueueItem(BaseModel):
     id_photo_presigned_url: str | None
 
     model_config = ConfigDict(use_enum_values=True)
+
+
+class AdminKYCQueueResponse(BaseModel):
+    items: list[AdminKYCQueueItem]
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
 
 
 class AdminKYCDecisionResponse(BaseModel):

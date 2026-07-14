@@ -16,6 +16,7 @@ from app.schemas.user import CurrentUser
 from app.services.audit_log import append_audit
 from app.services.biller_client import call_mock_biller
 from app.services.wallet_locking import lock_and_debit_wallet
+from app.services.wallet_status import WalletClosedError, WalletFrozenError
 from app.tasks.transaction_tasks import score_transaction
 
 router = APIRouter(prefix="/bills", tags=["bills"])
@@ -86,6 +87,12 @@ async def pay_bill(
     # --- success: lock + re-check + debit ---
     try:
         wallet = await lock_and_debit_wallet(db, wallet.id, payload.amount)
+    except (WalletFrozenError, WalletClosedError) as e:
+        reason = "wallet_frozen" if isinstance(e, WalletFrozenError) else "wallet_closed"
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"error": reason},
+        )
     except ValueError:
         # Balance changed between the advisory check and now (e.g. a
         # concurrent spend) -- the biller already reported success, so
@@ -258,3 +265,7 @@ async def get_bill_history(
         total=total,
         total_pages=_compute_total_pages(total, page_size),
     )
+
+
+
+

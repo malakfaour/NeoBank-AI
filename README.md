@@ -52,3 +52,10 @@ celery -A app.celery_app worker --loglevel=info --pool=solo   # Windows needs --
 
 Or via Docker:
 docker compose up celery-worker -d
+
+## Data Retention
+
+Previous avatar objects are deleted from storage when a user successfully replaces
+their avatar. KYC verification documents and bank statements are retained
+indefinitely for compliance and audit purposes and are never deleted by application
+code.
