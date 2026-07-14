@@ -84,3 +84,8 @@ class CategorySummaryItem(BaseModel):
 class TransactionSummaryResponse(BaseModel):
     month: str
     summary: list[CategorySummaryItem]
+
+class StatementResponse(BaseModel):
+    month: str
+    s3_key: str
+    presigned_url: str
