@@ -1,3 +1,15 @@
+import asyncio
+from functools import partial
+from typing import Literal
+
+from app.core.storage import get_presigned_url, upload_file
+from app.schemas.transaction import StatementResponse
+from app.services.statement_generation import (
+    generate_csv_bytes,
+    generate_pdf_bytes,
+    reconstruct_currency_statements,
+)
+
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -287,6 +299,7 @@ async def send_money(
 # body at call time, not at definition time, so module-level imports placed
 # after a function's def are still valid before any request is served.
 
+
 # Route registration order matters here: "/summary" is registered before
 # "/{transaction_id}" so a request to GET /transactions/summary doesn't get
 # swallowed by the {transaction_id} path parameter.
@@ -296,7 +309,7 @@ async def send_money(
 # (bill payments, exchange execution) that don't write to this table yet.
 # These values are accepted as valid filters (so the endpoint doesn't 400
 # on a legitimate future value) but currently match zero rows.
-VALID_TRANSACTION_TYPES = {"send", "receive", "topup", "bill", "exchange", "adjustment"}
+VALID_TRANSACTION_TYPES = {"send", "receive", "topup", "bill", "exchange", "adjustment", "reversal"}
 TYPES_NOT_YET_SUPPORTED = {"bill"}
 
 
@@ -308,6 +321,8 @@ def _derive_transaction_type(transaction: Transaction, user_id: int) -> str:
             return "bill"
         if transaction.category == "Adjustment":
             return "adjustment"
+        if transaction.category == "Reversal":
+            return "reversal"
         return "topup"
     return "send" if transaction.sender_id == user_id else "receive"
 
@@ -365,6 +380,76 @@ async def get_transaction_summary(
     ]
 
     return TransactionSummaryResponse(month=month, summary=summary_items)
+
+
+@router.get("/statement", response_model=StatementResponse)
+async def get_transaction_statement(
+    month: str = Query(..., description="Format YYYY-MM, e.g. 2026-07"),
+    format: Literal["csv", "pdf"] = Query(...),
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    DEVATTECH-94: monthly account statement (CSV or PDF), uploaded to
+    S3 under the existing bucket's "neobank-statements/{user_id}/
+    {month}.{ext}" key prefix, presigned URL returned. Reuses
+    app/core/storage.py as-is -- no new boto3 code; storage.upload_file
+    already applies server-side encryption automatically.
+
+    Registered before "/{transaction_id}" -- same route-ordering
+    requirement already documented above for "/summary".
+
+    Generation is synchronous, in-memory, CPU-only (stdlib csv /
+    reportlab) -- meets the ticket's "<1s, no Celery" requirement.
+    storage.upload_file/get_presigned_url are SYNCHRONOUS functions
+    (confirmed from the current file -- no async/await in
+    app/core/storage.py); calling either directly here would block the
+    event loop during real S3 network I/O. Wrapped in
+    loop.run_in_executor, same pattern already established in
+    admin.py's get_kyc_queue for this exact same storage helper.
+
+    Balance reconstruction (app/services/statement_generation.py) is
+    guaranteed exact only for a currency with no pre-ledger-fix
+    Exchange/Reversal/Adjustment rows (missing exchange_leg/
+    ledger_direction) -- see that module's docstring. Such a currency's
+    opening/closing balance is omitted from the generated file (never
+    silently defaulted to 0), with its transaction rows still shown.
+    This is entirely internal to the generated file's content -- the
+    API response contract below is unaffected either way.
+    """
+    try:
+        year, month_num = parse_summary_month(month)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="month must be in YYYY-MM format",
+        )
+
+    user_id = int(current_user.id)
+    month_start = date(year, month_num, 1)
+    month_end = date(year + 1, 1, 1) if month_num == 12 else date(year, month_num + 1, 1)
+
+    currency_statements = await reconstruct_currency_statements(db, user_id, month_start, month_end)
+
+    if format == "csv":
+        file_bytes = generate_csv_bytes(month, currency_statements)
+        content_type = "text/csv"
+        ext = "csv"
+    else:
+        file_bytes = generate_pdf_bytes(month, currency_statements)
+        content_type = "application/pdf"
+        ext = "pdf"
+
+    s3_key = f"neobank-statements/{user_id}/{month}.{ext}"
+
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(
+        None,
+        partial(upload_file, file_bytes, s3_key, extra_args={"ContentType": content_type}),
+    )
+    presigned_url = await loop.run_in_executor(None, partial(get_presigned_url, s3_key))
+
+    return StatementResponse(month=month, s3_key=s3_key, presigned_url=presigned_url)
 
 
 @router.get("/{transaction_id}", response_model=TransactionDetailResponse)
@@ -477,6 +562,8 @@ async def list_transactions(
         filters.append(Transaction.category == "Exchange")
     elif type == "adjustment":
         filters.append(Transaction.category == "Adjustment")
+    elif type == "reversal":
+        filters.append(Transaction.category == "Reversal")
 
     if start_date is not None:
         filters.append(Transaction.created_at >= start_date)
@@ -537,4 +624,3 @@ async def list_transactions(
         total=total,
         total_pages=compute_total_pages(total, page_size),
     )
-

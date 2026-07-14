@@ -29,13 +29,13 @@ from app.schemas.chatbot import (
 )
 from app.schemas.user import CurrentUser
 from app.services.chatbot_intent import classify_intent
+from app.services.rate_limiter import check_rate_limit
 from app.services.chatbot_service import (
     ChatSessionOwnershipError,
     get_chat_history,
     get_chatbot_response,
     save_chat_turn,
 )
-from app.services.rate_limiter import check_rate_limit
 from app.services.chatbot_transfer import (
     build_transfer_confirmation_reply,
     extract_transfer_draft,
@@ -101,13 +101,13 @@ async def send_chatbot_message(
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db),
 ) -> ChatbotMessageResponse:
-    user_id = int(current_user.id)
     await check_rate_limit(
         request,
         key_prefix="chatbot_message",
         max_requests=20,
         window_seconds=60,
     )
+    user_id = int(current_user.id)
     message = body.message.strip()
 
     start = time.monotonic()

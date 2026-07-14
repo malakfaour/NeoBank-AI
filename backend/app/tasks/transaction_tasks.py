@@ -40,7 +40,11 @@ def score_transaction(transaction_id):
     with SyncSessionLocal() as db:
         transaction = db.get(Transaction, transaction_id)
         if transaction is None:
-            logger.warning("Transaction %s not found for scoring", transaction_id)
+            logger.warning(
+                "Transaction %s not found for scoring",
+                transaction_id,
+                extra={"transaction_id": transaction_id},
+            )
             return {"score": 0.0, "flagged": False, "model": None}
 
         actor_id = transaction.sender_id
@@ -74,6 +78,7 @@ def score_transaction(transaction_id):
                     logger.exception(
                         "Categorization enqueue failed for transaction %s",
                         transaction.id,
+                        extra={"transaction_id": transaction.id},
                     )
 
             append_audit_sync(
@@ -100,7 +105,11 @@ def score_transaction(transaction_id):
                 )
         except Exception:
             db.rollback()
-            logger.exception("Fraud scoring failed for transaction %s", transaction_id)
+            logger.exception(
+                "Fraud scoring failed for transaction %s",
+                transaction_id,
+                extra={"transaction_id": transaction_id},
+            )
 
             transaction = db.get(Transaction, transaction_id)
             if transaction is None:
@@ -130,6 +139,7 @@ def score_transaction(transaction_id):
     logger.info(
         "Transaction %s scored %.4f by %s (sender tx_count=%d, rule_triggered=%s)",
         transaction_id, score, model_name, tx_count, rule_result.triggered,
+        extra={"transaction_id": transaction_id},
     )
 
     return {"score": score, "flagged": flagged, "model": model_name}

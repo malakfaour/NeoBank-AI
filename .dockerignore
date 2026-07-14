@@ -1,0 +1,14 @@
+**/venv/
+**/__pycache__/
+**/*.pyc
+**/.pytest_cache/
+**/node_modules/
+**/.next/
+**/.git/
+**/.vscode/
+**/.idea/
+backend/test_neobank.db
+**/*.db
+.env
+.env.local
+**/.DS_Store

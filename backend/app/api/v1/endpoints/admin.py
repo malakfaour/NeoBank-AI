@@ -1,7 +1,9 @@
+from datetime import datetime
+
 import asyncio
 from uuid import uuid4
 from functools import partial
-from datetime import date, datetime, timezone
+from datetime import date, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, or_, select
@@ -16,7 +18,7 @@ from app.models.exchange_audit_log import ExchangeAuditLog
 from app.models.fraud_resolution import FraudResolution, FraudResolutionType
 from app.models.kyc_record import KYCRecord, KYCRecordStatus
 from app.models.model_metrics import ModelMetrics
-from app.models.transaction import Transaction, TransactionCurrency, TransactionStatus
+from app.models.transaction import LedgerDirection, Transaction, TransactionCurrency, TransactionStatus
 from app.models.transaction_audit_log import TransactionAuditLog
 from app.models.user import KYCStatus, User, UserRole
 from app.models.wallet import Wallet, WalletCurrency
@@ -457,9 +459,37 @@ async def resolve_flag(
 
         transaction.status = TransactionStatus.reversed
         audit_action = "reversed"
+
+        # Ledger fix (Issue 2 of 3): a compensating Transaction row
+        # represents the actual credit-back, distinct from the original
+        # (preserved, status-flipped) transaction -- so balance
+        # reconstruction can see this credit directly in Transaction
+        # data. Deterministic idempotency_key (not a random uuid, unlike
+        # other money-moving endpoints) doubles as an independent
+        # duplicate-insert guard at the DB level, on top of
+        # fraud_resolutions.transaction_id's own unique constraint.
+        # Added to the SAME commit as fraud_resolution below -- a
+        # duplicate-resolution race rolls back both together, never
+        # landing a compensating row alone. Per approved scope, no
+        # related_transaction_id column -- the link to the original
+        # transaction lives only in audit-log metadata, on both this
+        # row's own audit entry and the original transaction's audit
+        # entry below.
+        compensating_transaction = Transaction(
+            sender_id=transaction.sender_id,
+            receiver_id=transaction.sender_id,
+            amount=transaction.amount,
+            currency=transaction.currency,
+            category="Reversal",
+            status=TransactionStatus.completed,
+            ledger_direction=LedgerDirection.credit,
+            idempotency_key=f"reversal:{transaction.id}",
+        )
+        db.add(compensating_transaction)
     else:
         transaction.status = TransactionStatus.completed
         audit_action = "resolved_legitimate"
+        compensating_transaction = None
 
     fraud_resolution = FraudResolution(
         transaction_id=transaction_id,
@@ -480,6 +510,8 @@ async def resolve_flag(
 
     await db.refresh(transaction)
     await db.refresh(fraud_resolution)
+    if compensating_transaction is not None:
+        await db.refresh(compensating_transaction)
 
     # Best-effort follow-ups: the resolution (and reversal, if any) already
     # succeeded and is durably committed by this point.
@@ -492,10 +524,30 @@ async def resolve_flag(
             metadata={
                 "resolution": payload.resolution,
                 "reviewer_note": payload.reviewer_note,
+                **(
+                    {"compensating_transaction_id": compensating_transaction.id}
+                    if compensating_transaction is not None
+                    else {}
+                ),
             },
         )
     except Exception:
         pass
+
+    if compensating_transaction is not None:
+        try:
+            await append_audit(
+                db,
+                transaction_id=compensating_transaction.id,
+                action="reversal_credit",
+                actor_id=reviewer_id,
+                metadata={
+                    "related_transaction_id": transaction_id,
+                    "resolution": payload.resolution,
+                },
+            )
+        except Exception:
+            pass
 
     if payload.resolution == "confirmed_fraud":
         try:
@@ -822,6 +874,9 @@ async def adjust_wallet_balance(
         currency=TransactionCurrency(wallet.currency.value),
         category="Adjustment",
         status=TransactionStatus.completed,
+        # Ledger fix (Issue 3 of 3): explicit typed direction, previously
+        # only present in audit-log JSON metadata below.
+        ledger_direction=LedgerDirection.credit if payload.direction == "credit" else LedgerDirection.debit,
         idempotency_key=f"admin-adjust:{uuid4().hex}",
     )
     db.add(transaction)
