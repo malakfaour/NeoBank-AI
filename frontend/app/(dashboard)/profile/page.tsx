@@ -49,6 +49,7 @@ useEffect(() => {
   }, [setUser]);
 const handleBiometricToggle = async () => {
   setBiometricLoading(true);
+  
   setBiometricError("");
   try {
     if (biometric) {
@@ -209,7 +210,7 @@ const handleBiometricToggle = async () => {
           <button onClick={() => openSheet("passcode")} style={{ fontSize: "13px", color: "#00C853", fontWeight: "600", background: "none", border: "none", cursor: "pointer" }}>Change</button>
         </div>
        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px" }}>
-  <p style={{ fontSize: "14px", fontWeight: "500", color: "#000" }}>Biometric Login</p>
+  <p style={{ fontSize: "14px", fontWeight: "500", color: "#000" }}>Device-Bound Login</p>
   <button onClick={handleBiometricToggle} disabled={biometricLoading}
     style={{ width: "44px", height: "24px", borderRadius: "12px", border: "none", backgroundColor: biometric ? "#00C853" : "#E5E7EB", cursor: "pointer", position: "relative", transition: "background-color 0.2s" }}>
     <span style={{ position: "absolute", top: "2px", left: biometric ? "22px" : "2px", width: "20px", height: "20px", borderRadius: "50%", backgroundColor: "#fff", transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)" }} />

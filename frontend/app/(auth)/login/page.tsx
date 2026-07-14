@@ -103,7 +103,7 @@ const handleBiometricLogin = async () => {
   <button onClick={handleBiometricLogin} disabled={biometricLoading}
     style={{ width: "100%", backgroundColor: "#F0FDF4", color: "#00C853", fontWeight: "700", fontSize: "15px", border: "1.5px solid #00C853", borderRadius: "14px", padding: "14px", cursor: biometricLoading ? "not-allowed" : "pointer", marginTop: "12px", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 11c0-1.1.9-2 2-2s2 .9 2 2v2m-4 0h4m-4 0v4m4-4v4M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z" stroke="#00C853" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-    {biometricLoading ? "Authenticating..." : "Sign in with Biometric"}
+  {biometricLoading ? "Authenticating..." : "Sign in with Device Key"}
   </button>
 )}
         <p style={{ textAlign: "center", color: "#999", fontSize: "13px", marginTop: "16px" }}>
