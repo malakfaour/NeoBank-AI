@@ -14,7 +14,14 @@ export default function OTPPage() {
   const [resent, setResent] = useState(false);
   const inputs = useRef<(HTMLInputElement | null)[]>([]);
 
-  useEffect(() => { inputs.current[0]?.focus(); }, []);
+  useEffect(() => {
+  inputs.current[0]?.focus();
+  // Auto-send OTP on page load
+  const user_id = useAuthStore.getState().user?.id;
+  if (user_id) {
+    api.post("/auth/send-otp", { user_id }).catch(() => {});
+  }
+}, []);
 
   const handleChange = (i: number, val: string) => {
     if (!/^\d*$/.test(val)) return;

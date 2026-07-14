@@ -1,13 +1,14 @@
 export default function NeoLogo({ size = 48 }: { size?: number }) {
+  const scale = size / 60;
   return (
-    <svg width={size * 3} height={size} viewBox="0 0 180 60" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <svg width={200 * scale} height={60 * scale} viewBox="0 0 200 60" fill="none" xmlns="http://www.w3.org/2000/svg">
       {/* n */}
-      <path d="M10 45V15H22L38 35V15H50V45H38L22 25V45H10Z" fill="#0A0A0A"/>
-      {/* c */}
-      <path d="M60 30C60 20 68 13 80 13C89 13 96 17 99 24L89 27C87 24 84 22 80 22C74 22 70 25.5 70 30C70 34.5 74 38 80 38C84 38 87 36 89 33L99 36C96 43 89 47 80 47C68 47 60 40 60 30Z" fill="#0A0A0A"/>
+      <path d="M8 48V12H20L44 38V12H56V48H44L20 22V48H8Z" fill="#0A0A0A" />
+      {/* e */}
+      <path d="M66 30C66 19 74 11 86 11C98 11 106 19 106 31V34H78C79 38 82 41 86 41C90 41 92 39 94 37L103 41C100 46 94 49 86 49C74 49 66 41 66 30ZM78 27H94C93 23 90 20 86 20C82 20 79 23 78 27Z" fill="#0A0A0A" />
       {/* o — green oval */}
-      <ellipse cx="140" cy="30" rx="28" ry="17" fill="#00C853"/>
-      <ellipse cx="140" cy="30" rx="18" ry="10" fill="#F5F5F5"/>
+      <ellipse cx="152" cy="30" rx="36" ry="22" fill="#00C853" />
+      <ellipse cx="152" cy="30" rx="22" ry="13" fill="#F0F0F0" />
     </svg>
   );
 }
