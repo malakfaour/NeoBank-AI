@@ -52,11 +52,32 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    if op.get_bind().dialect.name == "postgresql":
+        exchange_leg_enum = postgresql.ENUM(
+            "debit",
+            "credit",
+            name="exchangelegtype",
+        )
+        exchange_leg_enum.create(op.get_bind(), checkfirst=True)
+
+        exchange_leg_column_type = postgresql.ENUM(
+            "debit",
+            "credit",
+            name="exchangelegtype",
+            create_type=False,
+        )
+    else:
+        exchange_leg_column_type = sa.Enum(
+            "debit",
+            "credit",
+            name="exchangelegtype",
+        )
+
     with op.batch_alter_table("transactions") as batch_op:
         batch_op.add_column(
             sa.Column(
                 "exchange_leg",
-                sa.Enum("debit", "credit", name="exchangelegtype"),
+                exchange_leg_column_type,
                 nullable=True,
             )
         )
@@ -67,5 +88,9 @@ def downgrade() -> None:
         batch_op.drop_column("exchange_leg")
 
     if op.get_bind().dialect.name == "postgresql":
-        exchange_leg_type_enum = postgresql.ENUM("debit", "credit", name="exchangelegtype")
-        exchange_leg_type_enum.drop(op.get_bind(), checkfirst=True)
+        exchange_leg_enum = postgresql.ENUM(
+            "debit",
+            "credit",
+            name="exchangelegtype",
+        )
+        exchange_leg_enum.drop(op.get_bind(), checkfirst=True)
