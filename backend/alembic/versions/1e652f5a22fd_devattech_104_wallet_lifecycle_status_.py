@@ -30,11 +30,35 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     # --- wallets.status ---
+    if op.get_bind().dialect.name == "postgresql":
+        walletstatus_enum = postgresql.ENUM(
+            'active',
+            'frozen',
+            'closed',
+            name='walletstatus',
+        )
+        walletstatus_enum.create(op.get_bind(), checkfirst=True)
+
+        walletstatus_column_type = postgresql.ENUM(
+            'active',
+            'frozen',
+            'closed',
+            name='walletstatus',
+            create_type=False,
+        )
+    else:
+        walletstatus_column_type = sa.Enum(
+            'active',
+            'frozen',
+            'closed',
+            name='walletstatus',
+        )
+
     op.add_column(
         'wallets',
         sa.Column(
             'status',
-            sa.Enum('active', 'frozen', 'closed', name='walletstatus'),
+            walletstatus_column_type,
             nullable=False,
             server_default='active',
         ),
@@ -97,5 +121,6 @@ def downgrade() -> None:
 
     op.drop_column('wallets', 'status')
 
-    walletstatus_enum = postgresql.ENUM('active', 'frozen', 'closed', name='walletstatus')
-    walletstatus_enum.drop(op.get_bind(), checkfirst=True)
+    if op.get_bind().dialect.name == "postgresql":
+        walletstatus_enum = postgresql.ENUM('active', 'frozen', 'closed', name='walletstatus')
+        walletstatus_enum.drop(op.get_bind(), checkfirst=True)

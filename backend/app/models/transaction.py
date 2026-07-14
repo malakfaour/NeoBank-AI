@@ -1,4 +1,4 @@
-﻿import enum
+import enum
 
 from sqlalchemy import Boolean, Column, DateTime, Enum as SAEnum, Float, ForeignKey, Index, Integer, Numeric, String
 from sqlalchemy.orm import relationship
@@ -19,6 +19,24 @@ class TransactionStatus(str, enum.Enum):
     failed = "failed"
     flagged = "flagged"
     reversed = "reversed"
+
+
+class ExchangeLegType(str, enum.Enum):
+    """
+    Ledger fix (Issue 1 of 3, DEVATTECH-92 prerequisite): distinguishes
+    the two Transaction rows a currency exchange now writes -- one debit
+    (source currency, source amount) and one credit (target currency,
+    converted amount) -- so balance reconstruction can identify each leg
+    directly from transaction data, without parsing idempotency_key
+    strings or joining ExchangeAuditLog.
+
+    NULL for every non-exchange transaction, and for any exchange row
+    created before this fix -- historical exchange rows keep
+    exchange_leg=NULL rather than being backfilled, per instruction.
+    """
+
+    debit = "debit"
+    credit = "credit"
 
 
 class Transaction(Base):
@@ -44,6 +62,9 @@ class Transaction(Base):
     # DEVATTECH-87: set True if any deterministic fraud rule (1-3) fired.
     # Independent of fraud_score/scoring_model -- see fraud_rules.py.
     rule_triggered = Column(Boolean, nullable=False, default=False)
+    # Ledger fix (Issue 1 of 3): nullable, set only on category="Exchange"
+    # rows going forward. See ExchangeLegType above.
+    exchange_leg = Column(SAEnum(ExchangeLegType), nullable=True)
     idempotency_key = Column(String(100), unique=True, nullable=False, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
@@ -52,4 +73,3 @@ class Transaction(Base):
     # with matching back_populates if/when that's wired up.
     sender = relationship("User", foreign_keys=[sender_id])
     receiver = relationship("User", foreign_keys=[receiver_id])
-

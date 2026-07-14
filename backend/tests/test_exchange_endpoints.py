@@ -12,7 +12,7 @@ from app.db.session import AsyncSessionLocal
 from app.models.exchange_audit_log import ExchangeAuditLog
 from app.models.exchange_rate import ExchangeRate
 from app.models.model_metrics import ModelMetrics
-from app.models.transaction import Transaction
+from app.models.transaction import ExchangeLegType, Transaction
 from app.models.user import User, UserRole
 from app.models.wallet import Wallet, WalletCurrency
 from app.services.exchange_cache import set_cached_exchange_rates
@@ -139,6 +139,15 @@ async def test_execute_exchange_creates_transaction_and_audit_rows(client, monke
                 Transaction.sender_id == user.id,
                 Transaction.receiver_id == user.id,
                 Transaction.category == "Exchange",
+                # Ledger fix (Issue 1 of 3): this exchange now writes TWO
+                # rows (debit + credit legs); the original unfiltered
+                # query would be ambiguous (.scalar() with no explicit
+                # single-row guarantee). Filtering by the intended
+                # semantic leg -- debit, which is what this assertion
+                # actually checks (currency == "USD", the source
+                # currency) -- keeps this deterministic without relying
+                # on row/insertion order.
+                Transaction.exchange_leg == ExchangeLegType.debit,
             )
         )
         exchange_audit = await session.scalar(
@@ -351,3 +360,102 @@ async def test_retrain_exchange_forecast_persists_model_metrics(monkeypatch):
     assert result["mae"] >= 0
     assert len(metrics_rows) == len(before_count) + 1
     assert metrics_rows[-1].mae == result["mae"]
+
+
+@pytest.mark.anyio
+async def test_execute_exchange_creates_both_debit_and_credit_ledger_legs(client, monkeypatch):
+    """
+    Ledger fix (Issue 1 of 3, DEVATTECH-92 prerequisite): execute_exchange
+    must write TWO Transaction rows -- a debit leg in the source currency
+    and a credit leg in the target currency -- distinguished by the new
+    Transaction.exchange_leg column, so balance reconstruction can
+    identify both legs directly from transaction data.
+
+    Does not duplicate test_execute_exchange_creates_transaction_and_audit_rows
+    above (already covers the audit-log row and overall wallet balances) --
+    this test is specifically about the new two-row ledger structure and
+    the unchanged response contract.
+
+    Atomic-failure coverage (both legs absent on a rejected exchange) is
+    already provided by
+    test_execute_exchange_rejects_insufficient_balance_without_writing_rows
+    above, unmodified -- its query filters only on sender_id/category=="Exchange",
+    with no dependence on exchange_leg, so it already catches either leg
+    if one were incorrectly written on a failed request.
+    """
+    tokens = await _register_user(client, "exchange-two-legs")
+    user, wallets = await _get_user_and_wallets(tokens["email"])
+    await _top_up(client, tokens["access_token"], wallets[WalletCurrency.USD].id, "120.00")
+
+    async def fake_rates():
+        return {("USD", "LBP"): Decimal("89500.00")}
+
+    monkeypatch.setattr("app.api.v1.endpoints.exchange.is_market_open", lambda: True)
+    monkeypatch.setattr("app.api.v1.endpoints.exchange.get_rates_from_cache_or_provider", fake_rates)
+
+    response = await client.post(
+        "/api/v1/exchange/execute",
+        headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        json={
+            "from_currency": "USD",
+            "to_currency": "LBP",
+            "amount": "10.00",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+
+    # --- unchanged API response contract (ExchangeExecutionResponse) ---
+    assert set(body.keys()) == {
+        "exchange_id", "status", "from_currency", "to_currency",
+        "amount", "rate", "converted_amount", "message",
+    }
+    assert body["status"] == "executed"
+    assert body["from_currency"] == "USD"
+    assert body["to_currency"] == "LBP"
+    assert Decimal(body["amount"]) == Decimal("10.00")
+    assert Decimal(body["converted_amount"]) == Decimal("895000.00")
+
+    # --- both ledger legs exist ---
+    async with AsyncSessionLocal() as session:
+        exchange_rows = (
+            await session.execute(
+                select(Transaction).where(
+                    Transaction.sender_id == user.id,
+                    Transaction.category == "Exchange",
+                )
+            )
+        ).scalars().all()
+
+    assert len(exchange_rows) == 2
+
+    # Proves the column round-trips as the REAL enum class, not merely a
+    # string that happens to match -- `is` comparison against the actual
+    # enum member (Python enum members are singletons), stronger than
+    # `.value == "debit"`.
+    for tx in exchange_rows:
+        assert isinstance(tx.exchange_leg, ExchangeLegType)
+
+    debit_rows = [tx for tx in exchange_rows if tx.exchange_leg is ExchangeLegType.debit]
+    credit_rows = [tx for tx in exchange_rows if tx.exchange_leg is ExchangeLegType.credit]
+
+    assert len(debit_rows) == 1
+    assert len(credit_rows) == 1
+
+    debit_leg = debit_rows[0]
+    credit_leg = credit_rows[0]
+
+    # --- debit leg: source currency, source amount ---
+    assert debit_leg.currency.value == "USD"
+    assert debit_leg.amount == Decimal("10.0000")
+    assert debit_leg.status.value == "completed"
+    assert debit_leg.sender_id == user.id
+    assert debit_leg.receiver_id == user.id
+
+    # --- credit leg: target currency, converted amount ---
+    assert credit_leg.currency.value == "LBP"
+    assert credit_leg.amount == Decimal("895000.0000")
+    assert credit_leg.status.value == "completed"
+    assert credit_leg.sender_id == user.id
+    assert credit_leg.receiver_id == user.id
