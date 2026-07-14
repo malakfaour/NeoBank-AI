@@ -511,7 +511,6 @@ async def execute_exchange(
         "message": "Exchange executed successfully",
     }
 
-
 @router.get("/rates/history")
 async def get_exchange_rates_history(
     days: int = Query(30, ge=1, le=90),
@@ -530,12 +529,20 @@ async def get_exchange_rates_history(
 
     rows = result.scalars().all()
 
-    rows = rows[-days:]
+    # Keep only the latest value per calendar day
+    daily_rates = {}
+
+    for row in rows:
+        day = row.last_updated_at.date()
+
+        daily_rates[day] = row
+
+    rows = list(daily_rates.values())[-days:]
 
     return [
         {
             "date": row.last_updated_at.date(),
-            "rate": row.rate,
+            "predicted_rate": row.rate,
             "provider": row.provider,
         }
         for row in rows
@@ -558,10 +565,11 @@ async def forecast_exchange_rate(
         )
 
     predictions = await run_in_threadpool(
-        train_and_forecast_usd_lbp,
-        latest_rate,
-        days,
-    )
+    train_and_forecast_usd_lbp,
+    latest_rate,
+    days,
+    settings.FORECAST_MODEL,
+)
 
     return {
         "base_currency": "USD",

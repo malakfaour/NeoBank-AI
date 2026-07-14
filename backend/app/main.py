@@ -114,7 +114,6 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
 
 app.include_router(v1_router, prefix="/api/v1")
 
-
 @app.get("/health")
 async def health_check():
     try:
@@ -122,10 +121,39 @@ async def health_check():
         redis_status = "ok"
     except Exception:
         redis_status = "unavailable"
+
+    beat_last_run_age = None
+
+    try:
+        last_run = await redis_client.get(
+            "beat:last_run"
+        )
+
+        if last_run:
+            from datetime import datetime, timezone
+
+            if isinstance(last_run, bytes):
+                last_run = last_run.decode("utf-8")
+
+            timestamp = datetime.fromisoformat(
+                last_run
+            )
+
+            beat_last_run_age = int(
+                (
+                    datetime.now(timezone.utc)
+                    - timestamp
+                ).total_seconds()
+            )
+
+    except Exception:
+        beat_last_run_age = None
+
     return {
         "status": "ok",
         "env": settings.APP_ENV,
         "redis": redis_status,
+<<<<<<< HEAD
     }
 
 
@@ -171,3 +199,7 @@ async def readiness_check():
         status_code=status.HTTP_200_OK if all_ok else status.HTTP_503_SERVICE_UNAVAILABLE,
         content={"status": "ready" if all_ok else "not_ready", "checks": checks},
     )
+=======
+        "beat_last_run_age": beat_last_run_age,
+    }
+>>>>>>> 67cd178 (fix(exchange): address PR review comments)

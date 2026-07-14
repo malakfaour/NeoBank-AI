@@ -1,5 +1,8 @@
+import asyncio
 import logging
 import uuid
+
+import httpx
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
@@ -7,21 +10,80 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_current_user
 from app.core.cache_utils import invalidate_balance_cache
+from app.core.config import settings
 from app.db.session import get_db
-from app.models.bill_payment import BillPayment, BillPaymentStatus, BillType
-from app.models.transaction import Transaction, TransactionCurrency, TransactionStatus
-from app.models.wallet import Wallet, WalletCurrency
-from app.schemas.bill import BillHistoryItem, BillHistoryResponse, BillPayRequest, BillPayResponse
+
+from app.models.bill_payment import (
+    BillPayment,
+    BillPaymentStatus,
+    BillType,
+)
+
+from app.models.transaction import (
+    Transaction,
+    TransactionCurrency,
+    TransactionStatus,
+)
+
+from app.models.wallet import (
+    Wallet,
+    WalletCurrency,
+)
+
+from app.schemas.bill import (
+    BillHistoryItem,
+    BillHistoryResponse,
+    BillPayRequest,
+    BillPayResponse,
+)
+
 from app.schemas.user import CurrentUser
+
 from app.services.audit_log import append_audit
 from app.services.biller_client import call_mock_biller
 from app.services.wallet_locking import lock_and_debit_wallet
+<<<<<<< HEAD
 from app.services.wallet_status import WalletClosedError, WalletFrozenError
+=======
+
+>>>>>>> 67cd178 (fix(exchange): address PR review comments)
 from app.tasks.transaction_tasks import score_transaction
 
 router = APIRouter(prefix="/bills", tags=["bills"])
 logger = logging.getLogger(__name__)
+async def _call_payment_gateway(
+    card_token: str,
+    amount,
+    currency: str,
+):
+    payload = {
+        "token": card_token,
+        "amount": float(amount),
+        "currency": currency,
+    }
 
+    async with httpx.AsyncClient(timeout=10.0) as client:
+
+        response = await client.post(
+            settings.PAYMENT_GATEWAY_URL,
+            json=payload,
+        )
+
+        if response.status_code >= 500:
+            await asyncio.sleep(2)
+
+            response = await client.post(
+                settings.PAYMENT_GATEWAY_URL,
+                json=payload,
+            )
+
+    if response.status_code != 200:
+        raise HTTPException(
+            status_code=402,
+            detail=response.json(),
+        )
+
+    return response.json()
 
 def _compute_total_pages(total: int, page_size: int) -> int:
     if total == 0:
@@ -64,6 +126,11 @@ async def pay_bill(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Insufficient balance")
 
     # --- call biller (no lock held during this network call) ---
+    gateway_result = await _call_payment_gateway(
+    payload.card_token,
+    payload.amount,
+    payload.currency,
+)
     biller_result = await call_mock_biller(payload.bill_type, payload.bill_reference, payload.amount)
 
     if not biller_result.success:

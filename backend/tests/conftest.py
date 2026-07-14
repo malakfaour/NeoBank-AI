@@ -149,9 +149,14 @@ def mock_payment_gateway(monkeypatch):
     target locally to override the behavior.
     """
     monkeypatch.setattr(
-        "app.api.v1.endpoints.accounts.httpx.AsyncClient",
-        _FakeGatewayClient,
-    )
+    "app.api.v1.endpoints.accounts.httpx.AsyncClient",
+    _FakeGatewayClient,
+)
+
+    monkeypatch.setattr(
+    "app.api.v1.endpoints.bills.httpx.AsyncClient",
+    _FakeGatewayClient,
+)
 
 
 @pytest_asyncio.fixture
