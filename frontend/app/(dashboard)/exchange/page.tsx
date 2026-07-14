@@ -54,7 +54,8 @@ const [isStale, setIsStale] = useState(false);
   else setError("Exchange rate unavailable. Try again later.");
 }).catch(() => setError("Could not load exchange rates. Please try again."));
 api.get("/exchange/rates/live").then((r) => {
-  if (r.data.cache_age_seconds > 300) setIsStale(true);
+  if (r.data.stale !== undefined) setIsStale(r.data.stale);
+  else if (r.data.cache_age_seconds > 300) setIsStale(true);
 }).catch(() => {});
   }, []);
 

@@ -235,7 +235,7 @@ export default function TransferPage() {
           <p style={{ color: "#166534", fontSize: "13px", fontWeight: "600" }}>✓ Sending to: {recipient.display_name}</p>
         </div>
       )}
-      <button onClick={validateRecipient} disabled={validating || (tab === "mobile" ? phone.length < 7 : iban.length < 10)}
+      <button onClick={validateRecipient} disabled={validating || (tab === "mobile" ? phone.length < 7 : !/^LB[A-Za-z0-9]{26}$/.test(iban.replace(/\s/g, "")))}
         style={{ width: "100%", backgroundColor: "#00C853", color: "#fff", fontWeight: "700", fontSize: "15px", border: "none", borderRadius: "14px", padding: "14px", cursor: "pointer", marginBottom: "20px" }}>
         {validating ? "Checking..." : "Validate"}
       </button>
