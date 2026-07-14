@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import api from "@/lib/axios";
 import { useAuthStore } from "@/store/authStore";
-
+import { generateKeyPair, savePrivateKey, clearBiometricKey, getDeviceId, isBiometricEnrolled } from "@/lib/biometric";
 interface UserMe {
   id: string;
   full_name: string;
@@ -26,7 +26,11 @@ export default function ProfilePage() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
-const [biometric, setBiometric] = useState(false);
+const [biometric, setBiometric] = useState(() => 
+  typeof window !== "undefined" ? isBiometricEnrolled() : false
+);
+const [biometricLoading, setBiometricLoading] = useState(false);
+const [biometricError, setBiometricError] = useState("");
   // Sheet states
   const [sheet, setSheet] = useState<"none" | "email" | "phone" | "passcode">("none");
   const [sheetVal, setSheetVal] = useState("");
@@ -36,13 +40,33 @@ const [biometric, setBiometric] = useState(false);
   const [sheetLoading, setSheetLoading] = useState(false);
   const [sheetError, setSheetError] = useState("");
 
-  useEffect(() => {
-    api.get("/users/me").then((r) => {
+useEffect(() => {
+  api.get("/users/me").then((r) => {
       setLocalUser(r.data);
       setUser(r.data);
     }).catch(() => setError("Failed to load profile."))
       .finally(() => setLoading(false));
   }, [setUser]);
+const handleBiometricToggle = async () => {
+  setBiometricLoading(true);
+  setBiometricError("");
+  try {
+    if (biometric) {
+      clearBiometricKey();
+      setBiometric(false);
+      setSuccess("Biometric login disabled.");
+    } else {
+      const { privateKeyHex, publicKeyPem } = await generateKeyPair();
+      const deviceId = getDeviceId();
+      await api.post("/auth/biometric/enroll", { device_id: deviceId, public_key: publicKeyPem });
+      savePrivateKey(privateKeyHex);
+      setBiometric(true);
+      setSuccess("Biometric login enabled!");
+    }
+  } catch {
+    setBiometricError("Could not set up biometric. Try again.");
+  } finally { setBiometricLoading(false); }
+};
 
   const handleAvatarUpload = async (file: File) => {
     const form = new FormData();
@@ -186,11 +210,12 @@ const [biometric, setBiometric] = useState(false);
         </div>
        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px" }}>
   <p style={{ fontSize: "14px", fontWeight: "500", color: "#000" }}>Biometric Login</p>
-  <button onClick={() => setBiometric(!biometric)}
+  <button onClick={handleBiometricToggle} disabled={biometricLoading}
     style={{ width: "44px", height: "24px", borderRadius: "12px", border: "none", backgroundColor: biometric ? "#00C853" : "#E5E7EB", cursor: "pointer", position: "relative", transition: "background-color 0.2s" }}>
     <span style={{ position: "absolute", top: "2px", left: biometric ? "22px" : "2px", width: "20px", height: "20px", borderRadius: "50%", backgroundColor: "#fff", transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)" }} />
   </button>
 </div>
+        {biometricError && <p style={{ color: "#EF4444", fontSize: "12px", padding: "0 16px 12px" }}>{biometricError}</p>}
       </div>
 
       {/* Sheet overlay */}
