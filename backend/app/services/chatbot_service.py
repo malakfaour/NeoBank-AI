@@ -144,11 +144,37 @@ async def _get_or_create_chat_session(
         db.add(session)
 
     elif session.user_id != user_id:
-        raise ChatSessionOwnershipError(
-            "Chat session belongs to another user"
-        )
+        raise ChatSessionOwnershipError("Chat session belongs to another user")
 
     return session
+
+
+async def get_chat_history(
+    db: AsyncSession,
+    user_id: int,
+    session_id: str,
+) -> list[dict[str, Any]] | None:
+    """
+    Return the stored conversation for an owned chat session.
+
+    Raw message text is stored only in chat_sessions.messages.
+    chatbot_logs remains analytics-only.
+    """
+    result = await db.execute(
+        select(ChatSession).where(
+            ChatSession.session_id == session_id,
+        )
+    )
+
+    session = result.scalar_one_or_none()
+
+    if session is None:
+        return None
+
+    if session.user_id != user_id:
+        raise ChatSessionOwnershipError("Chat session belongs to another user")
+
+    return list(session.messages or [])
 
 
 def _history_for_agent(
@@ -182,9 +208,7 @@ def _extract_reply(
     messages = agent_result.get("messages", [])
 
     if not messages:
-        raise RuntimeError(
-            "Chatbot agent returned no messages"
-        )
+        raise RuntimeError("Chatbot agent returned no messages")
 
     content = messages[-1].content
 
@@ -265,9 +289,7 @@ async def get_chatbot_response(
 
     stored_history = list(session.messages or [])
 
-    agent_messages = _history_for_agent(
-        stored_history
-    )
+    agent_messages = _history_for_agent(stored_history)
 
     agent_messages.append(
         {

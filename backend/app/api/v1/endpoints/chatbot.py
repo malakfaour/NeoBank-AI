@@ -7,6 +7,7 @@ from fastapi import (
     Depends,
     Header,
     HTTPException,
+    Query,
     Request,
     status,
 )
@@ -23,6 +24,7 @@ from app.db.session import get_async_db
 from app.models.chatbot_log import ChatbotLog
 from app.schemas.chatbot import (
     ChatbotMessageRequest,
+    ChatbotHistoryResponse,
     ChatbotMessageResponse,
 )
 from app.schemas.user import CurrentUser
@@ -30,6 +32,7 @@ from app.services.chatbot_intent import classify_intent
 from app.services.rate_limiter import check_rate_limit
 from app.services.chatbot_service import (
     ChatSessionOwnershipError,
+    get_chat_history,
     get_chatbot_response,
     save_chat_turn,
 )
@@ -292,4 +295,40 @@ async def send_chatbot_message(
         intent=classification.intent,
         confidence=classification.confidence,
         confirmation_required=False,
+    )
+
+
+@router.get(
+    "/history",
+    response_model=ChatbotHistoryResponse,
+    summary="Get stored chatbot conversation history",
+)
+async def get_chatbot_history(
+    session_id: str = Query(..., min_length=1, max_length=64),
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+) -> ChatbotHistoryResponse:
+    user_id = int(current_user.id)
+
+    try:
+        messages = await get_chat_history(
+            db=db,
+            user_id=user_id,
+            session_id=session_id,
+        )
+    except ChatSessionOwnershipError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from exc
+
+    if messages is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Chat session not found",
+        )
+
+    return ChatbotHistoryResponse(
+        session_id=session_id,
+        messages=messages,
     )
