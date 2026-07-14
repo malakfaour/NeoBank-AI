@@ -18,7 +18,7 @@ from sqlalchemy import select
 
 from app.core.security import create_access_token
 from app.db.session import AsyncSessionLocal
-from app.models.transaction import Transaction
+from app.models.transaction import LedgerDirection, Transaction
 from app.models.transaction_audit_log import TransactionAuditLog
 from app.models.user import User
 from app.models.wallet import Wallet, WalletCurrency
@@ -141,6 +141,7 @@ async def test_adjust_credit_by_admin_creates_transaction_and_audit_row(client):
         assert tx.receiver_id == user.id
         assert tx.category == "Adjustment"
         assert Decimal(tx.amount) == Decimal("50.00")
+        assert tx.ledger_direction == LedgerDirection.credit
 
         audit_rows = (
             await session.execute(
@@ -169,6 +170,14 @@ async def test_adjust_debit_reduces_balance(client):
     assert response.status_code == 200, response.text
     body = response.json()
     assert Decimal(body["new_balance"]) == Decimal("70.00")
+
+    async with AsyncSessionLocal() as session:
+        tx = (
+            await session.execute(
+                select(Transaction).where(Transaction.id == body["transaction_id"])
+            )
+        ).scalar_one()
+        assert tx.ledger_direction == LedgerDirection.debit
 
 
 @pytest.mark.anyio

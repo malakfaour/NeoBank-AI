@@ -39,6 +39,26 @@ class ExchangeLegType(str, enum.Enum):
     credit = "credit"
 
 
+class LedgerDirection(str, enum.Enum):
+    """
+    Ledger fix (Issues 2+3 of 3): explicit typed credit/debit direction
+    for Transaction rows where sender_id == receiver_id and the
+    direction isn't already implied by ExchangeLegType (Exchange rows).
+    Currently used by:
+      - Reversal rows (Issue 2): always ledger_direction=credit -- the
+        compensating credit-back to the original sender.
+      - Adjustment rows (Issue 3): credit or debit, per the admin's
+        chosen direction.
+
+    NULL for every other transaction, and for any Reversal/Adjustment
+    row created before this fix -- historical rows keep
+    ledger_direction=NULL rather than being backfilled, per instruction.
+    """
+
+    debit = "debit"
+    credit = "credit"
+
+
 class Transaction(Base):
     __tablename__ = "transactions"
     __table_args__ = (
@@ -65,6 +85,10 @@ class Transaction(Base):
     # Ledger fix (Issue 1 of 3): nullable, set only on category="Exchange"
     # rows going forward. See ExchangeLegType above.
     exchange_leg = Column(SAEnum(ExchangeLegType), nullable=True)
+    # Ledger fix (Issues 2+3 of 3): nullable, set on category="Reversal"
+    # (always credit) and category="Adjustment" (credit or debit) rows
+    # going forward. See LedgerDirection above.
+    ledger_direction = Column(SAEnum(LedgerDirection), nullable=True)
     idempotency_key = Column(String(100), unique=True, nullable=False, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
