@@ -296,7 +296,7 @@ async def send_money(
 # (bill payments, exchange execution) that don't write to this table yet.
 # These values are accepted as valid filters (so the endpoint doesn't 400
 # on a legitimate future value) but currently match zero rows.
-VALID_TRANSACTION_TYPES = {"send", "receive", "topup", "bill", "exchange", "adjustment"}
+VALID_TRANSACTION_TYPES = {"send", "receive", "topup", "bill", "exchange", "adjustment", "reversal"}
 TYPES_NOT_YET_SUPPORTED = {"bill"}
 
 
@@ -308,6 +308,8 @@ def _derive_transaction_type(transaction: Transaction, user_id: int) -> str:
             return "bill"
         if transaction.category == "Adjustment":
             return "adjustment"
+        if transaction.category == "Reversal":
+            return "reversal"
         return "topup"
     return "send" if transaction.sender_id == user_id else "receive"
 
@@ -477,6 +479,8 @@ async def list_transactions(
         filters.append(Transaction.category == "Exchange")
     elif type == "adjustment":
         filters.append(Transaction.category == "Adjustment")
+    elif type == "reversal":
+        filters.append(Transaction.category == "Reversal")
 
     if start_date is not None:
         filters.append(Transaction.created_at >= start_date)
@@ -537,4 +541,3 @@ async def list_transactions(
         total=total,
         total_pages=compute_total_pages(total, page_size),
     )
-
