@@ -21,6 +21,7 @@ from app.main import app
 # Routes that are deliberately public -- must match exactly (method, path).
 # Path is the raw FastAPI path template, e.g. "/api/v1/auth/login".
 _PUBLIC_ROUTES: set[tuple[str, str]] = {
+    ("GET", "/api/v1/exchange/rates/history"),
     ("GET", "/health"),
     ("GET", "/health/ready"),
     ("POST", "/api/v1/auth/register"),

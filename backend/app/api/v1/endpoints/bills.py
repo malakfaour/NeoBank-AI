@@ -42,11 +42,8 @@ from app.schemas.user import CurrentUser
 from app.services.audit_log import append_audit
 from app.services.biller_client import call_mock_biller
 from app.services.wallet_locking import lock_and_debit_wallet
-<<<<<<< HEAD
 from app.services.wallet_status import WalletClosedError, WalletFrozenError
-=======
 
->>>>>>> 67cd178 (fix(exchange): address PR review comments)
 from app.tasks.transaction_tasks import score_transaction
 
 router = APIRouter(prefix="/bills", tags=["bills"])

@@ -153,7 +153,6 @@ async def health_check():
         "status": "ok",
         "env": settings.APP_ENV,
         "redis": redis_status,
-<<<<<<< HEAD
     }
 
 
@@ -193,13 +192,17 @@ async def readiness_check():
     except Exception:
         logger.exception("Readiness check: celery unavailable")
         checks["celery"] = "unavailable"
-
     all_ok = all(v == "ok" for v in checks.values())
+
     return JSONResponse(
-        status_code=status.HTTP_200_OK if all_ok else status.HTTP_503_SERVICE_UNAVAILABLE,
-        content={"status": "ready" if all_ok else "not_ready", "checks": checks},
+        status_code=(
+            status.HTTP_200_OK
+            if all_ok
+            else status.HTTP_503_SERVICE_UNAVAILABLE
+        ),
+        content={
+            "status": "ready" if all_ok else "not_ready",
+            "checks": checks,
+            "beat_last_run_age": beat_last_run_age,
+        },
     )
-=======
-        "beat_last_run_age": beat_last_run_age,
-    }
->>>>>>> 67cd178 (fix(exchange): address PR review comments)
