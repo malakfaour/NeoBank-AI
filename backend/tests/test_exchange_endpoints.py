@@ -327,7 +327,6 @@ class _FakeSyncRedis:
     def setex(self, key, ttl, value):
         self.saved[key] = {"ttl": ttl, "value": value}
 
-
 @pytest.mark.anyio
 async def test_retrain_exchange_forecast_persists_model_metrics(monkeypatch):
     fake_sync_redis = _FakeSyncRedis()
@@ -335,13 +334,24 @@ async def test_retrain_exchange_forecast_persists_model_metrics(monkeypatch):
     async def fake_fetch_exchange_rates():
         return {("USD", "LBP"): Decimal("90000.00")}
 
-    monkeypatch.setattr(exchange_tasks, "fetch_exchange_rates", fake_fetch_exchange_rates)
-    monkeypatch.setattr(redis.Redis, "from_url", lambda *args, **kwargs: fake_sync_redis)
+    monkeypatch.setattr(
+        exchange_tasks,
+        "fetch_exchange_rates",
+        fake_fetch_exchange_rates,
+    )
+
+    monkeypatch.setattr(
+        redis.Redis,
+        "from_url",
+        lambda *args, **kwargs: fake_sync_redis,
+    )
 
     async with AsyncSessionLocal() as session:
         before_count = (
             await session.execute(
-                select(ModelMetrics).where(ModelMetrics.model_name == "LightGBM")
+                select(ModelMetrics).where(
+                    ModelMetrics.model_name == "LightGBM"
+                )
             )
         ).scalars().all()
 
@@ -351,7 +361,9 @@ async def test_retrain_exchange_forecast_persists_model_metrics(monkeypatch):
         metrics_rows = (
             await session.execute(
                 select(ModelMetrics)
-                .where(ModelMetrics.model_name == "LightGBM")
+                .where(
+                    ModelMetrics.model_name == "LightGBM"
+                )
                 .order_by(ModelMetrics.id.asc())
             )
         ).scalars().all()
@@ -459,3 +471,123 @@ async def test_execute_exchange_creates_both_debit_and_credit_ledger_legs(client
     assert credit_leg.status.value == "completed"
     assert credit_leg.sender_id == user.id
     assert credit_leg.receiver_id == user.id
+@pytest.mark.anyio
+async def test_retrain_exchange_forecast_rolls_back_worse_model(monkeypatch):
+
+    fake_sync_redis = _FakeSyncRedis()
+
+    monkeypatch.setattr(
+        redis.Redis,
+        "from_url",
+        lambda *args, **kwargs: fake_sync_redis,
+    )
+
+    async def fake_fetch_exchange_rates():
+        return {
+            ("USD", "LBP"): Decimal("90000.00")
+        }
+
+    async def fake_previous_mae():
+        return 100.0
+
+    def fake_train_models(_):
+        return {
+            "winner": "LightGBM",
+            "results": [
+                {
+                    "model": "LightGBM",
+                    "mae": 150.0,
+                }
+            ],
+        }
+
+    rollback_called = False
+
+    def fake_rollback():
+        nonlocal rollback_called
+        rollback_called = True
+
+    monkeypatch.setattr(
+        exchange_tasks,
+        "fetch_exchange_rates",
+        fake_fetch_exchange_rates,
+    )
+
+    monkeypatch.setattr(
+        exchange_tasks,
+        "get_previous_mae",
+        fake_previous_mae,
+    )
+
+    monkeypatch.setattr(
+        exchange_tasks,
+        "train_and_evaluate_models",
+        fake_train_models,
+    )
+
+    monkeypatch.setattr(
+        exchange_tasks,
+        "rollback_model",
+        fake_rollback,
+    )
+
+    monkeypatch.setattr(
+        exchange_tasks,
+        "backup_current_model",
+        lambda: None,
+    )
+
+    result = await exchange_tasks.retrain_exchange_forecast_model()
+
+    assert result["status"] == "ok"
+    assert result["mae"] == 150.0
+    assert rollback_called is True
+
+@pytest.mark.anyio
+async def test_exchange_rates_history_returns_predicted_rate(client):
+
+    async with AsyncSessionLocal() as session:
+
+        existing = await session.scalar(
+            select(ExchangeRate).where(
+                ExchangeRate.base_currency == "USD",
+                ExchangeRate.target_currency == "LBP",
+            )
+        )
+
+        if existing:
+            existing.rate = Decimal("90000.00")
+            existing.provider = "test-provider"
+            existing.last_updated_at = (
+                datetime.now(timezone.utc)
+                - timedelta(days=1)
+            )
+
+        else:
+            session.add(
+                ExchangeRate(
+                    base_currency="USD",
+                    target_currency="LBP",
+                    rate=Decimal("90000.00"),
+                    provider="test-provider",
+                    last_updated_at=(
+                        datetime.now(timezone.utc)
+                        - timedelta(days=1)
+                    ),
+                )
+            )
+
+        await session.commit()
+
+    response = await client.get(
+        "/api/v1/exchange/rates/history?days=30"
+    )
+
+    assert response.status_code == 200, response.text
+
+    body = response.json()
+
+    assert len(body) >= 1
+    assert "date" in body[0]
+    assert "rate" in body[0]
+    assert body[-1]["rate"] == 90000.0
