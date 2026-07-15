@@ -117,16 +117,22 @@ export default function TransferPage() {
     } catch (e: unknown) {
       const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
       if (detail && typeof detail === "object") {
-        const d = detail as { error?: string; available?: string; requested?: string };
-        if (d.error === "insufficient_balance") {
-          setError(`Insufficient balance. Available: ${d.available}, requested: ${d.requested}`);
-        } else if (d.error === "receiver_not_found") {
-          setError("Recipient not found in NeoBank.");
-        } else if (d.error === "receiver_kyc_not_approved") {
-          setError("Recipient has not completed KYC verification.");
-        } else {
-          setError(JSON.stringify(d));
-        }
+      const d = detail as { error?: string; available?: string; requested?: string; remaining?: string };
+       if (d.error === "insufficient_balance") {
+  setError(`Insufficient balance. Available: ${d.available}, requested: ${d.requested}`);
+} else if (d.error === "daily_limit_exceeded") {
+  setError(`Daily transfer limit reached. Remaining today: $${d.remaining}`);
+} else if (d.error === "wallet_frozen") {
+  setError("Your wallet is frozen. Please contact support.");
+} else if (d.error === "wallet_closed") {
+  setError("Your wallet is closed. Please contact support.");
+} else if (d.error === "receiver_not_found") {
+  setError("Recipient not found in NeoBank.");
+} else if (d.error === "receiver_kyc_not_approved") {
+  setError("Recipient has not completed KYC verification.");
+} else {
+  setError(JSON.stringify(d));
+}
       } else {
         setError(typeof detail === "string" ? detail : "Transfer failed.");
       }
@@ -229,7 +235,7 @@ export default function TransferPage() {
           <p style={{ color: "#166534", fontSize: "13px", fontWeight: "600" }}>✓ Sending to: {recipient.display_name}</p>
         </div>
       )}
-      <button onClick={validateRecipient} disabled={validating || (tab === "mobile" ? phone.length < 7 : iban.length < 10)}
+      <button onClick={validateRecipient} disabled={validating || (tab === "mobile" ? phone.length < 7 : !/^LB[A-Za-z0-9]{26}$/.test(iban.replace(/\s/g, "")))}
         style={{ width: "100%", backgroundColor: "#00C853", color: "#fff", fontWeight: "700", fontSize: "15px", border: "none", borderRadius: "14px", padding: "14px", cursor: "pointer", marginBottom: "20px" }}>
         {validating ? "Checking..." : "Validate"}
       </button>

@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import api from "@/lib/axios";
 import { useAuthStore } from "@/store/authStore";
-
+import { generateKeyPair, savePrivateKey, clearBiometricKey, getDeviceId, isBiometricEnrolled } from "@/lib/biometric";
 interface UserMe {
   id: string;
   full_name: string;
@@ -26,7 +26,11 @@ export default function ProfilePage() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
-const [biometric, setBiometric] = useState(false);
+const [biometric, setBiometric] = useState(() => 
+  typeof window !== "undefined" ? isBiometricEnrolled() : false
+);
+const [biometricLoading, setBiometricLoading] = useState(false);
+const [biometricError, setBiometricError] = useState("");
   // Sheet states
   const [sheet, setSheet] = useState<"none" | "email" | "phone" | "passcode">("none");
   const [sheetVal, setSheetVal] = useState("");
@@ -35,14 +39,38 @@ const [biometric, setBiometric] = useState(false);
   const [sheetNew, setSheetNew] = useState("");
   const [sheetLoading, setSheetLoading] = useState(false);
   const [sheetError, setSheetError] = useState("");
-
-  useEffect(() => {
-    api.get("/users/me").then((r) => {
+const [statementMonth, setStatementMonth] = useState("");
+const [statementFormat, setStatementFormat] = useState<"csv" | "pdf">("pdf");
+const [statementLoading, setStatementLoading] = useState(false);
+const [statementError, setStatementError] = useState("");
+useEffect(() => {
+  api.get("/users/me").then((r) => {
       setLocalUser(r.data);
       setUser(r.data);
     }).catch(() => setError("Failed to load profile."))
       .finally(() => setLoading(false));
   }, [setUser]);
+const handleBiometricToggle = async () => {
+  setBiometricLoading(true);
+  
+  setBiometricError("");
+  try {
+    if (biometric) {
+      clearBiometricKey();
+      setBiometric(false);
+      setSuccess("Biometric login disabled.");
+    } else {
+      const { privateKeyHex, publicKeyPem } = await generateKeyPair();
+      const deviceId = getDeviceId();
+      await api.post("/auth/biometric/enroll", { device_id: deviceId, public_key: publicKeyPem });
+      savePrivateKey(privateKeyHex);
+      setBiometric(true);
+      setSuccess("Biometric login enabled!");
+    }
+  } catch {
+    setBiometricError("Could not set up biometric. Try again.");
+  } finally { setBiometricLoading(false); }
+};
 
   const handleAvatarUpload = async (file: File) => {
     const form = new FormData();
@@ -102,7 +130,17 @@ const [biometric, setBiometric] = useState(false);
     setSheet(s); setSheetVal(""); setSheetOtp("");
     setSheetCurrent(""); setSheetNew(""); setSheetError("");
   };
-
+const handleDownloadStatement = async () => {
+  if (!statementMonth) return;
+  setStatementLoading(true);
+  setStatementError("");
+  try {
+    const res = await api.get(`/transactions/statement?month=${statementMonth}&format=${statementFormat}`);
+    window.open(res.data.presigned_url, "_blank");
+  } catch {
+    setStatementError("Could not generate statement. Try again.");
+  } finally { setStatementLoading(false); }
+};
   const initials = user?.full_name?.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase() ?? "?";
 
   if (loading) return (
@@ -185,14 +223,34 @@ const [biometric, setBiometric] = useState(false);
           <button onClick={() => openSheet("passcode")} style={{ fontSize: "13px", color: "#00C853", fontWeight: "600", background: "none", border: "none", cursor: "pointer" }}>Change</button>
         </div>
        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px" }}>
-  <p style={{ fontSize: "14px", fontWeight: "500", color: "#000" }}>Biometric Login</p>
-  <button onClick={() => setBiometric(!biometric)}
+  <p style={{ fontSize: "14px", fontWeight: "500", color: "#000" }}>Device-Bound Login</p>
+  <button onClick={handleBiometricToggle} disabled={biometricLoading}
     style={{ width: "44px", height: "24px", borderRadius: "12px", border: "none", backgroundColor: biometric ? "#00C853" : "#E5E7EB", cursor: "pointer", position: "relative", transition: "background-color 0.2s" }}>
     <span style={{ position: "absolute", top: "2px", left: biometric ? "22px" : "2px", width: "20px", height: "20px", borderRadius: "50%", backgroundColor: "#fff", transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)" }} />
   </button>
 </div>
+        {biometricError && <p style={{ color: "#EF4444", fontSize: "12px", padding: "0 16px 12px" }}>{biometricError}</p>}
       </div>
-
+{/* Account Statement */}
+<div style={{ backgroundColor: "#fff", borderRadius: "20px", marginBottom: "16px", overflow: "hidden" }}>
+  <p style={{ color: "#aaa", fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px", padding: "16px 16px 8px" }}>Account Statement</p>
+  <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: "12px" }}>
+    <div style={{ display: "flex", gap: "8px" }}>
+      <input type="month" value={statementMonth} onChange={(e) => setStatementMonth(e.target.value)}
+        style={{ flex: 1, border: "1.5px solid #E5E7EB", borderRadius: "12px", padding: "10px 12px", fontSize: "14px", outline: "none" }} />
+      <select value={statementFormat} onChange={(e) => setStatementFormat(e.target.value as "csv" | "pdf")}
+        style={{ border: "1.5px solid #E5E7EB", borderRadius: "12px", padding: "10px 12px", fontSize: "14px", outline: "none", backgroundColor: "#fff" }}>
+        <option value="pdf">PDF</option>
+        <option value="csv">CSV</option>
+      </select>
+    </div>
+    {statementError && <p style={{ color: "#EF4444", fontSize: "12px" }}>{statementError}</p>}
+    <button onClick={handleDownloadStatement} disabled={!statementMonth || statementLoading}
+      style={{ width: "100%", backgroundColor: !statementMonth ? "#E5E7EB" : "#00C853", color: !statementMonth ? "#999" : "#fff", fontWeight: "700", fontSize: "14px", border: "none", borderRadius: "12px", padding: "12px", cursor: !statementMonth ? "not-allowed" : "pointer" }}>
+      {statementLoading ? "Generating..." : "Download Statement"}
+    </button>
+  </div>
+</div>
       {/* Sheet overlay */}
       {sheet !== "none" && (
         <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.4)", zIndex: 100, display: "flex", alignItems: "flex-end" }}
@@ -237,7 +295,9 @@ const [biometric, setBiometric] = useState(false);
                   {sheetLoading ? "Saving..." : "Change Passcode"}
                 </button>
               </>
+              
             )}
+            
           </div>
         </div>
       )}
