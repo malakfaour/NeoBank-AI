@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     KYC_LIVENESS_THRESHOLD: float = 0.7
     GROQ_API_KEY: str = ""
 
+    FORECAST_MODEL: str = "LightGBM"
+    FEE_PCT: float = 0.01
+    FORECAST_MODEL: str = "LightGBM"
+    FEE_PCT: float = 0.01
     REQUIRE_ACTION_TOKEN: bool = False
 
     # AWS / S3

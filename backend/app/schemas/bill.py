@@ -6,11 +6,29 @@ from pydantic import BaseModel, Field
 
 
 class BillPayRequest(BaseModel):
-    bill_type: Literal["ogero", "edl", "water", "mobile_topup"]
+    bill_type: Literal[
+        "ogero",
+        "edl",
+        "water",
+        "mobile_topup",
+    ]
+
     bill_reference: str
-    amount: Decimal = Field(..., gt=0)
-    currency: Literal["USD", "LBP", "USDT"]
+
+    amount: Decimal = Field(
+        ...,
+        gt=0,
+    )
+
+    currency: Literal[
+        "USD",
+        "LBP",
+        "USDT",
+    ]
+
     from_wallet_id: int
+
+    card_token: str
 
 
 class BillPayResponse(BaseModel):

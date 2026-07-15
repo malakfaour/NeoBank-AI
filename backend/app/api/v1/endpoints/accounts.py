@@ -84,33 +84,32 @@ async def _call_payment_gateway(
     currency: str,
 ) -> httpx.Response:
     """
-    Calls the external card payment gateway (NBL-411). Retries once, after
-    a 2s pause, on a 5xx response -- gateways are occasionally flaky under
-    load and a single retry clears most transient failures without the
-    user needing to resubmit. Not retried on 402 (declined), since that's
-    a definitive answer from the gateway, not a transient failure.
+    Calls payment gateway stub.
     """
+
     payload = {
-        "card_token": card_token,
-        "amount": str(amount),
-        "currency": currency,
+        "token": card_token,
+        "amount": float(amount),
     }
+
+    gateway_url = settings.PAYMENT_GATEWAY_URL.rstrip(
+        "/"
+    )
+
+    if not gateway_url.endswith(
+        "/payments/charge"
+    ):
+        gateway_url = (
+            f"{gateway_url}/payments/charge"
+        )
 
     async with httpx.AsyncClient(timeout=10.0) as http_client:
         response = await http_client.post(
-            settings.PAYMENT_GATEWAY_URL,
+            gateway_url,
             json=payload,
         )
 
-        if response.status_code >= 500:
-            await asyncio.sleep(2)
-            response = await http_client.post(
-                settings.PAYMENT_GATEWAY_URL,
-                json=payload,
-            )
-
-    return response
-
+        return response
 
 @router.post("/top-up", response_model=CardTopUpResponse)
 async def card_top_up(

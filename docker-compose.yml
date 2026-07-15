@@ -21,18 +21,22 @@ services:
     ports:
       - "6379:6379"
     restart: unless-stopped
-
   api:
     build: ./backend
     volumes:
       - ./backend:/app
+<<<<<<< HEAD
       - ./ml:/app/ml
+=======
+      - ./ml:/ml
+>>>>>>> 8ad76dd (feat(payment): add payment gateway stub integration)
     env_file:
       - .env
     environment:
       DATABASE_URL: postgresql+asyncpg://neobank:neobank@postgres:5432/neobank
       DATABASE_URL_DIRECT: postgresql+asyncpg://neobank:neobank@postgres:5432/neobank
       REDIS_URL: redis://redis:6379
+      PYTHONPATH: /app:/ml
     depends_on:
       postgres:
         condition: service_healthy
@@ -54,19 +58,49 @@ services:
     build: ./backend
     volumes:
       - ./backend:/app
+<<<<<<< HEAD
       - ./ml:/app/ml
+=======
+      - ./ml:/ml
+>>>>>>> 8ad76dd (feat(payment): add payment gateway stub integration)
     env_file:
       - .env
     environment:
       DATABASE_URL: postgresql+asyncpg://neobank:neobank@postgres:5432/neobank
       DATABASE_URL_DIRECT: postgresql+asyncpg://neobank:neobank@postgres:5432/neobank
       REDIS_URL: redis://redis:6379
+      PYTHONPATH: /app:/ml
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_started
     command: celery -A app.celery_app:celery_app worker --loglevel=info
+
+  celery-beat:
+    build: ./backend
+    volumes:
+      - ./backend:/app
+      - ./ml:/ml
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://neobank:neobank@postgres:5432/neobank
+      DATABASE_URL_DIRECT: postgresql+asyncpg://neobank:neobank@postgres:5432/neobank
+      REDIS_URL: redis://redis:6379
+      PYTHONPATH: /app:/ml
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    command: celery -A app.celery_app:celery_app beat --loglevel=info
+
+  gateway-stub:
+    build: ./tools/gateway_stub
+    ports:
+      - "9000:9000"
+    restart: unless-stopped
 
 volumes:
   postgres_data:

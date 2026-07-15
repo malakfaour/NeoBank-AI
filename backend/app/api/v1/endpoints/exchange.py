@@ -7,9 +7,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
+from starlette.concurrency import run_in_threadpool
+
+from app.services.exchange_forecast import train_and_forecast_usd_lbp
 
 from app.core.cache_utils import invalidate_balance_cache
-from app.api.dependencies import require_action_token
+from app.api.dependencies import require_action_token, get_current_user
 from app.db.session import get_db
 from app.models.exchange_audit_log import ExchangeAuditLog
 from app.models.exchange_rate import ExchangeRate
@@ -25,6 +28,7 @@ from app.schemas.exchange import (
 )
 from app.schemas.user import CurrentUser
 from app.services.audit_log import append_audit
+from app.core.config import settings
 from app.services.exchange_cache import (
     get_cached_exchange_rates,
     get_cached_exchange_rates_with_age,
@@ -34,22 +38,59 @@ from app.services.exchange_forecast import train_and_forecast_usd_lbp
 from app.services.market_hours import get_market_status, is_market_open
 from app.services.wallet_status import WalletClosedError, WalletFrozenError, assert_wallet_active
 from app.tasks.exchange_tasks import fetch_exchange_rates
+from app.services.exchange_cache import fetch_exchange_rates
 
 
 router = APIRouter(prefix="/exchange", tags=["exchange"])
 logger = logging.getLogger(__name__)
 
 
-async def get_rates_from_cache_or_provider() -> dict[tuple[str, str], Decimal]:
+async def get_rates_from_cache_or_provider(
+    db: AsyncSession | None = None,
+) -> dict[tuple[str, str], Decimal]:
+
     cached_rates = await get_cached_exchange_rates()
 
     if cached_rates is not None:
         return cached_rates
 
-    rates = await fetch_exchange_rates()
-    await set_cached_exchange_rates(rates)
+    try:
+        rates = await fetch_exchange_rates()
 
-    return rates
+        await set_cached_exchange_rates(
+            rates
+        )
+
+        return rates
+
+    except Exception:
+
+        if db is not None:
+            result = await db.execute(
+                select(ExchangeRate)
+                .order_by(
+                    ExchangeRate.last_updated_at.desc()
+                )
+            )
+
+            latest_rates = {}
+
+            for row in result.scalars().all():
+                pair = (
+                    row.base_currency,
+                    row.target_currency,
+                )
+
+                if pair not in latest_rates:
+                    latest_rates[pair] = row.rate
+
+            if latest_rates:
+                return latest_rates
+
+        raise HTTPException(
+            status_code=503,
+            detail="Exchange rate provider unavailable",
+        )
 
 
 @router.get("/market-status")
@@ -106,6 +147,7 @@ async def get_live_exchange_rate(
             "provider": "redis-cache",
             "last_updated_at": None,
             "cache_age_seconds": cache_age_seconds or 0,
+            "stale": (cache_age_seconds or 0) > 300,
         }
 
     latest_db_rate = await db.scalar(
@@ -139,6 +181,7 @@ async def get_live_exchange_rate(
         "provider": latest_db_rate.provider,
         "last_updated_at": last_updated_at,
         "cache_age_seconds": cache_age_seconds,
+        "stale": cache_age_seconds > 300,
     }
 
 
@@ -147,6 +190,7 @@ async def convert_currency(
     amount: Decimal = Query(..., gt=0),
     from_currency: str = Query(..., min_length=3, max_length=3),
     to_currency: str = Query(..., min_length=3, max_length=3),
+    db: AsyncSession = Depends(get_db),
 ):
     from_currency = from_currency.upper()
     to_currency = to_currency.upper()
@@ -167,8 +211,9 @@ async def convert_currency(
         )
 
     rates = await get_rates_from_cache_or_provider()
-
-    rate = rates.get((from_currency, to_currency))
+    rate = rates.get(
+        (from_currency, to_currency)
+    )
 
     if rate is None:
         raise HTTPException(
@@ -178,12 +223,18 @@ async def convert_currency(
 
     converted_amount = amount * rate
 
+    fee_amount = (
+        amount * Decimal(str(settings.FEE_PCT))
+    )
+
     return {
         "from_currency": from_currency,
         "to_currency": to_currency,
         "amount": amount,
         "rate": rate,
         "converted_amount": converted_amount,
+        "fee_pct": settings.FEE_PCT,
+        "fee_amount": fee_amount,
     }
 
 
@@ -213,7 +264,9 @@ async def execute_exchange(
 
     rates = await get_rates_from_cache_or_provider()
 
-    rate = rates.get((from_currency, to_currency))
+    rate = rates.get(
+        (from_currency, to_currency)
+    )
 
     if rate is None:
         raise HTTPException(
@@ -233,16 +286,32 @@ async def execute_exchange(
         )
 
     locked_wallets_result = await db.execute(
-        select(Wallet).where(
+        select(Wallet)
+        .where(
             Wallet.user_id == user_id,
-            Wallet.currency.in_([from_wallet_currency, to_wallet_currency]),
+            Wallet.currency.in_(
+                [
+                    from_wallet_currency,
+                    to_wallet_currency,
+                ]
+            ),
         )
         .order_by(Wallet.id.asc())
         .with_for_update()
     )
-    wallets_by_currency = {wallet.currency: wallet for wallet in locked_wallets_result.scalars().all()}
-    source_wallet = wallets_by_currency.get(from_wallet_currency)
-    target_wallet = wallets_by_currency.get(to_wallet_currency)
+
+    wallets_by_currency = {
+        wallet.currency: wallet
+        for wallet in locked_wallets_result.scalars().all()
+    }
+
+    source_wallet = wallets_by_currency.get(
+        from_wallet_currency
+    )
+
+    target_wallet = wallets_by_currency.get(
+        to_wallet_currency
+    )
 
     if source_wallet is None:
         raise HTTPException(
@@ -282,7 +351,6 @@ async def execute_exchange(
 
     converted_amount = payload.amount * rate
 
-    # Move money
     source_wallet.balance -= payload.amount
     target_wallet.balance += converted_amount
 
@@ -322,7 +390,6 @@ async def execute_exchange(
         idempotency_key=f"exchange:{exchange_id.hex}:credit",
     )
     db.add(credit_transaction)
-
     audit_log = ExchangeAuditLog(
         exchange_id=str(exchange_id),
         user_id=user_id,
@@ -342,24 +409,7 @@ async def execute_exchange(
     await db.refresh(credit_transaction)
 
     await invalidate_balance_cache(user_id)
-    # Real, separate audit entries for BOTH legs -- one append_audit()
-    # call per Transaction, since TransactionAuditLog.transaction_id is a
-    # required, single-target FK (one entry cannot cover two
-    # transactions). Without this, GET /admin/transactions/{id}/audit-trail
-    # for the credit leg's id would return zero rows -- confirmed gap,
-    # fixed here. Each entry's metadata records which leg it is and the
-    # paired transaction's id, so either leg's audit trail can be traced
-    # to its counterpart.
-    #
-    # Both calls are best-effort follow-ups, same convention as
-    # bills.py's pay_bill and admin.py's resolve_flag: append_audit()
-    # commits internally/independently of the exchange's own commit
-    # above, so by this point the exchange has ALREADY succeeded and is
-    # durably committed. An uncaught exception in either audit write must
-    # not surface as a 500 to the client for a request that actually
-    # succeeded -- that would falsely tell the user their exchange
-    # failed and could invite a duplicate attempt. Logged at ERROR level
-    # for manual follow-up instead of propagating.
+
     try:
         await append_audit(
             db,
@@ -379,7 +429,9 @@ async def execute_exchange(
         logger.error(
             "Exchange %s succeeded but debit-leg audit write failed for "
             "transaction %s (user %s). Manual audit backfill may be required.",
-            exchange_id, debit_transaction.id, user_id,
+            exchange_id,
+            debit_transaction.id,
+            user_id,
             exc_info=True,
         )
 
@@ -402,14 +454,11 @@ async def execute_exchange(
         logger.error(
             "Exchange %s succeeded but credit-leg audit write failed for "
             "transaction %s (user %s). Manual audit backfill may be required.",
-            exchange_id, credit_transaction.id, user_id,
+            exchange_id,
+            credit_transaction.id,
+            user_id,
             exc_info=True,
         )
-
-    # Response shape is UNCHANGED -- ExchangeExecutionResponse is not
-    # modified, per instruction. The two transaction ids exist in the DB
-    # and in the audit metadata above; DEVATTECH-92 reads directly from
-    # the DB, not through this response.
     return {
         "exchange_id": exchange_id,
         "status": "executed",
@@ -420,10 +469,48 @@ async def execute_exchange(
         "converted_amount": converted_amount,
         "message": "Exchange executed successfully",
     }
+    
+@router.get("/rates/history")
+async def get_exchange_rates_history(
+    days: int = Query(30, ge=1, le=90),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(ExchangeRate)
+        .where(
+            ExchangeRate.base_currency == "USD",
+            ExchangeRate.target_currency == "LBP",
+        )
+        .order_by(
+            ExchangeRate.last_updated_at.asc()
+        )
+    )
+
+    rows = result.scalars().all()
+
+    daily_rates = {}
+
+    for row in rows:
+        day = row.last_updated_at.date()
+        daily_rates[day] = row
+
+    rows = list(daily_rates.values())[-days:]
+
+    return [
+        {
+            "date": row.last_updated_at.date(),
+            "predicted_rate": row.rate,
+            "rate": row.rate,
+            "provider": row.provider,
+        }
+        for row in rows
+    ]
 
 
 @router.get("/forecast", response_model=ExchangeForecastResponse)
-async def forecast_exchange_rate(days: int = Query(7, ge=1, le=7)):
+async def forecast_exchange_rate(
+    days: int = Query(7, ge=1, le=7),
+):
     rates = await get_rates_from_cache_or_provider()
 
     latest_rate = rates.get(("USD", "LBP"))
@@ -438,12 +525,13 @@ async def forecast_exchange_rate(days: int = Query(7, ge=1, le=7)):
         train_and_forecast_usd_lbp,
         latest_rate,
         days,
+        settings.FORECAST_MODEL,
     )
 
     return {
         "base_currency": "USD",
         "target_currency": "LBP",
         "days": days,
-        "model": "LightGBM",
+        "model": settings.FORECAST_MODEL,
         "predictions": predictions,
     }
