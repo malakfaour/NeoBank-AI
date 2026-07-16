@@ -7,12 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
-from starlette.concurrency import run_in_threadpool
-
-from app.services.exchange_forecast import train_and_forecast_usd_lbp
-
 from app.core.cache_utils import invalidate_balance_cache
-from app.api.dependencies import require_action_token, get_current_user
+from app.api.dependencies import require_action_token
 from app.db.session import get_db
 from app.models.exchange_audit_log import ExchangeAuditLog
 from app.models.exchange_rate import ExchangeRate
@@ -37,7 +33,6 @@ from app.services.exchange_cache import (
 from app.services.exchange_forecast import train_and_forecast_usd_lbp
 from app.services.market_hours import get_market_status, is_market_open
 from app.services.wallet_status import WalletClosedError, WalletFrozenError, assert_wallet_active
-from app.tasks.exchange_tasks import fetch_exchange_rates
 from app.services.exchange_cache import fetch_exchange_rates
 
 
