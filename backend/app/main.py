@@ -150,10 +150,11 @@ async def health_check():
         beat_last_run_age = None
 
     return {
-        "status": "ok",
-        "env": settings.APP_ENV,
-        "redis": redis_status,
-    }
+    "status": "ok",
+    "env": settings.APP_ENV,
+    "redis": redis_status,
+    "beat_last_run_age": beat_last_run_age,
+}
 
 
 @app.get("/health/ready")
@@ -192,6 +193,7 @@ async def readiness_check():
     except Exception:
         logger.exception("Readiness check: celery unavailable")
         checks["celery"] = "unavailable"
+        beat_last_run_age = None
     all_ok = all(v == "ok" for v in checks.values())
 
     return JSONResponse(

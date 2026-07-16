@@ -123,10 +123,9 @@ async def pay_bill(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Insufficient balance")
 
     # --- call biller (no lock held during this network call) ---
-    gateway_result = await _call_payment_gateway(
+    await _call_payment_gateway(
     payload.card_token,
     payload.amount,
-    payload.currency,
 )
     biller_result = await call_mock_biller(payload.bill_type, payload.bill_reference, payload.amount)
 

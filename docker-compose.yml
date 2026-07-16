@@ -25,11 +25,8 @@ services:
     build: ./backend
     volumes:
       - ./backend:/app
-<<<<<<< HEAD
       - ./ml:/app/ml
-=======
       - ./ml:/ml
->>>>>>> 8ad76dd (feat(payment): add payment gateway stub integration)
     env_file:
       - .env
     environment:
@@ -58,11 +55,8 @@ services:
     build: ./backend
     volumes:
       - ./backend:/app
-<<<<<<< HEAD
       - ./ml:/app/ml
-=======
       - ./ml:/ml
->>>>>>> 8ad76dd (feat(payment): add payment gateway stub integration)
     env_file:
       - .env
     environment:
