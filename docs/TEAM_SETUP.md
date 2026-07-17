@@ -18,8 +18,8 @@ PostgreSQL and Redis are optional local installs. The repository's Docker Compos
 Run:
 
 ```bash
-git clone https://github.com/malakfaour/neobank-lebanon.git
-cd neobank-lebanon
+git clone https://github.com/malakfaour/Techtalks-Bank.git
+cd Techtalks-Bank
 ```
 
 ## 3. Create a task branch
