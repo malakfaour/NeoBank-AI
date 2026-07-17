@@ -19,7 +19,7 @@ for path in (REPO_ROOT, BACKEND_DIR):
 
 from app.core.config import settings  # noqa: E402
 from ml.kyc.face_verification import verify_face  # noqa: E402
-from ml.kyc.liveness import LIVENESS_THRESHOLD, check_liveness  # noqa: E402
+from ml.kyc.liveness import check_liveness, liveness_threshold  # noqa: E402
 
 EVAL_DIR = Path(__file__).resolve().parent / "eval_data"
 GENUINE_DIR = EVAL_DIR / "genuine_pairs"
@@ -108,7 +108,7 @@ def evaluate_spoofs(dataset_dir: str | Path) -> dict:
         try:
             result = check_liveness(str(image))
             score = float(result["antispoof_score"])
-            passed = bool(result["is_real"]) and score >= LIVENESS_THRESHOLD
+            passed = bool(result["is_real"]) and score >= liveness_threshold()
             results.append({
                 "image": str(image.relative_to(root)), "label": label,
                 "is_real": bool(result["is_real"]),

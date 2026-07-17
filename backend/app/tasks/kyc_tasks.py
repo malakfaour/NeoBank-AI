@@ -17,17 +17,13 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from ml.kyc.face_verification import verify_face  # noqa: E402
-from ml.kyc.liveness import LIVENESS_THRESHOLD, check_liveness  # noqa: E402
+from ml.kyc.liveness import require_liveness  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
 
 def _run_liveness_check(selfie_path: str) -> float:
-    result = check_liveness(selfie_path)
-    antispoof_score = float(result["antispoof_score"])
-    if not result["is_real"] or antispoof_score < LIVENESS_THRESHOLD:
-        raise RuntimeError(f"liveness_failed:{antispoof_score}")
-    return antispoof_score
+    return require_liveness(selfie_path)
 
 
 def _persist_decision(

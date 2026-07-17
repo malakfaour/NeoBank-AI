@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-LIVENESS_THRESHOLD = 0.7
+def liveness_threshold() -> float:
+    """Read the deployed threshold at call time from application settings."""
+    from app.core.config import settings
+
+    return float(settings.KYC_LIVENESS_THRESHOLD)
 
 
 def _extract_faces(image_path: str) -> list[dict]:
@@ -23,10 +27,11 @@ def check_liveness(image_path: str) -> dict[str, bool | float]:
     face = faces[0]
     is_real = bool(face.get("is_real", False))
     score = float(face.get("antispoof_score", 0.0))
+    threshold = liveness_threshold()
     return {
         "is_real": is_real,
         "antispoof_score": score,
-        "passed": is_real and score >= LIVENESS_THRESHOLD,
+        "passed": is_real and score >= threshold,
     }
 
 
