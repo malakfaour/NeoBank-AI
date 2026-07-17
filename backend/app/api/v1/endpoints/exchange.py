@@ -1,9 +1,11 @@
+import json
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+import redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
@@ -34,6 +36,7 @@ from app.services.exchange_forecast import train_and_forecast_usd_lbp
 from app.services.market_hours import get_market_status, is_market_open
 from app.services.wallet_status import WalletClosedError, WalletFrozenError, assert_wallet_active
 from app.services.exchange_cache import fetch_exchange_rates
+from app.tasks.exchange_tasks import EXCHANGE_FORECAST_CACHE_KEY
 
 
 router = APIRouter(prefix="/exchange", tags=["exchange"])
@@ -506,6 +509,41 @@ async def get_exchange_rates_history(
 async def forecast_exchange_rate(
     days: int = Query(7, ge=1, le=7),
 ):
+    try:
+        redis_client = redis.Redis.from_url(
+            settings.REDIS_URL,
+            decode_responses=True,
+        )
+        cached_forecast = await run_in_threadpool(
+            redis_client.get,
+            EXCHANGE_FORECAST_CACHE_KEY,
+        )
+
+        if cached_forecast is not None:
+            cached_payload = json.loads(cached_forecast)
+            if cached_payload.get("predictions"):
+                cached_payload["predictions"] = [
+                    {
+                        "date": date.fromisoformat(item["date"]),
+                        "predicted_rate": Decimal(
+                            item["predicted_rate"]
+                        ),
+                    }
+                    for item in cached_payload["predictions"]
+                ]
+                return cached_payload
+    except (
+        redis.RedisError,
+        json.JSONDecodeError,
+        KeyError,
+        TypeError,
+        ValueError,
+    ):
+        logger.warning(
+            "Unable to serve cached exchange forecast",
+            exc_info=True,
+        )
+
     rates = await get_rates_from_cache_or_provider()
 
     latest_rate = rates.get(("USD", "LBP"))

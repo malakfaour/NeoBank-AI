@@ -18,6 +18,9 @@ from app.services.exchange_cache import (
 from app.services.exchange_ml_service import (
     train_and_evaluate_models,
 )
+from app.services.exchange_forecast import (
+    train_and_forecast_usd_lbp,
+)
 from app.services.model_artifact import (
     backup_current_model,
     atomic_save,
@@ -206,6 +209,12 @@ def retrain_exchange_forecast():
         usd_to_lbp
     )
 
+    predictions = train_and_forecast_usd_lbp(
+        usd_to_lbp,
+        days=7,
+        model_name=evaluation["winner"],
+    )
+
     new_mae = min(
         item["mae"]
         for item in evaluation["results"]
@@ -231,9 +240,19 @@ def retrain_exchange_forecast():
             {
                 "base_currency": "USD",
                 "target_currency": "LBP",
+                "days": 7,
                 "model": evaluation["winner"],
                 "mae": new_mae,
                 "model_status": model_status,
+                "predictions": [
+                    {
+                        "date": str(item["date"]),
+                        "predicted_rate": str(
+                            item["predicted_rate"]
+                        ),
+                    }
+                    for item in predictions
+                ],
             }
         ),
     )
@@ -272,6 +291,12 @@ async def retrain_exchange_forecast_model():
         usd_to_lbp
     )
 
+    predictions = train_and_forecast_usd_lbp(
+        usd_to_lbp,
+        days=7,
+        model_name=evaluation["winner"],
+    )
+
     new_mae = min(
         result["mae"]
         for result in evaluation["results"]
@@ -301,9 +326,19 @@ async def retrain_exchange_forecast_model():
             {
                 "base_currency": "USD",
                 "target_currency": "LBP",
+                "days": 7,
                 "model": evaluation["winner"],
                 "mae": new_mae,
                 "model_status": model_status,
+                "predictions": [
+                    {
+                        "date": str(item["date"]),
+                        "predicted_rate": str(
+                            item["predicted_rate"]
+                        ),
+                    }
+                    for item in predictions
+                ],
             }
         ),
     )
