@@ -83,7 +83,10 @@ async def test_transaction_audit_log_update_is_rejected_by_db_trigger(client, st
 
     top_up_response = await client.post(
         "/api/v1/accounts/top-up",
-        headers={"Authorization": f"Bearer {sender['access_token']}"},
+        headers={
+        "Authorization": f"Bearer {sender['access_token']}",
+        "X-Idempotency-Key": uuid4().hex,
+        },
         json={
             "wallet_id": sender_wallet.id,
             "amount": "100.00",

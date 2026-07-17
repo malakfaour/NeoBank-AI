@@ -125,7 +125,10 @@ async def test_full_money_path_register_topup_send_score_audit_reversal(client, 
     # --- top-up ---
     top_up_response = await client.post(
         "/api/v1/accounts/top-up",
-        headers={"Authorization": f"Bearer {sender['access_token']}"},
+        headers={
+        "Authorization": f"Bearer {sender['access_token']}",
+        "X-Idempotency-Key": uuid4().hex,
+        },
         json={
             "wallet_id": sender_wallet.id,
             "amount": "500.00",

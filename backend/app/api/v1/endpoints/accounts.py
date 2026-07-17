@@ -1,9 +1,8 @@
-﻿
-from uuid import uuid4
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_current_user
@@ -11,7 +10,10 @@ from app.core.cache_utils import invalidate_balance_cache
 from app.core.config import settings
 from app.core.redis import (
     TOPUP_DAILY_LIMIT,
+    cache_idempotent_response,
+    get_cached_idempotent_response,
     get_topup_daily_total,
+    hash_idempotency_key,
     increment_topup_daily,
 )
 from app.db.session import get_db
@@ -114,6 +116,7 @@ async def _call_payment_gateway(
 @router.post("/top-up", response_model=CardTopUpResponse)
 async def card_top_up(
     payload: CardTopUpRequest,
+    x_idempotency_key: str = Header(..., alias="X-Idempotency-Key"),
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -123,6 +126,18 @@ async def card_top_up(
     This endpoint does not accept or store real card numbers.
     It only accepts a tokenized card reference such as tok_visa_test_123.
     Only the authenticated owner of the wallet can top it up.
+
+    DEVATTECH-125: idempotency, matching send_money's pattern exactly.
+    "topup:" prefix applied to the raw client-supplied key at every call
+    site (Redis lookup, Redis cache-set, and the hashed
+    Transaction.idempotency_key value) -- this is the entire fix for a
+    real cross-endpoint collision risk: hash_idempotency_key(user_id,
+    raw_key) ignores its own `endpoint` parameter whenever `raw_key` is
+    passed directly (confirmed from the current app/core/redis.py,
+    NOT modified here), so an unprefixed key reused by a naive client
+    across /transactions/send and /accounts/top-up would hash identically
+    on both endpoints. The prefix resolves this without touching the
+    shared Redis helper at all.
     """
 
     if not payload.card_token.startswith("tok_"):
@@ -131,10 +146,20 @@ async def card_top_up(
             detail="Invalid card token. Use a tokenized card reference.",
         )
 
+    user_id = int(current_user.id)
+
+    # --- idempotency: replay cached response if this key was already used ---
+    # Deliberately BEFORE wallet lookup, daily-limit processing, and the
+    # gateway call -- a cache hit must short-circuit all of that, per
+    # approved scope.
+    cached_response = await get_cached_idempotent_response(user_id, f"topup:{x_idempotency_key}")
+    if cached_response is not None:
+        return CardTopUpResponse(**cached_response)
+
     result = await db.execute(
         select(Wallet).where(
             Wallet.id == payload.wallet_id,
-            Wallet.user_id == int(current_user.id),
+            Wallet.user_id == user_id,
         )
     )
     wallet = result.scalar_one_or_none()
@@ -142,7 +167,7 @@ async def card_top_up(
     if wallet is None:
         raise HTTPException(status_code=404, detail="Wallet not found")
 
-    daily_total = await get_topup_daily_total(int(current_user.id))
+    daily_total = await get_topup_daily_total(user_id)
     if daily_total + payload.amount > TOPUP_DAILY_LIMIT:
         raise HTTPException(
             status_code=422,
@@ -208,12 +233,11 @@ async def card_top_up(
     # from send_money) since a self-top-up has no fraud-relevant
     # sender/receiver relationship to score.
     #
-    # idempotency_key: CardTopUpRequest has no client-supplied idempotency
-    # header today (unlike /transactions/send), so a fresh uuid4 is used
-    # here purely to satisfy the column's UNIQUE NOT NULL constraint. This
-    # does NOT protect against a double-submit the way send_money's
-    # header-based key does -- flagged as a follow-up, not solved by this
-    # ticket.
+    # idempotency_key: DEVATTECH-125 -- now derived from the required
+    # X-Idempotency-Key header via hash_idempotency_key(), same pattern
+    # as send_money. "topup:" prefix distinguishes this endpoint's keys
+    # from send_money's within the shared Redis idempotency helper (see
+    # this function's docstring for why that prefix is required).
     transaction = Transaction(
         sender_id=wallet.user_id,
         receiver_id=wallet.user_id,
@@ -221,11 +245,23 @@ async def card_top_up(
         currency=TransactionCurrency(wallet.currency.value),
         category="TopUp",
         status=TransactionStatus.completed,
-        idempotency_key=f"topup:{uuid4().hex}",
+        idempotency_key=hash_idempotency_key(user_id, f"topup:{x_idempotency_key}"),
     )
     db.add(transaction)
 
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # Redis-level idempotency check above raced and both requests got
+        # past it -- the DB's unique constraint on idempotency_key is the
+        # real safety net, same pattern as send_money. Roll back so the
+        # balance mutation staged above never lands twice.
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Duplicate request: this idempotency key is already being processed",
+        )
+
     await db.refresh(wallet)
     await db.refresh(transaction)
 
@@ -244,18 +280,22 @@ async def card_top_up(
         },
     )
 
-    return {
-        "wallet_id": wallet.id,
-        "currency": (
+    response = CardTopUpResponse(
+        wallet_id=wallet.id,
+        currency=(
             wallet.currency.value
             if hasattr(wallet.currency, "value")
             else str(wallet.currency)
         ),
-        "top_up_amount": payload.amount,
-        "new_balance": wallet.balance,
-        "status": "success",
-        "message": "Card top-up completed successfully",
-    }
+        top_up_amount=payload.amount,
+        new_balance=wallet.balance,
+        status="success",
+        message="Card top-up completed successfully",
+    )
+
+    await cache_idempotent_response(user_id, f"topup:{x_idempotency_key}", response.model_dump(mode="json"))
+
+    return response
 
 
 @router.get("/validate-recipient")
@@ -432,4 +472,3 @@ async def close_wallet(
         status=wallet.status.value,
         message="Wallet closed",
     )
-
