@@ -88,9 +88,13 @@ def _admin_token() -> str:
 
 
 async def _top_up_wallet(client, access_token: str, wallet_id: int, amount: str):
+    # DEVATTECH-125: X-Idempotency-Key is now required on this endpoint.
     return await client.post(
         "/api/v1/accounts/top-up",
-        headers={"Authorization": f"Bearer {access_token}"},
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "X-Idempotency-Key": uuid4().hex,
+        },
         json={
             "wallet_id": wallet_id,
             "amount": amount,
@@ -273,4 +277,3 @@ async def test_exchange_from_closed_wallet_rejected(client, monkeypatch):
     )
     assert response.status_code == 422, response.text
     assert response.json()["detail"]["error"] == "wallet_closed"
-

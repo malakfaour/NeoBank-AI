@@ -57,9 +57,13 @@ async def _get_wallet_id(user_id: int) -> int:
 
 
 async def _top_up(client, access_token: str, wallet_id: int, amount: str) -> None:
+    # DEVATTECH-125: X-Idempotency-Key is now required on this endpoint.
     response = await client.post(
         "/api/v1/accounts/top-up",
-        headers={"Authorization": f"Bearer {access_token}"},
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "X-Idempotency-Key": uuid4().hex,
+        },
         json={
             "wallet_id": wallet_id,
             "amount": amount,

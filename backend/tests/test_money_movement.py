@@ -56,10 +56,20 @@ async def _get_wallet_balance(user_id: int, currency: WalletCurrency) -> Decimal
         return wallet.balance
 
 
-async def _top_up_wallet(client, access_token: str, wallet_id: int, amount: str) -> None:
+async def _top_up_wallet(
+    client, access_token: str, wallet_id: int, amount: str, idempotency_key: str | None = None
+) -> None:
+    # DEVATTECH-125: X-Idempotency-Key is now required on this endpoint.
+    # Defaults to a fresh key per call so every EXISTING call site's
+    # intent (a brand-new, non-retried top-up) is preserved unchanged --
+    # only tests that specifically exercise retry/idempotency behavior
+    # pass an explicit, reused key.
     response = await client.post(
         "/api/v1/accounts/top-up",
-        headers={"Authorization": f"Bearer {access_token}"},
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "X-Idempotency-Key": idempotency_key or uuid4().hex,
+        },
         json={
             "wallet_id": wallet_id,
             "amount": amount,
@@ -277,15 +287,23 @@ async def test_send_money_to_nonexistent_recipient_keeps_balance_unchanged(clien
 # --- NBL-411: card top-up ---
 
 
-async def _top_up_wallet_raw(client, access_token: str, wallet_id: int, amount: str):
+async def _top_up_wallet_raw(
+    client, access_token: str, wallet_id: int, amount: str, idempotency_key: str | None = None
+):
     """
     Like _top_up_wallet above, but returns the raw response instead of
     asserting 200 -- needed here since these tests exercise non-200 paths
     (gateway decline, daily limit) that _top_up_wallet's assert would mask.
+
+    DEVATTECH-125: same default-fresh-key-per-call convention as
+    _top_up_wallet above.
     """
     return await client.post(
         "/api/v1/accounts/top-up",
-        headers={"Authorization": f"Bearer {access_token}"},
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "X-Idempotency-Key": idempotency_key or uuid4().hex,
+        },
         json={
             "wallet_id": wallet_id,
             "amount": amount,
@@ -413,3 +431,143 @@ async def test_top_up_success_creates_transaction_row(client):
     assert Decimal(tx.amount) == Decimal("42.00")
     assert tx.status.value == "completed"
     assert tx.currency.value == "USD"
+
+
+@pytest.mark.anyio
+async def test_top_up_is_idempotent(client, monkeypatch):
+    """
+    DEVATTECH-125: same X-Idempotency-Key retried against /accounts/top-up
+    must return the identical cached response, credit the wallet exactly
+    once, and must NOT call the payment gateway a second time -- the
+    cache-hit check happens before the gateway call, per approved scope.
+    """
+    call_count = {"count": 0}
+
+    class _CountingGatewayClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, url, json=None):
+            call_count["count"] += 1
+
+            class _ApprovedResponse:
+                status_code = 200
+
+                def json(self):
+                    return {"status": "approved"}
+
+            return _ApprovedResponse()
+
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.accounts.httpx.AsyncClient",
+        _CountingGatewayClient,
+    )
+
+    tokens = await _register_user(client, "topup-idem")
+    user, wallet = await _get_user_and_wallet(tokens["email"], WalletCurrency.USD)
+
+    idempotency_key = uuid4().hex
+    headers = {
+        "Authorization": f"Bearer {tokens['access_token']}",
+        "X-Idempotency-Key": idempotency_key,
+    }
+    request_body = {
+        "wallet_id": wallet.id,
+        "amount": "20.00",
+        "card_token": "tok_visa_test_123",
+    }
+
+    first = await client.post("/api/v1/accounts/top-up", headers=headers, json=request_body)
+    second = await client.post("/api/v1/accounts/top-up", headers=headers, json=request_body)
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert second.json() == first.json()
+    assert await _get_wallet_balance(user.id, WalletCurrency.USD) == Decimal("20.0000")
+    assert call_count["count"] == 1
+
+
+@pytest.mark.anyio
+async def test_shared_idempotency_key_does_not_collide_across_endpoints(client, stub_fraud_scoring):
+    """
+    DEVATTECH-125 regression: the SAME raw X-Idempotency-Key value, reused
+    by the same user across /accounts/top-up and /transactions/send, must
+    NOT collide. hash_idempotency_key(user_id, raw_key) ignores its
+    `endpoint` parameter when raw_key is passed directly (see
+    app/core/redis.py, not modified by this ticket) -- the "topup:"
+    prefix applied only at the top-up call site is what prevents this
+    collision, without touching the shared Redis helper. Both calls must
+    succeed independently, each producing its own distinct Transaction
+    row with a distinct idempotency_key.
+    """
+    sender_tokens = await _register_user(client, "collision-sender")
+    receiver_tokens = await _register_user(client, "collision-receiver")
+
+    sender_user, sender_wallet = await _get_user_and_wallet(
+        sender_tokens["email"], WalletCurrency.USD
+    )
+    receiver_user, _ = await _get_user_and_wallet(
+        receiver_tokens["email"], WalletCurrency.USD
+    )
+
+    shared_key = uuid4().hex
+
+    top_up_response = await client.post(
+        "/api/v1/accounts/top-up",
+        headers={
+            "Authorization": f"Bearer {sender_tokens['access_token']}",
+            "X-Idempotency-Key": shared_key,
+        },
+        json={
+            "wallet_id": sender_wallet.id,
+            "amount": "80.00",
+            "card_token": "tok_visa_test_123",
+        },
+    )
+    assert top_up_response.status_code == 200, top_up_response.text
+
+    send_response = await client.post(
+        "/api/v1/transactions/send",
+        headers={
+            "Authorization": f"Bearer {sender_tokens['access_token']}",
+            "X-Idempotency-Key": shared_key,
+        },
+        json={
+            "receiver_id": str(receiver_user.id),
+            "amount": "30.00",
+            "currency": "USD",
+        },
+    )
+    assert send_response.status_code == 200, send_response.text
+
+    # Both operations must have actually happened -- proving neither call
+    # was silently short-circuited as a false "duplicate" of the other.
+    assert await _get_wallet_balance(sender_user.id, WalletCurrency.USD) == Decimal("50.0000")
+    assert await _get_wallet_balance(receiver_user.id, WalletCurrency.USD) == Decimal("30.0000")
+
+    async with AsyncSessionLocal() as session:
+        topup_tx = (
+            await session.execute(
+                select(Transaction).where(
+                    Transaction.sender_id == sender_user.id,
+                    Transaction.receiver_id == sender_user.id,
+                    Transaction.category == "TopUp",
+                )
+            )
+        ).scalar_one()
+        send_tx = (
+            await session.execute(
+                select(Transaction).where(
+                    Transaction.id == send_response.json()["transaction_id"]
+                )
+            )
+        ).scalar_one()
+
+    assert topup_tx.idempotency_key != send_tx.idempotency_key
+    assert stub_fraud_scoring == [send_tx.id]

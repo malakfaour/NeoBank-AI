@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import api from "@/lib/axios";
 
@@ -31,6 +31,12 @@ export default function AddMoneyPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [newBalance, setNewBalance] = useState<number | null>(null);
+  // DEVATTECH-125: one idempotency key per user submission attempt.
+  // useRef (not useState) deliberately -- this value must persist across
+  // a retry of the SAME attempt (e.g. handleTopUp called again after a
+  // transient error while still on the confirm step) without triggering
+  // a re-render, and must NOT survive into a genuinely new attempt.
+  const idempotencyKeyRef = useRef<string | null>(null);
 
 useEffect(() => {
   api.get("/accounts/balance").then((r) => {
@@ -53,14 +59,31 @@ const formatCard = (val: string) =>
     if (!selected) return;
     setLoading(true);
     setError("");
+    // DEVATTECH-125: generate the key only once per attempt -- a retry
+    // (this function called again while idempotencyKeyRef.current is
+    // still set, e.g. after a transient failure) reuses the same key
+    // rather than generating a new one, so the backend can recognize it
+    // as the same logical submission.
+    if (!idempotencyKeyRef.current) {
+      idempotencyKeyRef.current = crypto.randomUUID();
+    }
     try {
       const token = `tok_test_${card.number.replace(/\s/g, "").slice(-4)}`;
-      const res = await api.post("/accounts/top-up", {
-        wallet_id: selected.id,
-        amount: parseFloat(amount),
-        card_token: token,
-      });
+      const res = await api.post(
+        "/accounts/top-up",
+        {
+          wallet_id: selected.id,
+          amount: parseFloat(amount),
+          card_token: token,
+        },
+        {
+          headers: { "X-Idempotency-Key": idempotencyKeyRef.current },
+        },
+      );
       setNewBalance(res.data.new_balance);
+      // Success -- this attempt is complete; a future top-up must get a
+      // fresh key, not reuse this one.
+      idempotencyKeyRef.current = null;
       setStep("receipt");
     } catch (e: unknown) {
     const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
@@ -76,6 +99,10 @@ if (detail && typeof detail === "object") {
   };
 
   const goBack = () => {
+    // DEVATTECH-125: going back abandons the in-progress attempt (if
+    // any) -- a later top-up must get a fresh key, not resume a stale
+    // one from a submission the user backed out of.
+    idempotencyKeyRef.current = null;
     if (step === "account") router.back();
     else if (step === "card") setStep("account");
     else if (step === "confirm") setStep("card");
