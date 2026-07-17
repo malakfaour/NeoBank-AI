@@ -148,11 +148,14 @@ async def test_admin_kyc_needs_review_includes_unreviewed_rejected_only(client):
     admin_tokens = await _register_user(client, "adminneedsreview")
     auto_user = await _register_user(client, "autorejected")
     reviewed_user = await _register_user(client, "reviewedrejected")
+    flagged_user = await _register_user(client, "autoflagged")
     admin, token = await _promote_user(admin_tokens["email"], UserRole.compliance_officer)
     auto_customer, _ = await _promote_user(auto_user["email"], UserRole.customer)
     reviewed_customer, _ = await _promote_user(reviewed_user["email"], UserRole.customer)
+    flagged_customer, _ = await _promote_user(flagged_user["email"], UserRole.customer)
     auto_id = await _create_record(auto_customer.id, "auto", status=KYCRecordStatus.rejected)
     reviewed_id = await _create_record(reviewed_customer.id, "reviewed", status=KYCRecordStatus.rejected)
+    flagged_id = await _create_record(flagged_customer.id, "flagged", status=KYCRecordStatus.flagged)
     async with AsyncSessionLocal() as session:
         record = await session.get(KYCRecord, reviewed_id)
         record.reviewed_by = admin.id
@@ -164,7 +167,7 @@ async def test_admin_kyc_needs_review_includes_unreviewed_rejected_only(client):
         headers={"Authorization": f"Bearer {token}"},
     )
     assert response.status_code == 200, response.text
-    assert [item["id"] for item in response.json()["items"]] == [auto_id]
+    assert [item["id"] for item in response.json()["items"]] == [auto_id, flagged_id]
 
 
 @pytest.mark.anyio
