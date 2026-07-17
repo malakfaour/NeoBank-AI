@@ -12,17 +12,17 @@
 
 
 
-\## Daily Workflow
+## Daily Workflow
 
-1\. `git checkout feature/<your-branch>`
+1. `git fetch origin && git checkout -b feature/<name> origin/develop`
 
-2\. `git pull origin develop`
+2. Work, commit regularly with real commit messages
 
-3\. Work, commit regularly
+3. Pull `develop` again before opening the PR
 
-4\. `git push origin feature/<your-branch>`
+4. `git push origin feature/<name>`
 
-5\. Open PR to `develop` when ticket is done
+5. Open PR to `develop` when ticket is done
 
 
 
