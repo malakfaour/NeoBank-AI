@@ -84,17 +84,19 @@ def test_categorize_transaction_writes_valid_groq_category(monkeypatch):
         session_factory,
         idempotency_key="cat-food",
     )
+    captured_transaction_text = {}
 
     monkeypatch.setattr(
         categorization_tasks,
         "SyncSessionLocal",
         session_factory,
     )
-    monkeypatch.setattr(
-        categorization_tasks,
-        "_call_groq",
-        lambda _transaction_text: "Food",
-    )
+
+    def mock_call_groq(transaction_text):
+        captured_transaction_text["value"] = transaction_text
+        return "Food"
+
+    monkeypatch.setattr(categorization_tasks, "_call_groq", mock_call_groq)
 
     result = categorization_tasks.categorize_transaction(transaction_id)
 
@@ -102,6 +104,9 @@ def test_categorize_transaction_writes_valid_groq_category(monkeypatch):
         transaction = db.get(Transaction, transaction_id)
         assert transaction.category == "Food"
 
+    assert captured_transaction_text["value"] == (
+        "Transfer of 42.5000 USD to Receiver"
+    )
     assert result == "Food"
 
 
