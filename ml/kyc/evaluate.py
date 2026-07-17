@@ -18,12 +18,12 @@ for path in (REPO_ROOT, BACKEND_DIR):
         sys.path.insert(0, str(path))
 
 from app.core.config import settings  # noqa: E402
-from ml.kyc.face_verification import check_liveness, verify_face  # noqa: E402
+from ml.kyc.face_verification import verify_face  # noqa: E402
+from ml.kyc.liveness import LIVENESS_THRESHOLD, check_liveness  # noqa: E402
 
 EVAL_DIR = Path(__file__).resolve().parent / "eval_data"
 GENUINE_DIR = EVAL_DIR / "genuine_pairs"
 SPOOF_DIR = EVAL_DIR / "spoof_pairs"
-LIVENESS_THRESHOLD = 0.70
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp"}
 
 
@@ -96,26 +96,35 @@ def evaluate_genuine() -> dict:
     }
 
 
-def evaluate_spoofs() -> dict:
-    images = sorted(
-        path for path in SPOOF_DIR.rglob("*")
-        if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES
-    ) if SPOOF_DIR.exists() else []
+def evaluate_spoofs(dataset_dir: str | Path) -> dict:
+    """Evaluate the production liveness function over ``live`` and spoof labels."""
+    root = Path(dataset_dir)
+    images = sorted(path for path in root.rglob("*") if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES)
     results = []
     failures = []
     for image in images:
+        label = image.parent.name.lower()
+        expected_live = label in {"live", "genuine", "real"}
         try:
             result = check_liveness(str(image))
             score = float(result["antispoof_score"])
+            passed = bool(result["is_real"]) and score >= LIVENESS_THRESHOLD
             results.append({
-                "image": str(image.relative_to(SPOOF_DIR)),
+                "image": str(image.relative_to(root)), "label": label,
                 "is_real": bool(result["is_real"]),
                 "antispoof_score": score,
-                "incorrectly_passed": bool(result["is_real"]) and score >= LIVENESS_THRESHOLD,
+                "passed": passed, "false_accept": not expected_live and passed,
+                "false_reject": expected_live and not passed,
             })
         except Exception as exc:
             failures.append({"image": str(image.relative_to(SPOOF_DIR)), "error": str(exc)})
     scores = [item["antispoof_score"] for item in results]
+    def breakdown(label, predicate):
+        rows = [r for r in results if predicate(r)]
+        return {"count": len(rows), "errors": sum(1 for f in failures if f["image"].split("\\")[0] == label),
+                "false_accept_rate": (sum(r["false_accept"] for r in rows) / len(rows)) if rows else 0.0,
+                "false_reject_rate": (sum(r["false_reject"] for r in rows) / len(rows)) if rows else 0.0}
+    spoof_labels = {"printed_photo", "screen_replay", "spoof"}
     return {
         "images_found": len(images),
         "successful_checks": len(results),
@@ -123,7 +132,10 @@ def evaluate_spoofs() -> dict:
         "mean_antispoof_score": mean(scores) if scores else None,
         "min_antispoof_score": min(scores) if scores else None,
         "max_antispoof_score": max(scores) if scores else None,
-        "incorrectly_passed_as_real": sum(item["incorrectly_passed"] for item in results),
+        "overall_pass_rate": (sum(r["passed"] for r in results) / len(results)) if results else 0.0,
+        "false_accept_rate": (sum(r["false_accept"] for r in results) / len(results)) if results else 0.0,
+        "false_reject_rate": (sum(r["false_reject"] for r in results) / len(results)) if results else 0.0,
+        "by_class": {label: breakdown(label, lambda r, l=label: r["label"] == l) for label in ("live", "printed_photo", "screen_replay")},
         "results": results,
     }
 
@@ -136,7 +148,7 @@ def main() -> None:
             "liveness": LIVENESS_THRESHOLD,
         },
         "genuine": evaluate_genuine(),
-        "spoof": evaluate_spoofs(),
+        "spoof": evaluate_spoofs(EVAL_DIR / "spoof_dataset"),
     }
     print(json.dumps(report, indent=2))
 
