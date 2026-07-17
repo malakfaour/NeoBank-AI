@@ -144,6 +144,30 @@ async def test_admin_kyc_queue_filters_status_date_and_paginates(client):
 
 
 @pytest.mark.anyio
+async def test_admin_kyc_needs_review_includes_unreviewed_rejected_only(client):
+    admin_tokens = await _register_user(client, "adminneedsreview")
+    auto_user = await _register_user(client, "autorejected")
+    reviewed_user = await _register_user(client, "reviewedrejected")
+    admin, token = await _promote_user(admin_tokens["email"], UserRole.compliance_officer)
+    auto_customer, _ = await _promote_user(auto_user["email"], UserRole.customer)
+    reviewed_customer, _ = await _promote_user(reviewed_user["email"], UserRole.customer)
+    auto_id = await _create_record(auto_customer.id, "auto", status=KYCRecordStatus.rejected)
+    reviewed_id = await _create_record(reviewed_customer.id, "reviewed", status=KYCRecordStatus.rejected)
+    async with AsyncSessionLocal() as session:
+        record = await session.get(KYCRecord, reviewed_id)
+        record.reviewed_by = admin.id
+        await session.commit()
+
+    response = await client.get(
+        "/api/v1/admin/kyc/queue",
+        params={"status": "needs_review"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200, response.text
+    assert [item["id"] for item in response.json()["items"]] == [auto_id]
+
+
+@pytest.mark.anyio
 async def test_admin_approve_kyc_updates_record_and_user(client, monkeypatch):
     admin_tokens = await _register_user(client, "adminapprove")
     customer_tokens = await _register_user(client, "customerapprove")
