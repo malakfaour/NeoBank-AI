@@ -13,7 +13,13 @@ def test_check_liveness_uses_deepface_boundary(monkeypatch):
     monkeypatch.setitem(sys.modules, "deepface", types.SimpleNamespace(DeepFace=FakeDeepFace))
     result = check_liveness("fixture.jpg")
     assert result["passed"] is True
+    monkeypatch.delenv("KYC_LIVENESS_THRESHOLD", raising=False)
     assert liveness_threshold() == 0.7
+
+
+def test_liveness_threshold_reads_environment(monkeypatch):
+    monkeypatch.setenv("KYC_LIVENESS_THRESHOLD", "0.82")
+    assert liveness_threshold() == 0.82
 
 
 def test_require_liveness_returns_score(monkeypatch):

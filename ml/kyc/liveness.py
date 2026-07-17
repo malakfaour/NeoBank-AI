@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-def liveness_threshold() -> float:
-    """Read the deployed threshold at call time from application settings."""
-    from app.core.config import settings
+import os
 
-    return float(settings.KYC_LIVENESS_THRESHOLD)
+
+def liveness_threshold() -> float:
+    """Read the deployed threshold directly from the process environment."""
+    return float(os.environ.get("KYC_LIVENESS_THRESHOLD", "0.7"))
 
 
 def _extract_faces(image_path: str) -> list[dict]:
