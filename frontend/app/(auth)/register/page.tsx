@@ -45,11 +45,7 @@ export default function RegisterPage() {
   return (
     <div style={{ minHeight: "100vh", backgroundColor: "#F5F5F5", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "20px" }}>
       <div style={{ marginBottom: "32px", textAlign: "center" }}>
-        <div style={{ fontSize: "32px", fontWeight: "800", color: "#000", letterSpacing: "-1px" }}>
-          neo<span style={{ color: "#00C853" }}>.</span>
-        </div>
-        <div style={{ color: "#999", fontSize: "13px", marginTop: "4px" }}>by NeoBank Lebanon</div>
-      </div>
+      <img src="/logo.svg" alt="NeoBank Lebanon" style={{ width: "160px", height: "auto" }} />    </div>
 
       <div style={{ width: "100%", maxWidth: "380px", backgroundColor: "#fff", borderRadius: "24px", padding: "28px", boxShadow: "0 2px 20px rgba(0,0,0,0.08)" }}>
         <h2 style={{ fontSize: "22px", fontWeight: "700", color: "#000", marginBottom: "4px" }}>Create account</h2>
