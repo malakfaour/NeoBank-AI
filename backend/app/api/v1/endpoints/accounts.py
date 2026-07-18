@@ -24,7 +24,7 @@ from app.models.transaction import (
 )
 from app.models.user import KYCStatus, User, UserRole
 from app.models.wallet import Wallet, WalletStatus
-from app.schemas.user import CurrentUser
+from app.schemas.auth import CurrentUser
 from app.schemas.wallet import CardTopUpRequest, CardTopUpResponse, WalletStatusChangeResponse
 from app.services.account_service import (
     create_wallets_for_user,

@@ -17,7 +17,7 @@ from app.services.otp import verify_and_consume_otp
 from app.core.security import hash_password, verify_password
 from app.db.session import get_async_db
 from app.models.user import User
-from app.schemas.user import CurrentUser
+from app.schemas.auth import CurrentUser
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

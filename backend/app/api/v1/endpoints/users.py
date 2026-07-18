@@ -12,8 +12,8 @@ from app.core.storage import delete_file, upload_file
 from app.db.session import get_db
 from app.models.notification import Notification
 from app.models.user import User
-from app.schemas.user import CurrentUser
-from app.schemas.users import (
+from app.schemas.auth import CurrentUser
+from app.schemas.user_profile import (
     NotificationPreferences,
     UserMeResponse,
     UserUpdateEmailRequest,

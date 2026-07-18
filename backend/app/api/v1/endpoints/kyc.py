@@ -17,7 +17,7 @@ from app.schemas.kyc import (
     KYCStatusUpdateRequest,
     KYCUploadResponse,
 )
-from app.schemas.user import CurrentUser
+from app.schemas.auth import CurrentUser
 from app.tasks.kyc_tasks import process_kyc
 
 router = APIRouter()

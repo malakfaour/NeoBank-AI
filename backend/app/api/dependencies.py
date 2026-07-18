@@ -5,7 +5,7 @@ from jwt import ExpiredSignatureError, InvalidTokenError
 from app.core.config import settings
 from app.core.redis import consume_action_token, is_blacklisted
 from app.core.security import decode_token
-from app.schemas.user import CurrentUser, UserRole
+from app.schemas.auth import CurrentUser, UserRole
 
 bearer_scheme = HTTPBearer()
 

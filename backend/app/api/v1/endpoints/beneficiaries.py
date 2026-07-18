@@ -15,7 +15,7 @@ from app.schemas.beneficiary import (
     BeneficiaryUpdateRequest,
     DeleteBeneficiaryResponse,
 )
-from app.schemas.user import CurrentUser
+from app.schemas.auth import CurrentUser
 
 router = APIRouter(prefix="/beneficiaries", tags=["beneficiaries"])
 
