@@ -8,6 +8,22 @@ interface Wallet { currency: string; balance: number; account_number: string | n
 interface Beneficiary { id: number; nickname: string; type: string; value: string; }
 interface RecipientInfo { exists: boolean; display_name: string | null; kyc_approved: boolean; }
 
+const OWN_ACCOUNT_CURRENCIES = new Set(["USD", "LBP"]);
+
+function walletLabel(currency: string) {
+  if (currency === "USD") return "Fresh USD";
+  if (currency === "LBP") return "Cash LBP";
+  return currency;
+}
+
+function formatMoney(value: number, currency: string) {
+  if (currency === "USD") return `$${value.toFixed(2)}`;
+  if (currency === "LBP") {
+    return `${value.toLocaleString()} LBP`;
+  }
+  return `${value.toLocaleString()} ${currency}`;
+}
+
 type Step = "account" | "type" | "recipient" | "amount" | "passcode" | "confirm" | "receipt";
 type TransferType = "mobile" | "iban" | "own" | "bank";
 type Tab = "mobile" | "iban";
@@ -45,6 +61,8 @@ export default function TransferPage() {
   const [step, setStep] = useState<Step>("account");
   const [wallets, setWallets] = useState<Wallet[]>([]);
   const [selectedWallet, setSelectedWallet] = useState<Wallet | null>(null);
+  const [selectedDestinationWallet, setSelectedDestinationWallet] =
+    useState<Wallet | null>(null);
   const [transferType, setTransferType] = useState<TransferType | null>(null);
   const [tab, setTab] = useState<Tab>("mobile");
   const [phone, setPhone] = useState("");
@@ -101,47 +119,136 @@ export default function TransferPage() {
   };
 
   const handleSubmit = async () => {
-    if (!selectedWallet || !recipientValue || !amount) return;
-    setLoading(true); setError("");
+    if (!selectedWallet || !amount) return;
+    if (transferType === "own" && !selectedDestinationWallet) return;
+    if (transferType !== "own" && !recipientValue) return;
+
+    setLoading(true);
+    setError("");
+
     try {
-      const endpoint = tab === "mobile" ? "/transfer/neo/mobile" : "/transfer/neo/iban";
-      const body = tab === "mobile"
-        ? { receiver_phone: recipientValue, amount: parseFloat(amount), currency: selectedWallet.currency }
-        : { receiver_iban: recipientValue, amount: parseFloat(amount), currency: selectedWallet.currency };
-      const idempotencyKey = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const r = await api.post(endpoint, body, {
-        headers: { "X-Idempotency-Key": idempotencyKey, "X-Action-Token": actionToken },
-      });
-      setReceipt(r.data);
+      if (transferType === "own") {
+        const response = await api.post(
+          "/exchange/execute",
+          {
+            from_currency: selectedWallet.currency,
+            to_currency: selectedDestinationWallet!.currency,
+            amount: parseFloat(amount),
+          },
+          {
+            headers: {
+              "X-Action-Token": actionToken,
+            },
+          }
+        );
+
+        setReceipt(response.data);
+      } else {
+        const endpoint =
+          tab === "mobile"
+            ? "/transfer/neo/mobile"
+            : "/transfer/neo/iban";
+
+        const body =
+          tab === "mobile"
+            ? {
+                receiver_phone: recipientValue,
+                amount: parseFloat(amount),
+                currency: selectedWallet.currency,
+              }
+            : {
+                receiver_iban: recipientValue,
+                amount: parseFloat(amount),
+                currency: selectedWallet.currency,
+              };
+
+        const idempotencyKey =
+          `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+        const response = await api.post(endpoint, body, {
+          headers: {
+            "X-Idempotency-Key": idempotencyKey,
+            "X-Action-Token": actionToken,
+          },
+        });
+
+        setReceipt(response.data);
+      }
+
       setStep("receipt");
     } catch (e: unknown) {
-      const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+      const detail = (
+        e as {
+          response?: {
+            data?: {
+              detail?: unknown;
+            };
+          };
+        }
+      )?.response?.data?.detail;
+
       if (detail && typeof detail === "object") {
-      const d = detail as { error?: string; available?: string; requested?: string; remaining?: string };
-       if (d.error === "insufficient_balance") {
-  setError(`Insufficient balance. Available: ${d.available}, requested: ${d.requested}`);
-} else if (d.error === "daily_limit_exceeded") {
-  setError(`Daily transfer limit reached. Remaining today: $${d.remaining}`);
-} else if (d.error === "wallet_frozen") {
-  setError("Your wallet is frozen. Please contact support.");
-} else if (d.error === "wallet_closed") {
-  setError("Your wallet is closed. Please contact support.");
-} else if (d.error === "receiver_not_found") {
-  setError("Recipient not found in NeoBank.");
-} else if (d.error === "receiver_kyc_not_approved") {
-  setError("Recipient has not completed KYC verification.");
-} else {
-  setError(JSON.stringify(d));
-}
+        const parsed = detail as {
+          error?: string;
+          message?: string;
+          available?: string;
+          requested?: string;
+          remaining?: string;
+        };
+
+        if (parsed.error === "insufficient_balance") {
+          setError(
+            `Insufficient balance. Available: ${parsed.available}, requested: ${parsed.requested}`
+          );
+        } else if (parsed.error === "daily_limit_exceeded") {
+          setError(
+            `Daily transfer limit reached. Remaining today: $${parsed.remaining}`
+          );
+        } else if (parsed.error === "wallet_frozen") {
+          setError("Your wallet is frozen. Please contact support.");
+        } else if (parsed.error === "wallet_closed") {
+          setError("Your wallet is closed. Please contact support.");
+        } else if (parsed.error === "receiver_not_found") {
+          setError("Recipient not found in NeoBank.");
+        } else if (parsed.error === "receiver_kyc_not_approved") {
+          setError("Recipient has not completed KYC verification.");
+        } else {
+          setError(parsed.message ?? JSON.stringify(parsed));
+        }
       } else {
-        setError(typeof detail === "string" ? detail : "Transfer failed.");
+        setError(
+          typeof detail === "string"
+            ? detail
+            : transferType === "own"
+              ? "Own-account transfer failed."
+              : "Transfer failed."
+        );
       }
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+    }
   };
 
   const balance = selectedWallet?.balance ?? 0;
   const amountNum = parseFloat(amount) || 0;
   const insufficient = amountNum > balance;
+
+  const ownAccountOptions =
+    selectedWallet &&
+    OWN_ACCOUNT_CURRENCIES.has(selectedWallet.currency)
+      ? wallets.filter(
+          (wallet) =>
+            wallet.currency !== selectedWallet.currency &&
+            OWN_ACCOUNT_CURRENCIES.has(wallet.currency)
+        )
+      : [];
+
+  const destinationLabel =
+    transferType === "own"
+      ? selectedDestinationWallet
+        ? `${walletLabel(selectedDestinationWallet.currency)} account`
+        : "Destination account"
+      : recipient?.display_name ?? recipientValue;
 
   const filteredBeneficiaries = beneficiaries.filter((b) =>
     (tab === "mobile" ? b.type === "mobile" : b.type === "iban") &&
@@ -159,7 +266,11 @@ export default function TransferPage() {
           </div>
         )}
         {wallets.map((w) => (
-          <button key={w.currency} onClick={() => setSelectedWallet(w)}
+          <button key={w.currency} onClick={() => {
+              setSelectedWallet(w);
+              setSelectedDestinationWallet(null);
+              setError("");
+            }}
             style={{ backgroundColor: "#fff", border: `2px solid ${selectedWallet?.currency === w.currency ? "#00C853" : "#F0F0F0"}`, borderRadius: "16px", padding: "16px", textAlign: "left", cursor: "pointer" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
@@ -190,7 +301,16 @@ export default function TransferPage() {
           { type: "own" as TransferType, label: "To my other accounts", sub: "Between your accounts", icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" stroke="#333" strokeWidth="2" strokeLinecap="round"/></svg> },
           { type: "bank" as TransferType, label: "To Bank", sub: "Coming soon", icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M3 21h18M3 10h18M5 6l7-3 7 3M4 10v11M8 10v11M12 10v11M16 10v11M20 10v11" stroke="#ccc" strokeWidth="2" strokeLinecap="round"/></svg> },
         ].map(({ type, label, sub, icon }) => (
-          <button key={type} onClick={() => { if (type === "bank") return; setTransferType(type); setStep("recipient"); }}
+          <button key={type} onClick={() => {
+              if (type === "bank") return;
+
+              setTransferType(type);
+              setRecipient(null);
+              setRecipientValue("");
+              setSelectedDestinationWallet(null);
+              setError("");
+              setStep("recipient");
+            }}
             style={{ backgroundColor: "#fff", border: `2px solid ${transferType === type ? "#00C853" : "#F0F0F0"}`, borderRadius: "16px", padding: "16px", textAlign: "left", cursor: type === "bank" ? "not-allowed" : "pointer", opacity: type === "bank" ? 0.5 : 1, display: "flex", alignItems: "center", gap: "14px" }}>
             {icon}
             <div>
@@ -200,6 +320,141 @@ export default function TransferPage() {
           </button>
         ))}
       </div>
+    </Wrap>
+  );
+
+
+  if (step === "recipient" && transferType === "own") return (
+    <Wrap>
+      <Header
+        title="Select Destination Account"
+        step={step}
+        setStep={setStep}
+        router={router}
+      />
+
+      <p style={{
+        color: "#aaa",
+        fontSize: "13px",
+        marginBottom: "12px",
+      }}>
+        Choose one of your other accounts
+      </p>
+
+      {ownAccountOptions.length === 0 ? (
+        <div style={{
+          backgroundColor: "#fff",
+          borderRadius: "16px",
+          padding: "24px",
+          marginBottom: "16px",
+        }}>
+          <p style={{ color: "#666", fontSize: "14px" }}>
+            No supported destination account is available.
+          </p>
+        </div>
+      ) : (
+        <div style={{ marginBottom: "20px" }}>
+          <select
+            aria-label="Destination account"
+            value={selectedDestinationWallet?.currency ?? ""}
+            onChange={(event) => {
+              const wallet =
+                ownAccountOptions.find(
+                  (item) => item.currency === event.target.value
+                ) ?? null;
+
+              setSelectedDestinationWallet(wallet);
+              setError("");
+            }}
+            style={{
+              width: "100%",
+              border: "1.5px solid #E5E7EB",
+              borderRadius: "14px",
+              padding: "14px 16px",
+              fontSize: "14px",
+              color: "#000",
+              backgroundColor: "#fff",
+              outline: "none",
+            }}
+          >
+            <option value="" disabled>
+              Select an account
+            </option>
+
+            {ownAccountOptions.map((wallet) => (
+              <option
+                key={wallet.currency}
+                value={wallet.currency}
+              >
+                {walletLabel(wallet.currency)} -{" "}
+                {formatMoney(wallet.balance, wallet.currency)}
+              </option>
+            ))}
+          </select>
+
+          {selectedDestinationWallet && (
+            <div style={{
+              backgroundColor: "#F0FDF4",
+              border: "1px solid #BBF7D0",
+              borderRadius: "12px",
+              padding: "12px 16px",
+              marginTop: "12px",
+            }}>
+              <p style={{
+                color: "#166534",
+                fontSize: "13px",
+                fontWeight: "600",
+              }}>
+                To: {walletLabel(selectedDestinationWallet.currency)}
+              </p>
+
+              <p style={{
+                color: "#166534",
+                fontSize: "12px",
+                marginTop: "4px",
+              }}>
+                Current balance:{" "}
+                {formatMoney(
+                  selectedDestinationWallet.balance,
+                  selectedDestinationWallet.currency
+                )}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {error && (
+        <p style={{
+          color: "#EF4444",
+          fontSize: "13px",
+          marginBottom: "12px",
+        }}>
+          {error}
+        </p>
+      )}
+
+      <button
+        onClick={() => setStep("amount")}
+        disabled={!selectedDestinationWallet}
+        style={{
+          width: "100%",
+          backgroundColor: selectedDestinationWallet
+            ? "#00C853"
+            : "#E5E7EB",
+          color: selectedDestinationWallet ? "#fff" : "#999",
+          fontWeight: "700",
+          fontSize: "15px",
+          border: "none",
+          borderRadius: "14px",
+          padding: "14px",
+          cursor: selectedDestinationWallet
+            ? "pointer"
+            : "not-allowed",
+        }}
+      >
+        Next
+      </button>
     </Wrap>
   );
 
@@ -272,7 +527,7 @@ export default function TransferPage() {
       <Header title="Enter Amount" step={step} setStep={setStep} router={router} />
       <div style={{ backgroundColor: "#fff", borderRadius: "20px", padding: "20px", marginBottom: "16px" }}>
         <p style={{ color: "#aaa", fontSize: "12px", marginBottom: "4px" }}>Sending to</p>
-        <p style={{ fontSize: "15px", fontWeight: "600", color: "#000" }}>{recipient?.display_name ?? recipientValue}</p>
+        <p style={{ fontSize: "15px", fontWeight: "600", color: "#000" }}>{destinationLabel}</p>
       </div>
       <div style={{ backgroundColor: "#fff", borderRadius: "20px", padding: "20px", marginBottom: "16px" }}>
         <p style={{ color: "#aaa", fontSize: "12px", marginBottom: "8px" }}>Amount ({selectedWallet?.currency})</p>
@@ -296,7 +551,7 @@ export default function TransferPage() {
       <Header title="Confirm Identity" step={step} setStep={setStep} router={router} />
       <div style={{ backgroundColor: "#fff", borderRadius: "20px", padding: "24px", marginBottom: "16px", display: "flex", flexDirection: "column", gap: "12px" }}>
         {[
-          { label: "To", value: recipient?.display_name ?? recipientValue },
+          { label: "To", value: destinationLabel },
           { label: "Amount", value: `${selectedWallet?.currency === "USD" ? `$${amountNum.toFixed(2)}` : `${amountNum.toLocaleString()} ل.ل`}` },
         ].map(({ label, value }) => (
           <div key={label} style={{ display: "flex", justifyContent: "space-between" }}>
@@ -325,9 +580,17 @@ export default function TransferPage() {
       <div style={{ backgroundColor: "#fff", borderRadius: "20px", padding: "24px", marginBottom: "16px", display: "flex", flexDirection: "column", gap: "16px" }}>
         {[
           { label: "From", value: `${selectedWallet?.currency === "USD" ? "Fresh USD" : "Cash LBP"} — ${selectedWallet?.currency === "USD" ? `$${balance.toFixed(2)}` : `${balance.toLocaleString()} ل.ل`}` },
-          { label: "To", value: recipient?.display_name ?? recipientValue },
+          { label: "To", value: destinationLabel },
           { label: "Amount", value: `${selectedWallet?.currency === "USD" ? `$${amountNum.toFixed(2)}` : `${amountNum.toLocaleString()} ل.ل`}` },
-          { label: "Transfer type", value: tab === "mobile" ? "Via Mobile Number" : "Via IBAN" },
+          {
+             label: "Transfer type",
+             value:
+               transferType === "own"
+                 ? "Between my accounts"
+                 : tab === "mobile"
+                   ? "Via Mobile Number"
+                   : "Via IBAN",
+           },
         ].map(({ label, value }) => (
           <div key={label} style={{ display: "flex", justifyContent: "space-between" }}>
             <p style={{ color: "#aaa", fontSize: "14px" }}>{label}</p>
@@ -347,12 +610,28 @@ export default function TransferPage() {
     <Wrap>
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "16px", paddingTop: "40px" }}>
         <div style={{ width: "72px", height: "72px", borderRadius: "50%", backgroundColor: "#F0FDF4", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "32px" }}>✅</div>
-        <h2 style={{ fontSize: "22px", fontWeight: "700", color: "#000" }}>Transfer Sent!</h2>
+        <h2 style={{ fontSize: "22px", fontWeight: "700", color: "#000" }}>
+          {transferType === "own"
+            ? "Transfer Completed!"
+            : "Transfer Sent!"}
+        </h2>
         <div style={{ backgroundColor: "#fff", borderRadius: "20px", padding: "24px", width: "100%", display: "flex", flexDirection: "column", gap: "12px" }}>
           {[
-            { label: "To", value: recipient?.display_name ?? recipientValue },
+            { label: "To", value: destinationLabel },
             { label: "Amount", value: `${selectedWallet?.currency === "USD" ? `$${amountNum.toFixed(2)}` : `${amountNum.toLocaleString()} ل.ل`}` },
-            { label: "Transaction ID", value: String((receipt as { transaction_id?: unknown })?.transaction_id ?? "—") },
+            {
+              label:
+                transferType === "own"
+                  ? "Exchange ID"
+                  : "Transaction ID",
+              value: String(
+                (receipt as { transaction_id?: unknown })
+                  ?.transaction_id ??
+                (receipt as { exchange_id?: unknown })
+                  ?.exchange_id ??
+                "-"
+              ),
+            },
           ].map(({ label, value }) => (
             <div key={label} style={{ display: "flex", justifyContent: "space-between" }}>
               <p style={{ color: "#aaa", fontSize: "14px" }}>{label}</p>
