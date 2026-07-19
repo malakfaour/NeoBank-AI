@@ -10,7 +10,7 @@ from user_agents import parse as parse_ua
 from app.api.dependencies import get_current_user
 from app.db.session import get_async_db
 from app.models.session import UserSession
-from app.schemas.user import CurrentUser
+from app.schemas.auth import CurrentUser
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

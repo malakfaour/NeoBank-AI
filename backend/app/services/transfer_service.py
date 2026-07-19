@@ -11,7 +11,7 @@ from app.models.user import KYCStatus, User
 from app.models.wallet import Wallet, WalletCurrency
 from app.schemas.transaction import SendMoneyRequest
 from app.schemas.transfer import TransferReceipt
-from app.schemas.user import CurrentUser
+from app.schemas.auth import CurrentUser
 
 LEBANESE_IBAN_PATTERN = re.compile(r"^LB[A-Za-z0-9]{26}$")
 

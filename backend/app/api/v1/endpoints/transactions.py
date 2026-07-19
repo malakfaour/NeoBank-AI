@@ -32,7 +32,7 @@ from app.db.session import get_db
 from app.models.transaction import Transaction, TransactionCurrency, TransactionStatus
 from app.models.wallet import Wallet, WalletCurrency
 from app.schemas.transaction import SendMoneyRequest, SendMoneyResponse
-from app.schemas.user import CurrentUser
+from app.schemas.auth import CurrentUser
 from app.services.audit_log import append_audit
 from app.services.fraud_rules import CurrencyMismatchError, check_currency_match
 from app.services.rate_limiter import check_rate_limit

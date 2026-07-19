@@ -22,7 +22,7 @@ from app.schemas.exchange import (
     LiveExchangeRateResponse,
     ExchangeRateResponse,
 )
-from app.schemas.user import CurrentUser
+from app.schemas.auth import CurrentUser
 from app.services.audit_log import append_audit
 from app.core.config import settings
 from app.services.exchange_cache import (

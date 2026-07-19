@@ -8,7 +8,7 @@ from app.schemas.transfer import (
     TransferByMobileRequest,
     TransferReceipt,
 )
-from app.schemas.user import CurrentUser
+from app.schemas.auth import CurrentUser
 from app.services.transfer_service import (
     execute_transfer_by_iban,
     execute_transfer_by_mobile,

@@ -47,7 +47,7 @@ from app.schemas.admin_kyc import (
     AdminKYCRejectRequest,
 )
 from app.schemas.audit_log import AuditLogEntry, AuditTrailResponse
-from app.schemas.user import CurrentUser
+from app.schemas.auth import CurrentUser
 from app.services.audit_log import append_audit, append_kyc_audit
 from app.services.fraud_scoring import FRAUD_FLAG_THRESHOLD
 from app.services.notifications import notify
@@ -304,7 +304,7 @@ async def get_transaction_audit_trail(
 # get_transaction_audit_trail above are the pre-existing file, byte-for-
 # byte unchanged -- only new imports were added to the top-of-file import
 # block (UserRole reused from the existing app.models.user import rather
-# than re-imported from app.schemas.user, to stay consistent with this
+# than re-imported from app.schemas.auth, to stay consistent with this
 # file's own established convention).
 # =====================================================================
 

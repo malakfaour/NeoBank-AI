@@ -22,7 +22,7 @@ from app.core.security import create_access_token, create_refresh_token
 from app.db.session import get_async_db
 from app.models.device_credential import DeviceCredential
 from app.models.user import User
-from app.schemas.user import CurrentUser
+from app.schemas.auth import CurrentUser
 
 router = APIRouter()
 INVALID_CREDENTIALS = HTTPException(

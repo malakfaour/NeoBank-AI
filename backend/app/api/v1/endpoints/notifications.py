@@ -17,7 +17,7 @@ from app.schemas.notification import (
     PushSubscriptionResponse,
     ReadAllNotificationsResponse,
 )
-from app.schemas.user import CurrentUser
+from app.schemas.auth import CurrentUser
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
 
