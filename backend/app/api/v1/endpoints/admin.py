@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_role
 from app.core.cache_utils import invalidate_balance_cache
-app.api.v1.endpoints.admin_kyc.get_presigned_url
+from app.core.storage import get_presigned_url
 from app.db.session import get_db
 from app.models.exchange_audit_log import ExchangeAuditLog
 from app.models.fraud_resolution import FraudResolution, FraudResolutionType
