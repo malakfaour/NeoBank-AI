@@ -15,3 +15,21 @@ def test_evaluate_spoofs_pins_rates(monkeypatch, tmp_path: Path):
     assert result["overall_pass_rate"] == 1 / 3
     assert result["by_class"]["printed_photo"]["false_accept_rate"] == 0.0
     assert result["by_class"]["live"]["false_reject_rate"] == 0.0
+
+
+def test_evaluate_spoofs_records_failures_by_class(monkeypatch, tmp_path: Path):
+    image = tmp_path / "screen_replay" / "broken.jpg"
+    image.parent.mkdir()
+    image.write_bytes(b"fixture")
+
+    def fail_liveness(_path):
+        raise RuntimeError("unreadable image")
+
+    monkeypatch.setattr(evaluate, "check_liveness", fail_liveness)
+
+    result = evaluate.evaluate_spoofs(tmp_path)
+
+    assert result["failed_checks"] == [
+        {"image": str(Path("screen_replay") / "broken.jpg"), "error": "unreadable image"}
+    ]
+    assert result["by_class"]["screen_replay"]["errors"] == 1

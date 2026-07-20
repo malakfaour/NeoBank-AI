@@ -17,7 +17,6 @@ for path in (REPO_ROOT, BACKEND_DIR):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from app.core.config import settings  # noqa: E402
 from ml.kyc.face_verification import verify_face  # noqa: E402
 from ml.kyc.liveness import check_liveness, liveness_threshold  # noqa: E402
 
@@ -59,6 +58,8 @@ def classify(scores: list[float], approve: float, flag: float) -> dict[str, int 
 
 
 def evaluate_genuine() -> dict:
+    from app.core.config import settings
+
     scores = []
     failures = []
     for pair_dir in sorted(GENUINE_DIR.iterdir()):
@@ -117,11 +118,11 @@ def evaluate_spoofs(dataset_dir: str | Path) -> dict:
                 "false_reject": expected_live and not passed,
             })
         except Exception as exc:
-            failures.append({"image": str(image.relative_to(SPOOF_DIR)), "error": str(exc)})
+            failures.append({"image": str(image.relative_to(root)), "error": str(exc)})
     scores = [item["antispoof_score"] for item in results]
     def breakdown(label, predicate):
         rows = [r for r in results if predicate(r)]
-        return {"count": len(rows), "errors": sum(1 for f in failures if f["image"].split("\\")[0] == label),
+        return {"count": len(rows), "errors": sum(1 for f in failures if Path(f["image"]).parts[0] == label),
                 "false_accept_rate": (sum(r["false_accept"] for r in rows) / len(rows)) if rows else 0.0,
                 "false_reject_rate": (sum(r["false_reject"] for r in rows) / len(rows)) if rows else 0.0}
     spoof_labels = {"printed_photo", "screen_replay", "spoof"}
@@ -141,11 +142,13 @@ def evaluate_spoofs(dataset_dir: str | Path) -> dict:
 
 
 def main() -> None:
+    from app.core.config import settings
+
     report = {
         "thresholds": {
             "approve": settings.KYC_MATCH_APPROVE_THRESHOLD,
             "flag": settings.KYC_MATCH_FLAG_THRESHOLD,
-            "liveness": LIVENESS_THRESHOLD,
+            "liveness": liveness_threshold(),
         },
         "genuine": evaluate_genuine(),
         "spoof": evaluate_spoofs(EVAL_DIR / "spoof_dataset"),
