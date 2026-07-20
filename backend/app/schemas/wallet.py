@@ -35,7 +35,10 @@ class WalletStatusChangeResponse(BaseModel):
 class CardTopUpRequest(BaseModel):
     wallet_id: int = Field(..., gt=0)
     amount: Decimal = Field(..., gt=0)
-    card_token: str = Field(..., min_length=8)
+    # DEVATTECH-131: was `card_token` (a fake "tok_..." string). Now a real
+    # Stripe PaymentMethod id (e.g. "pm_1Nx..."), created client-side by
+    # Stripe Elements -- the raw card number never reaches this backend.
+    payment_method_id: str = Field(..., min_length=8)
 
 
 class CardTopUpResponse(BaseModel):
