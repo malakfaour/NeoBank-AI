@@ -12,6 +12,7 @@ celery_app = Celery(
 
 celery_app.conf.imports = (
     "app.tasks.categorization_tasks",
+    "app.tasks.chatbot_tasks",
     "app.tasks.exchange_tasks",
     "app.tasks.kyc_tasks",
     "app.tasks.transaction_tasks",
@@ -25,6 +26,10 @@ celery_app.conf.beat_schedule = {
     "retrain-exchange-forecast-weekly": {
         "task": "app.tasks.exchange_tasks.retrain_exchange_forecast",
         "schedule": crontab(hour=3, minute=0, day_of_week="monday"),
+    },
+    "delete-expired-chat-sessions-daily": {
+        "task": "app.tasks.chatbot_tasks.delete_expired_chat_sessions",
+        "schedule": crontab(hour=4, minute=0),
     },
 }
 

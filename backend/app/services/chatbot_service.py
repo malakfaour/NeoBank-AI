@@ -160,6 +160,24 @@ async def get_chat_history(
     Raw message text is stored only in chat_sessions.messages.
     chatbot_logs remains analytics-only.
     """
+    session = await _get_owned_chat_session(
+        db=db,
+        user_id=user_id,
+        session_id=session_id,
+    )
+
+    if session is None:
+        return None
+
+    return list(session.messages or [])
+
+
+async def _get_owned_chat_session(
+    db: AsyncSession,
+    user_id: int,
+    session_id: str,
+) -> ChatSession | None:
+    """Load a chat session and enforce ownership for user-facing operations."""
     result = await db.execute(
         select(ChatSession).where(
             ChatSession.session_id == session_id,
@@ -174,7 +192,27 @@ async def get_chat_history(
     if session.user_id != user_id:
         raise ChatSessionOwnershipError("Chat session belongs to another user")
 
-    return list(session.messages or [])
+    return session
+
+
+async def delete_chat_session(
+    db: AsyncSession,
+    user_id: int,
+    session_id: str,
+) -> bool:
+    """Delete an owned conversation, returning False when it does not exist."""
+    session = await _get_owned_chat_session(
+        db=db,
+        user_id=user_id,
+        session_id=session_id,
+    )
+
+    if session is None:
+        return False
+
+    await db.delete(session)
+    await db.commit()
+    return True
 
 
 def _history_for_agent(
