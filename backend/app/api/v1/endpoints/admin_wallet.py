@@ -25,7 +25,7 @@ from app.schemas.admin import (
     AdminWalletItem,
 )
 
-from app.schemas.user import CurrentUser
+from app.schemas import CurrentUser
 
 from app.services.audit_log import append_audit
 from app.services.wallet_locking import (

@@ -34,7 +34,7 @@ from app.schemas.admin import (
 )
 
 from app.schemas.audit_log import AuditLogEntry, AuditTrailResponse
-from app.schemas.user import CurrentUser
+from app.schemas import CurrentUser
 
 from app.services.audit_log import append_audit
 from app.services.fraud_scoring import FRAUD_FLAG_THRESHOLD

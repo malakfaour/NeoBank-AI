@@ -11,9 +11,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 REPO_ROOT = BACKEND_DIR.parent
+
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
 if str(REPO_ROOT) not in sys.path:
     # Import the shared top-level ml package from the repo root.
-    sys.path.insert(0, str(REPO_ROOT))
+    sys.path.insert(1, str(REPO_ROOT))
 
 TEST_DB_URL = "sqlite+aiosqlite:///:memory:"
 
