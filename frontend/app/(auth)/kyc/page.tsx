@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
@@ -171,7 +171,7 @@ useEffect(() => {
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "48px 20px", gap: "8px" }}>
               <div style={{ fontSize: "32px" }}>🪪</div>
               <p style={{ color: "#666", fontSize: "14px" }}>Tap to upload ID photo</p>
-              <p style={{ color: "#aaa", fontSize: "12px" }}>JPG, PNG — max 10 MB</p>
+              <p style={{ color: "#aaa", fontSize: "12px" }}>JPG, PNG {"\u2014"} max 10 MB</p>
             </div>
           )
         }

@@ -1,16 +1,81 @@
 "use client";
 
-import { useState } from "react";
+import axios from "axios";
+import { useEffect, useState } from "react";
 import api from "@/lib/axios";
 
 interface ChatMessage { role: "user" | "bot"; text: string; }
 interface PendingAction { type?: string; method?: string; recipient?: string; amount?: string; currency?: string; }
+interface HistoryMessage { role: "user" | "assistant" | "system"; content: string; }
+interface ChatHistoryResponse { session_id: string; messages: HistoryMessage[]; }
+
+const CHAT_SESSION_STORAGE_KEY = "chatbot_session_id";
+
+function getOrCreateSessionId(): string {
+  const storedSessionId = localStorage.getItem(CHAT_SESSION_STORAGE_KEY);
+  if (storedSessionId) return storedSessionId;
+
+  const sessionId = crypto.randomUUID();
+  localStorage.setItem(CHAT_SESSION_STORAGE_KEY, sessionId);
+  return sessionId;
+}
+
+function getErrorDetail(error: unknown): unknown {
+  if (!axios.isAxiosError(error)) return undefined;
+  return error.response?.data?.detail;
+}
+
+function getChatErrorMessage(error: unknown, isTransferAttempt: boolean): string | null {
+  if (!axios.isAxiosError(error)) return "Sorry, something went wrong.";
+
+  const status = error.response?.status;
+  const detail = getErrorDetail(error);
+  const detailText = typeof detail === "string" ? detail : "";
+  const normalizedDetail = detailText.toLowerCase();
+
+  if (
+    status === 403
+    && (
+      normalizedDetail.includes("expired")
+      || (
+        normalizedDetail.includes("missing")
+        && (
+          normalizedDetail.includes("pending")
+          || normalizedDetail.includes("action")
+        )
+      )
+    )
+  ) {
+    return "That request expired, please try again.";
+  }
+  if (status === 429) {
+    return "You're sending messages too quickly, please wait a moment.";
+  }
+  if (status === 401) return null;
+  if (
+    typeof detail === "object"
+    && detail !== null
+    && "error" in detail
+    && detail.error === "insufficient_balance"
+  ) {
+    return "Transfer failed: insufficient balance.";
+  }
+  if (isTransferAttempt && status && status >= 400 && status < 500 && detailText) {
+    return `Transfer failed: ${detailText}`;
+  }
+  if (status && status >= 500) {
+    return "The assistant is temporarily unavailable, please try again.";
+  }
+  return "Sorry, something went wrong.";
+}
 
 export default function ChatWidget() {
   const [chatOpen, setChatOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
-  const [sessionId] = useState(() => `session_${Date.now()}`);
+  const [sessionId] = useState(() => (
+    typeof window === "undefined" ? "" : getOrCreateSessionId()
+  ));
   const [chatLoading, setChatLoading] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [showPasscode, setShowPasscode] = useState(false);
@@ -18,8 +83,37 @@ export default function ChatWidget() {
   const [passcodeLoading, setPasscodeLoading] = useState(false);
   const [passcodeError, setPasscodeError] = useState("");
 
+  useEffect(() => {
+    if (!sessionId) return;
+
+    let active = true;
+    api.get<ChatHistoryResponse>("/chatbot/history", {
+      params: { session_id: sessionId },
+    }).then((response) => {
+      if (!active) return;
+      const restoredMessages = response.data.messages.flatMap<ChatMessage>((message) => {
+        if (message.role === "user" && typeof message.content === "string") {
+          return [{ role: "user", text: message.content }];
+        }
+        if (message.role === "assistant" && typeof message.content === "string") {
+          return [{ role: "bot", text: message.content }];
+        }
+        return [];
+      });
+      setMessages(restoredMessages);
+    }).catch((error: unknown) => {
+      if (!axios.isAxiosError(error) || error.response?.status !== 404) {
+        console.error("Unable to restore chatbot history", error);
+      }
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [sessionId]);
+
   const sendMessage = async (text: string, actionToken?: string) => {
-    if (!text.trim()) return;
+    if (!text.trim() || !sessionId) return;
     if (!actionToken) {
       setMessages((prev) => [...prev, { role: "user", text }]);
     }
@@ -36,8 +130,11 @@ export default function ChatWidget() {
       } else {
         setPendingAction(null);
       }
-    } catch {
-      setMessages((prev) => [...prev, { role: "bot", text: "Sorry, something went wrong." }]);
+    } catch (error: unknown) {
+      const errorMessage = getChatErrorMessage(error, Boolean(actionToken));
+      if (errorMessage) {
+        setMessages((prev) => [...prev, { role: "bot", text: errorMessage }]);
+      }
     } finally { setChatLoading(false); }
   };
 
@@ -90,10 +187,10 @@ export default function ChatWidget() {
                 </div>
                 <div>
                   <p style={{ fontSize: "14px", fontWeight: "700", color: "#000" }}>Neo Assistant</p>
-                  <p style={{ fontSize: "11px", color: "#00C853" }}>● Online</p>
+                  <p style={{ fontSize: "11px", color: "#00C853" }}>{"\u25CF"} Online</p>
                 </div>
               </div>
-              <button onClick={() => setChatOpen(false)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "20px", color: "#aaa" }}>✕</button>
+              <button onClick={() => setChatOpen(false)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "20px", color: "#aaa" }}>{"\u2715"}</button>
             </div>
 
             {/* Messages */}
@@ -121,12 +218,12 @@ export default function ChatWidget() {
               {/* Confirm card */}
               {pendingAction && !showPasscode && (
                 <div style={{ backgroundColor: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: "16px", padding: "16px", display: "flex", flexDirection: "column", gap: "10px" }}>
-                  <p style={{ fontSize: "14px", fontWeight: "700", color: "#000" }}>🏦 Confirm Transfer</p>
+                  <p style={{ fontSize: "14px", fontWeight: "700", color: "#000" }}>{"\u{1F3E6}"} Confirm Transfer</p>
                   {pendingAction.recipient && <p style={{ fontSize: "13px", color: "#555" }}>To: {pendingAction.recipient}</p>}
                   {pendingAction.amount && pendingAction.currency && (
                     <p style={{ fontSize: "13px", color: "#555" }}>Amount: {pendingAction.amount} {pendingAction.currency}</p>
                   )}
-                  <p style={{ fontSize: "11px", color: "#aaa" }}>⏱ Expires in 5 minutes</p>
+                  <p style={{ fontSize: "11px", color: "#aaa" }}>{"\u23F1"} Expires in 5 minutes</p>
                   <div style={{ display: "flex", gap: "8px" }}>
                     <button onClick={handleConfirmClick} style={{ flex: 1, backgroundColor: "#00C853", color: "#fff", border: "none", borderRadius: "10px", padding: "10px", fontWeight: "700", cursor: "pointer", fontSize: "13px" }}>
                       Confirm
@@ -141,9 +238,9 @@ export default function ChatWidget() {
               {/* Passcode sheet */}
               {showPasscode && (
                 <div style={{ backgroundColor: "#fff", border: "1.5px solid #E5E7EB", borderRadius: "16px", padding: "16px", display: "flex", flexDirection: "column", gap: "10px" }}>
-                  <p style={{ fontSize: "14px", fontWeight: "700", color: "#000" }}>🔐 Enter Passcode</p>
+                  <p style={{ fontSize: "14px", fontWeight: "700", color: "#000" }}>{"\u{1F510}"} Enter Passcode</p>
                   <p style={{ fontSize: "12px", color: "#aaa" }}>Verify your identity to complete the transfer</p>
-                  <input type="password" placeholder="••••••" maxLength={6} value={passcode}
+                  <input type="password" placeholder={"\u2022".repeat(6)} maxLength={6} value={passcode}
                     onChange={(e) => { setPasscode(e.target.value.replace(/\D/g, "")); setPasscodeError(""); }}
                     style={{ width: "100%", border: "1.5px solid #E5E7EB", borderRadius: "12px", padding: "10px 14px", fontSize: "20px", letterSpacing: "8px", outline: "none", boxSizing: "border-box", textAlign: "center" }} />
                   {passcodeError && <p style={{ color: "#EF4444", fontSize: "12px" }}>{passcodeError}</p>}
@@ -164,9 +261,9 @@ export default function ChatWidget() {
             {messages.length === 0 && (
               <div style={{ padding: "0 16px 12px", display: "flex", gap: "8px", flexWrap: "wrap" }}>
                 {[
-                  { label: "💰 My Balance", msg: "What is my current balance?" },
-                  { label: "📋 Last Transactions", msg: "Show me my last transactions" },
-                  { label: "💱 Exchange Rate", msg: "What is the current USD to LBP exchange rate?" },
+                  { label: "\u{1F4B0} My Balance", msg: "What is my current balance?" },
+                  { label: "\u{1F4CB} Last Transactions", msg: "Show me my last transactions" },
+                  { label: "\u{1F4B1} Exchange Rate", msg: "What is the current USD to LBP exchange rate?" },
                 ].map(({ label, msg }) => (
                   <button key={label} onClick={() => sendMessage(msg)}
                     style={{ padding: "8px 14px", borderRadius: "20px", border: "1.5px solid #00C853", backgroundColor: "#F0FDF4", color: "#00C853", fontSize: "12px", fontWeight: "600", cursor: "pointer", whiteSpace: "nowrap" }}>
