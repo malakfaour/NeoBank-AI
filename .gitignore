@@ -227,3 +227,6 @@ test_neobank.db
 *.db
 /00ec1be9d686_initial_schema.py[}]
 ml/kyc/eval_data/
+!ml/kyc/eval_data/
+!ml/kyc/eval_data/spoof_dataset/
+!ml/kyc/eval_data/spoof_dataset/**
