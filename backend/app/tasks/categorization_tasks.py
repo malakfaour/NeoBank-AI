@@ -37,16 +37,9 @@ def _is_bill_transaction(db, transaction_id: int) -> bool:
 
 
 def _transaction_text(transaction: Transaction) -> str:
-    description = getattr(transaction, "description", None)
-    merchant_name = getattr(transaction, "merchant_name", None)
-
     return (
-        description
-        or merchant_name
-        or (
-            f"Bank transfer of {transaction.amount} "
-            f"{transaction.currency.value}"
-        )
+        f"Transfer of {transaction.amount} "
+        f"{transaction.currency.value} to {transaction.receiver.full_name}"
     )
 
 
