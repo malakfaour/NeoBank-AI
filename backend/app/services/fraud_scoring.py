@@ -24,6 +24,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.transaction import Transaction
+from app.core.storage import download_file
 
 MODEL_DIR = os.path.join(os.path.dirname(__file__), "..", "ml_models")
 ISOLATION_FOREST_PATH = os.path.join(MODEL_DIR, "isolation_forest.pkl")
@@ -37,6 +38,63 @@ _xgb_pipeline = None
 _xgb_stats = None
 
 logger = logging.getLogger(__name__)
+
+# DEVATTECH-143: S3 fallback for the two relocated .pkl artifacts only.
+# ISOLATION_FOREST_STATS_PATH / FRAUD_XGB_STATS_PATH stay locally
+# git-tracked and untouched -- only these two paths were approved for
+# relocation.
+
+# Tracks which local paths have already had an S3 fetch attempted in this
+# process, so a down/misconfigured S3 doesn't get re-hit on every single
+# transaction scored -- one attempt per path per process, matching the
+# existing module-level model-caching pattern below.
+_s3_fetch_attempted: set[str] = set()
+
+
+def _ensure_model_file_available(local_path: str, s3_key: str) -> None:
+    """
+    DEVATTECH-143: if local_path doesn't exist, attempt one S3 fetch into
+    that exact same path before the caller's existing joblib.load() runs.
+
+    s3_key is passed explicitly by the caller rather than looked up from
+    local_path in a module-level dict -- a path-keyed dict would silently
+    stop matching (and silently skip the S3 fetch) whenever local_path is
+    monkeypatched to a different value, e.g. in tests. Passing it
+    explicitly avoids that fragility entirely.
+
+    Best-effort only: any failure (S3 unavailable, credentials missing,
+    key not found) is logged and swallowed here -- the caller's existing
+    load code then runs exactly as it does today when the file is
+    genuinely absent. This function does NOT change either loader's
+    existing error-handling behavior:
+      - _load_isolation_forest(): joblib.load() still raises
+        FileNotFoundError uncaught if the file is still missing after
+        this best-effort fetch, unchanged from current behavior.
+      - _load_xgb_model(): its existing try/except FileNotFoundError ->
+        (None, None) fallback still applies unchanged.
+
+    This is purely a "give the local file a chance to exist first" step,
+    not a new failure mode.
+    """
+    if local_path in _s3_fetch_attempted:
+        return
+    _s3_fetch_attempted.add(local_path)
+
+    if os.path.exists(local_path):
+        return
+
+    try:
+        download_file(s3_key, local_path)
+        logger.info("Fetched %s from S3 key %s", local_path, s3_key)
+    except Exception:
+        logger.warning(
+            "Could not fetch %s from S3 (key=%s) -- falling back to "
+            "local-file-missing behavior.",
+            local_path,
+            s3_key,
+            exc_info=True,
+        )
+
 # DEVATTECH-90: justified from ml/fraud/tune_threshold.py's holdout
 # evaluation (evaluation-only pipeline, never touched fraud_xgb.pkl) --
 # precision=0.9909, recall=0.9083, F1=0.9478, flagged_rate=4.58% at this
@@ -48,6 +106,7 @@ FRAUD_FLAG_THRESHOLD = 0.45
 def _load_isolation_forest():
     global _isolation_forest_model, _isolation_forest_stats
     if _isolation_forest_model is None:
+        _ensure_model_file_available(ISOLATION_FOREST_PATH, "ml-models/fraud/isolation_forest.pkl")
         _isolation_forest_model = joblib.load(ISOLATION_FOREST_PATH)
         with open(ISOLATION_FOREST_STATS_PATH) as f:
             _isolation_forest_stats = json.load(f)
@@ -71,6 +130,7 @@ def _load_xgb_model():
     """
     global _xgb_pipeline, _xgb_stats
     if _xgb_pipeline is None:
+        _ensure_model_file_available(FRAUD_XGB_PATH, "ml-models/fraud/fraud_xgb.pkl")
         try:
             _xgb_pipeline = joblib.load(FRAUD_XGB_PATH)
             with open(FRAUD_XGB_STATS_PATH) as f:
@@ -283,3 +343,4 @@ def score_with_xgboost(db: Session, transaction: Transaction) -> float:
     # predict_proba returns [[P(class=0), P(class=1)]]; class 1 = fraud.
     fraud_score = float(pipeline.predict_proba([features])[0][1])
     return fraud_score
+    
