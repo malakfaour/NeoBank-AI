@@ -125,6 +125,36 @@ async def send_chatbot_message(
 
     try:
         if is_cancel_message(message):
+            pending_action = await get_chat_pending_action(body.session_id)
+
+            if (
+                pending_action is None
+                or int(pending_action.get("user_id", -1)) != user_id
+            ):
+                reply = (
+                    "There is no pending transfer to cancel, or it has expired. "
+                    "Please start the transfer again."
+                )
+
+                # A foreign pending action may share its owner's chat session.
+                # Do not write to that session or reveal whether it exists.
+                if pending_action is None:
+                    await save_chat_turn(
+                        db=db,
+                        user_id=user_id,
+                        session_id=body.session_id,
+                        message=body.message,
+                        reply=reply,
+                    )
+
+                return ChatbotMessageResponse(
+                    reply=reply,
+                    session_id=body.session_id,
+                    intent=classification.intent,
+                    confidence=classification.confidence,
+                    confirmation_required=False,
+                )
+
             await delete_chat_pending_action(body.session_id)
 
             reply = "Okay, I cancelled the pending transfer."

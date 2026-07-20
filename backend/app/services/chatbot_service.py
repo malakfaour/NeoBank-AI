@@ -1,4 +1,5 @@
 import json
+import logging
 from typing import Any
 
 from langchain.agents import create_agent
@@ -17,6 +18,14 @@ from app.services.transaction_query_service import (
 )
 
 GROQ_CHATBOT_MODEL = "llama-3.3-70b-versatile"
+AGENT_HISTORY_MESSAGE_LIMIT = 20
+STORED_HISTORY_MESSAGE_LIMIT = 100
+AGENT_UNAVAILABLE_REPLY = (
+    "The assistant is temporarily unavailable for this request. "
+    "Please try again."
+)
+
+logger = logging.getLogger(__name__)
 
 _SYSTEM_PROMPT = """
 You are NeoBank Lebanon's secure banking assistant.
@@ -126,12 +135,17 @@ async def _get_or_create_chat_session(
     db: AsyncSession,
     user_id: int,
     session_id: str,
+    *,
+    for_update: bool = False,
 ) -> ChatSession:
-    result = await db.execute(
-        select(ChatSession).where(
-            ChatSession.session_id == session_id,
-        )
+    query = select(ChatSession).where(
+        ChatSession.session_id == session_id,
     )
+
+    if for_update:
+        query = query.with_for_update()
+
+    result = await db.execute(query)
 
     session = result.scalar_one_or_none()
 
@@ -202,6 +216,26 @@ def _history_for_agent(
     return history
 
 
+def _append_bounded_turn(
+    messages: list[dict[str, Any]],
+    *,
+    message: str,
+    reply: str,
+) -> list[dict[str, Any]]:
+    history = [
+        *messages,
+        {
+            "role": "user",
+            "content": message,
+        },
+        {
+            "role": "assistant",
+            "content": reply,
+        },
+    ]
+    return history[-STORED_HISTORY_MESSAGE_LIMIT:]
+
+
 def _extract_reply(
     agent_result: dict[str, Any],
 ) -> str:
@@ -250,21 +284,16 @@ async def save_chat_turn(
         db=db,
         user_id=user_id,
         session_id=session_id,
+        for_update=True,
     )
 
     history = list(session.messages or [])
 
-    session.messages = [
-        *history,
-        {
-            "role": "user",
-            "content": message,
-        },
-        {
-            "role": "assistant",
-            "content": reply,
-        },
-    ]
+    session.messages = _append_bounded_turn(
+        history,
+        message=message,
+        reply=reply,
+    )
 
     await db.commit()
 
@@ -285,11 +314,14 @@ async def get_chatbot_response(
         db=db,
         user_id=user_id,
         session_id=session_id,
+        for_update=True,
     )
 
     stored_history = list(session.messages or [])
 
-    agent_messages = _history_for_agent(stored_history)
+    agent_messages = _history_for_agent(
+        stored_history[-AGENT_HISTORY_MESSAGE_LIMIT:]
+    )
 
     agent_messages.append(
         {
@@ -322,25 +354,26 @@ async def get_chatbot_response(
         ],
     )
 
-    agent_result = await agent.ainvoke(
-        {
-            "messages": agent_messages,
-        }
+    try:
+        agent_result = await agent.ainvoke(
+            {
+                "messages": agent_messages,
+            }
+        )
+        reply = _extract_reply(agent_result)
+    except Exception:
+        logger.exception(
+            "Chatbot agent failed for session %s and user %s",
+            session_id,
+            user_id,
+        )
+        reply = AGENT_UNAVAILABLE_REPLY
+
+    session.messages = _append_bounded_turn(
+        stored_history,
+        message=message,
+        reply=reply,
     )
-
-    reply = _extract_reply(agent_result)
-
-    session.messages = [
-        *stored_history,
-        {
-            "role": "user",
-            "content": message,
-        },
-        {
-            "role": "assistant",
-            "content": reply,
-        },
-    ]
 
     await db.commit()
 
