@@ -37,7 +37,7 @@ neobank-lebanon/
 ## Setup
 1. Clone the repo
 2. Copy `.env.example` to `.env` and fill in your keys
-3. See `/backend/README.md` and `/frontend/README.md` for setup instructions
+3. See `/frontend/README.md` for frontend setup. For branching, commits, pull requests, and all engineering conventions, see [docs/ENGINEERING_RULES.md](docs/ENGINEERING_RULES.md).
 
 ## Running the Celery Worker
 
