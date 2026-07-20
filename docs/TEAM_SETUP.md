@@ -1,122 +1,63 @@
 # NeoBank Lebanon Team Setup
 
-This guide shows each teammate how to install the basics, clone the repository, switch to the correct branch, and pull the latest work.
+This guide covers the basics needed to clone the repository and find the current development setup instructions.
 
 ## 1. Install these tools first
 
 Everyone should install:
 
 - Git
-- Node.js LTS
-- Python 3.11 or newer
+- Node.js 22
+- Python 3.12
 - VS Code or another code editor
 
-Optional for later backend or ML work:
-
-- PostgreSQL
-- Redis
+PostgreSQL and Redis are optional local installs. The repository's Docker Compose setup can run both services for you.
 
 ## 2. Clone the repository
 
 Run:
 
 ```bash
-git clone https://github.com/malakfaour/neobank-lebanon.git
-cd neobank-lebanon
+git clone https://github.com/malakfaour/Techtalks-Bank.git
+cd Techtalks-Bank
 ```
 
-## 3. Check available remote branches
+## 3. Create a task branch
 
-Run:
+Create a fresh ticket-based branch from the latest `develop` when you start a task. Do not reuse long-lived, per-domain feature branches.
 
-```bash
-git branch -r
-```
+The sources of truth for branch names, commits, pull requests, and the daily workflow are:
 
-You should see these project branches:
+- [CONTRIBUTING.md](../CONTRIBUTING.md)
+- [Engineering rules](ENGINEERING_RULES.md), especially section 1
 
-- `origin/main`
-- `origin/develop`
-- `origin/feature/auth`
-- `origin/feature/accounts`
-- `origin/feature/transactions`
-- `origin/feature/exchange`
-- `origin/feature/kyc`
-- `origin/feature/notifications`
-- `origin/feature/frontend`
-- `origin/feature/ml-fraud`
-- `origin/feature/ml-exchange`
-- `origin/feature/ml-kyc`
-- `origin/feature/ml-chatbot`
-- `origin/feature/ml-categories`
-- `origin/feature/docker-setup`
-- `origin/feature/ci-cd`
+## 4. Set up the development environment
 
-## 4. Switch to your assigned branch
+Use these tracked files for the current setup:
 
-Each teammate must work only on their assigned feature branch.
+- [`docker-compose.yml`](../docker-compose.yml) defines the application services and local PostgreSQL and Redis dependencies.
+- [`.env.example`](../.env.example) lists the environment variables to configure.
+- [`frontend/README.md`](../frontend/README.md) contains the frontend setup instructions; its dependencies are defined in [`frontend/package.json`](../frontend/package.json).
+- [`backend/requirements.txt`](../backend/requirements.txt) contains the backend Python dependencies.
+- [`ml/requirements.txt`](../ml/requirements.txt) contains the machine-learning Python dependencies.
 
-Example:
+A dedicated `backend/README.md` is still pending. Until it is added, use the backend requirements, environment example, and Docker Compose configuration above.
 
-```bash
-git checkout feature/auth
-```
+## 5. Team rules
 
-Replace `feature/auth` with the branch assigned to you.
+- Do not work directly on `main` or `develop`.
+- Do not delete branches.
+- Do not push to someone else's branch.
+- Fetch the latest `develop` before creating a task branch.
 
-## 5. Pull the latest version of your branch
+For the complete and authoritative rules, read the [engineering rules](ENGINEERING_RULES.md).
 
-Run:
-
-```bash
-git pull origin feature/auth
-```
-
-Replace `feature/auth` with your own branch name.
-
-## 6. Daily workflow
-
-Every time you start work:
-
-```bash
-git checkout feature/auth
-git pull origin feature/auth
-```
-
-Replace `feature/auth` with your own branch.
-
-## 7. If you need the latest updates from develop
-
-Run:
-
-```bash
-git checkout develop
-git pull origin develop
-git checkout feature/auth
-git merge develop
-```
-
-Replace `feature/auth` with your own branch.
-
-## 8. Team rules
-
-- Do not work directly on `main`
-- Do not delete branches
-- Do not push to someone else's branch
-- Do not create extra branches unless the team agrees first
-- Always pull before starting new work
-
-## 9. Current project folders
+## 6. Current project folders
 
 The repository currently includes:
 
 - `frontend/` for the Next.js frontend
 - `backend/` for the FastAPI backend
-- `ml/` for machine learning services
+- `ml/` for machine-learning code
+- `tools/` for supporting development services, including `gateway_stub`
 - `docs/` for project documentation
-
-## 10. Important note
-
-The branch structure is ready, but the repository does not yet include full setup files like `package.json`, `requirements.txt`, or dedicated setup READMEs for each app area.
-
-That means the Git workflow is ready now, but some project-specific install commands may still need to be added by the team as development continues.
