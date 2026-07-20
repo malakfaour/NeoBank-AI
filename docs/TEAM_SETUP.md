@@ -41,7 +41,7 @@ Use these tracked files for the current setup:
 - [`backend/requirements.txt`](../backend/requirements.txt) contains the backend Python dependencies.
 - [`ml/requirements.txt`](../ml/requirements.txt) contains the machine-learning Python dependencies.
 
-A dedicated `backend/README.md` is still pending. Until it is added, use the backend requirements, environment example, and Docker Compose configuration above.
+A dedicated `backend/README.md` is still pending. Until it is added, use `backend/requirements.txt`, `.env.example`, and `docker-compose.yml` for backend setup.
 
 ## 5. Team rules
 
