@@ -78,6 +78,9 @@ export default function TransferPage() {
   const [validating, setValidating] = useState(false);
   const [error, setError] = useState("");
   const [receipt, setReceipt] = useState<Record<string, unknown> | null>(null);
+  const [savedRecipient, setSavedRecipient] = useState(false);
+  const [saveNickname, setSaveNickname] = useState("");
+  const [skipSave, setSkipSave] = useState(false);
 
   useEffect(() => {
     api.get("/accounts/balance").then((r) => {
@@ -639,6 +642,72 @@ export default function TransferPage() {
             </div>
           ))}
         </div>
+        {!beneficiaries.some((beneficiary) => beneficiary.value === recipientValue) && !skipSave && (
+          <div style={{ backgroundColor: "#fff", borderRadius: "16px", padding: "16px", width: "100%", boxSizing: "border-box" }}>
+            {savedRecipient ? (
+              <p style={{ color: "#166534", fontSize: "14px", fontWeight: "600", margin: 0 }}>
+                Recipient saved successfully.
+              </p>
+            ) : (
+              <>
+                <p style={{ color: "#000", fontSize: "14px", fontWeight: "600", margin: "0 0 12px" }}>
+                  Save {recipient?.display_name ?? recipientValue} as a beneficiary?
+                </p>
+                {saveNickname && (
+                  <input
+                    value={saveNickname}
+                    onChange={(event) => {
+                      setSaveNickname(event.target.value);
+                      setError("");
+                    }}
+                    placeholder="Nickname"
+                    style={{ width: "100%", border: "1.5px solid #E5E7EB", borderRadius: "12px", padding: "11px 14px", fontSize: "14px", color: "#000", outline: "none", boxSizing: "border-box", marginBottom: "10px" }}
+                  />
+                )}
+                {error && <p style={{ color: "#EF4444", fontSize: "13px", margin: "0 0 10px" }}>{error}</p>}
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={async () => {
+                      if (!saveNickname) {
+                        setSaveNickname(recipient?.display_name ?? recipientValue);
+                        return;
+                      }
+
+                      setLoading(true);
+                      setError("");
+                      try {
+                        await api.post("/beneficiaries", {
+                          nickname: saveNickname.trim(),
+                          type: tab === "mobile" ? "mobile" : "iban",
+                          value: recipientValue,
+                        });
+                        setSavedRecipient(true);
+                      } catch (requestError: unknown) {
+                        const detail = (requestError as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+                        setError(typeof detail === "string" ? detail : "Could not save recipient.");
+                      } finally {
+                        setLoading(false);
+                      }
+                    }}
+                    style={{ flex: 1, backgroundColor: loading ? "#86EFAC" : "#00C853", color: "#fff", border: "none", borderRadius: "10px", padding: "10px", fontSize: "13px", fontWeight: "700", cursor: loading ? "not-allowed" : "pointer" }}
+                  >
+                    {loading ? "Saving..." : "Save"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => setSkipSave(true)}
+                    style={{ flex: 1, backgroundColor: "#E5E7EB", color: "#555", border: "none", borderRadius: "10px", padding: "10px", fontSize: "13px", fontWeight: "700", cursor: loading ? "not-allowed" : "pointer" }}
+                  >
+                    Skip
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
         <button onClick={() => router.push("/dashboard")}
           style={{ width: "100%", backgroundColor: "#00C853", color: "#fff", fontWeight: "700", fontSize: "15px", border: "none", borderRadius: "14px", padding: "14px", cursor: "pointer" }}>
           Back to Dashboard
