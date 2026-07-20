@@ -17,7 +17,7 @@ from app.schemas.admin_kyc import (
     AdminKYCQueueResponse,
     AdminKYCRejectRequest,
 )
-from app.schemas.user import CurrentUser
+from app.schemas import CurrentUser
 from app.services.audit_log import append_kyc_audit
 from app.services.notifications import notify
 from app.utils.transaction_query_utils import compute_total_pages
