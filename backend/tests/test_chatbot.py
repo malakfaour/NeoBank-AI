@@ -332,6 +332,94 @@ async def test_chatbot_transfer_intent_stores_pending_action(
     assert pending_action["currency"] == "USD"
 
 
+async def test_chatbot_accumulates_transfer_draft_across_messages(
+    client, auth_tokens, mock_redis
+):
+    session_id = "test-multi-turn-transfer-session"
+    headers = {"Authorization": f"Bearer {auth_tokens['access_token']}"}
+
+    with patch(
+        "httpx.AsyncClient.post",
+        new=_groq_success("TRANSFER_INTENT", 0.92),
+    ):
+        first = await client.post(
+            "/api/v1/chatbot/message",
+            json={"session_id": session_id, "message": "send 50 USD"},
+            headers=headers,
+        )
+
+    assert first.status_code == 200, first.text
+    assert first.json()["confirmation_required"] is False
+    assert first.json()["pending_action"] is None
+    assert "who should i send it to" in first.json()["reply"].lower()
+    assert await mock_redis.get(f"chat_action:{session_id}") is None
+    assert await mock_redis.get(f"chat_incomplete_action:{session_id}") is not None
+    partial_ttl = await mock_redis.ttl(f"chat_incomplete_action:{session_id}")
+    assert 0 < partial_ttl <= 300
+
+    with patch("httpx.AsyncClient.post", new=_groq_success("GENERAL", 0.9)):
+        second = await client.post(
+            "/api/v1/chatbot/message",
+            json={"session_id": session_id, "message": "+96170123456"},
+            headers=headers,
+        )
+
+    assert second.status_code == 200, second.text
+    assert second.json()["confirmation_required"] is True
+    assert second.json()["pending_action"] == {
+        "type": "transfer",
+        "method": "mobile",
+        "recipient": "+96170123456",
+        "amount": "50",
+        "currency": "USD",
+    }
+    assert await mock_redis.get(f"chat_incomplete_action:{session_id}") is None
+    stored = json.loads(await mock_redis.get(f"chat_action:{session_id}"))
+    assert stored["amount"] == "50"
+    assert stored["currency"] == "USD"
+    assert stored["receiver_phone"] == "+96170123456"
+
+
+async def test_chatbot_unrelated_reply_discards_incomplete_transfer(
+    client, auth_tokens, mock_redis
+):
+    session_id = "test-abandoned-transfer-session"
+    headers = {"Authorization": f"Bearer {auth_tokens['access_token']}"}
+
+    with patch(
+        "httpx.AsyncClient.post",
+        new=_groq_success("TRANSFER_INTENT", 0.92),
+    ):
+        first = await client.post(
+            "/api/v1/chatbot/message",
+            json={"session_id": session_id, "message": "send 50 USD"},
+            headers=headers,
+        )
+    assert first.status_code == 200, first.text
+
+    with (
+        patch("httpx.AsyncClient.post", new=_groq_success("GENERAL", 0.9)),
+        patch(
+            "app.api.v1.endpoints.chatbot.get_chatbot_response",
+            new_callable=AsyncMock,
+            return_value="Hello! How can I help?",
+        ),
+    ):
+        unrelated = await client.post(
+            "/api/v1/chatbot/message",
+            json={
+                "session_id": session_id,
+                "message": "how are you today? I have 2 questions.",
+            },
+            headers=headers,
+        )
+
+    assert unrelated.status_code == 200, unrelated.text
+    assert unrelated.json()["confirmation_required"] is False
+    assert await mock_redis.get(f"chat_incomplete_action:{session_id}") is None
+    assert await mock_redis.get(f"chat_action:{session_id}") is None
+
+
 async def test_chatbot_confirm_without_action_token_does_not_execute(
     client,
     auth_tokens,

@@ -16,8 +16,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies import get_current_user
 from app.core.redis import (
     consume_action_token,
+    delete_chat_incomplete_action,
     delete_chat_pending_action,
+    get_chat_incomplete_action,
     get_chat_pending_action,
+    store_chat_incomplete_action,
     store_chat_pending_action,
 )
 from app.db.session import get_async_db
@@ -37,8 +40,10 @@ from app.services.chatbot_service import (
     save_chat_turn,
 )
 from app.services.chatbot_transfer import (
+    ChatbotPartialTransferDraft,
+    build_incomplete_transfer_reply,
     build_transfer_confirmation_reply,
-    extract_transfer_draft,
+    extract_partial_transfer_draft,
     is_cancel_message,
     is_confirm_message,
 )
@@ -125,6 +130,7 @@ async def send_chatbot_message(
 
     try:
         if is_cancel_message(message):
+            await delete_chat_incomplete_action(body.session_id)
             await delete_chat_pending_action(body.session_id)
 
             reply = "Okay, I cancelled the pending transfer."
@@ -223,14 +229,34 @@ async def send_chatbot_message(
             and classification.confidence > _TRANSFER_CONFIRMATION_THRESHOLD
         )
 
-        if confirmation_required:
-            draft = extract_transfer_draft(message)
+        stored_partial = await get_chat_incomplete_action(body.session_id)
+        partial = None
+        if stored_partial is not None:
+            if int(stored_partial.get("user_id", -1)) == user_id:
+                partial = ChatbotPartialTransferDraft.from_storage_payload(stored_partial)
+            else:
+                await delete_chat_incomplete_action(body.session_id)
+
+        contribution = extract_partial_transfer_draft(message)
+        if partial is not None and not contribution.supplies_any(
+            partial.missing_fields()
+        ):
+            await delete_chat_incomplete_action(body.session_id)
+            partial = None
+
+        if confirmation_required or partial is not None:
+            accumulated = (
+                partial.merge(contribution) if partial is not None else contribution
+            )
+            draft = accumulated.to_complete_draft()
 
             if draft is None:
-                reply = (
-                    "I can help with the transfer, but I need the amount, "
-                    "currency, and recipient phone number or IBAN first."
-                )
+                if accumulated.has_fields():
+                    await store_chat_incomplete_action(
+                        body.session_id,
+                        accumulated.to_storage_payload(user_id=user_id),
+                    )
+                reply = build_incomplete_transfer_reply(accumulated)
                 await save_chat_turn(
                     db=db,
                     user_id=user_id,
@@ -247,6 +273,7 @@ async def send_chatbot_message(
                     confirmation_required=False,
                 )
 
+            await delete_chat_incomplete_action(body.session_id)
             pending_action = draft.to_pending_action(
                 user_id=user_id,
                 idempotency_key=f"chatbot:{body.session_id}:{uuid4().hex}",
