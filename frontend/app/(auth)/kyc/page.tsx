@@ -14,9 +14,7 @@ function KYCLayout({ stepNum, title, subtitle, children }: {
   return (
     <div style={{ minHeight: "100vh", backgroundColor: "#F5F5F5", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "20px" }}>
       <div style={{ marginBottom: "24px", textAlign: "center" }}>
-        <div style={{ fontSize: "32px", fontWeight: "800", color: "#000", letterSpacing: "-1px" }}>
-          neo<span style={{ color: "#00C853" }}>.</span>
-        </div>
+       <img src="/logo.svg" alt="NeoBank Lebanon" style={{ width: "160px", height: "auto" }} />
         <div style={{ display: "flex", justifyContent: "center", gap: "8px", marginTop: "16px" }}>
           {[1, 2, 3].map((s) => (
             <div key={s} style={{ height: "6px", borderRadius: "999px", backgroundColor: s <= stepNum ? "#00C853" : "#E5E7EB", width: s === stepNum ? "32px" : "16px", transition: "all 0.3s" }} />
