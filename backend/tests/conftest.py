@@ -11,9 +11,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 REPO_ROOT = BACKEND_DIR.parent
+
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
 if str(REPO_ROOT) not in sys.path:
     # Import the shared top-level ml package from the repo root.
-    sys.path.insert(0, str(REPO_ROOT))
+    sys.path.insert(1, str(REPO_ROOT))
 
 TEST_DB_URL = "sqlite+aiosqlite:///:memory:"
 
@@ -106,7 +110,10 @@ async def mock_redis():
 
 
 class _FakeGatewayResponse:
-    """Stand-in for httpx.Response, used by the payment gateway mock below."""
+    """Stand-in for httpx.Response, used by bills.py's payment gateway
+    mock below. NOT used for accounts.py top-up anymore -- that now goes
+    through stripe_gateway.charge_card (DEVATTECH-131), mocked separately
+    below via _fake_charge_card."""
 
     def __init__(self, status_code=200, json_data=None):
         self.status_code = status_code
@@ -118,11 +125,11 @@ class _FakeGatewayResponse:
 
 class _FakeGatewayClient:
     """
-    Stand-in for httpx.AsyncClient used only by
-    app.api.v1.endpoints.accounts._call_payment_gateway (NBL-411).
-    Defaults to a 200 "approved" response for every test; individual tests
-    override this per-call by monkeypatching the same target with their
-    own client class (e.g. to simulate a 402 decline or a 5xx).
+    Stand-in for httpx.AsyncClient used by bills.py's own (separate,
+    unmodified) fake-gateway stub. Defaults to a 200 "approved" response
+    for every test; individual tests override this per-call by
+    monkeypatching the same target with their own client class (e.g. to
+    simulate a 402 decline or a 5xx).
     """
 
     def __init__(self, *args, **kwargs):
@@ -138,20 +145,31 @@ class _FakeGatewayClient:
         return _FakeGatewayResponse(status_code=200)
 
 
+async def _fake_charge_card(payment_method_id, amount, currency, idempotency_key):
+    """
+    Stand-in for stripe_gateway.charge_card, used by accounts.py's
+    card_top_up (DEVATTECH-131). Defaults to a successful charge for
+    every test; individual tests override this same patch target locally
+    to simulate a decline (raise CardDeclinedError) or a gateway failure
+    (raise GatewayUnavailableError) -- same override pattern the old
+    httpx-based fake used.
+    """
+    return f"pi_test_{idempotency_key[:24]}"
+
+
 @pytest.fixture(autouse=True)
 def mock_payment_gateway(monkeypatch):
     """
-    NBL-411: the real payment gateway is an external HTTP call and must be
-    mocked in tests (see ENGINEERING_RULES.md #6 -- external calls are
-    always mocked in CI). Autouse so every existing top-up call in the
-    suite gets a default success without each test needing its own
-    fixture; tests exercising decline/5xx paths monkeypatch this same
-    target locally to override the behavior.
+    NBL-411 / DEVATTECH-131: external payment calls are always mocked in
+    tests (see ENGINEERING_RULES.md #6). Autouse so every existing
+    top-up/bill-pay call in the suite gets a default success without each
+    test needing its own fixture; tests exercising decline/5xx paths
+    monkeypatch the relevant target locally to override the behavior.
     """
     monkeypatch.setattr(
-    "app.api.v1.endpoints.accounts.httpx.AsyncClient",
-    _FakeGatewayClient,
-)
+        "app.api.v1.endpoints.accounts.charge_card",
+        _fake_charge_card,
+    )
 
     monkeypatch.setattr(
     "app.api.v1.endpoints.bills.httpx.AsyncClient",

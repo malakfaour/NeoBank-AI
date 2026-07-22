@@ -332,6 +332,131 @@ async def test_chatbot_transfer_intent_stores_pending_action(
     assert pending_action["currency"] == "USD"
 
 
+async def test_chatbot_accumulates_transfer_draft_across_messages(
+    client,
+    auth_tokens,
+    mock_redis,
+):
+    session_id = "test-multi-turn-transfer-session"
+    headers = {"Authorization": f"Bearer {auth_tokens['access_token']}"}
+
+    with patch(
+        "httpx.AsyncClient.post",
+        new=_groq_success("TRANSFER_INTENT", 0.92),
+    ):
+        first = await client.post(
+            "/api/v1/chatbot/message",
+            json={
+                "session_id": session_id,
+                "message": "send 50 USD",
+            },
+            headers=headers,
+        )
+
+    assert first.status_code == 200, first.text
+    first_data = first.json()
+    assert first_data["confirmation_required"] is False
+    assert first_data["pending_action"] is None
+    assert "who should i send it to" in first_data["reply"].lower()
+    assert await mock_redis.get(f"chat_action:{session_id}") is None
+    assert await mock_redis.get(f"chat_incomplete_action:{session_id}") is not None
+    partial_ttl = await mock_redis.ttl(f"chat_incomplete_action:{session_id}")
+    assert 0 < partial_ttl <= 300
+
+    # A phone-number-only answer may be classified as GENERAL. The existing
+    # incomplete draft supplies the conversational context.
+    with patch(
+        "httpx.AsyncClient.post",
+        new=_groq_success("GENERAL", 0.9),
+    ):
+        second = await client.post(
+            "/api/v1/chatbot/message",
+            json={
+                "session_id": session_id,
+                "message": "+96170123456",
+            },
+            headers=headers,
+        )
+
+    assert second.status_code == 200, second.text
+    second_data = second.json()
+    assert second_data["confirmation_required"] is True
+    assert second_data["pending_action"] == {
+        "type": "transfer",
+        "method": "mobile",
+        "recipient": "+96170123456",
+        "amount": "50",
+        "currency": "USD",
+    }
+    assert await mock_redis.get(f"chat_incomplete_action:{session_id}") is None
+    stored = json.loads(await mock_redis.get(f"chat_action:{session_id}"))
+    assert stored["amount"] == "50"
+    assert stored["currency"] == "USD"
+    assert stored["receiver_phone"] == "+96170123456"
+
+
+async def test_chatbot_unrelated_reply_discards_incomplete_transfer(
+    client,
+    auth_tokens,
+    mock_redis,
+):
+    session_id = "test-abandoned-transfer-session"
+    headers = {"Authorization": f"Bearer {auth_tokens['access_token']}"}
+
+    with patch(
+        "httpx.AsyncClient.post",
+        new=_groq_success("TRANSFER_INTENT", 0.92),
+    ):
+        first = await client.post(
+            "/api/v1/chatbot/message",
+            json={"session_id": session_id, "message": "send 50 USD"},
+            headers=headers,
+        )
+    assert first.status_code == 200, first.text
+    assert await mock_redis.get(f"chat_incomplete_action:{session_id}") is not None
+
+    with (
+        patch("httpx.AsyncClient.post", new=_groq_success("GENERAL", 0.9)),
+        patch(
+            "app.api.v1.endpoints.chatbot.get_chatbot_response",
+            new_callable=AsyncMock,
+            return_value="Hello! How can I help?",
+        ),
+    ):
+        unrelated = await client.post(
+            "/api/v1/chatbot/message",
+            json={
+                "session_id": session_id,
+                "message": "how are you today? I have 2 questions.",
+            },
+            headers=headers,
+        )
+
+    assert unrelated.status_code == 200, unrelated.text
+    assert unrelated.json()["confirmation_required"] is False
+    assert unrelated.json()["reply"] == "Hello! How can I help?"
+    assert await mock_redis.get(f"chat_incomplete_action:{session_id}") is None
+    assert await mock_redis.get(f"chat_action:{session_id}") is None
+
+    # A later recipient cannot revive the abandoned amount/currency.
+    with (
+        patch("httpx.AsyncClient.post", new=_groq_success("GENERAL", 0.9)),
+        patch(
+            "app.api.v1.endpoints.chatbot.get_chatbot_response",
+            new_callable=AsyncMock,
+            return_value="How else can I help?",
+        ),
+    ):
+        later = await client.post(
+            "/api/v1/chatbot/message",
+            json={"session_id": session_id, "message": "+96170123456"},
+            headers=headers,
+        )
+    assert later.status_code == 200, later.text
+    assert later.json()["confirmation_required"] is False
+    assert await mock_redis.get(f"chat_action:{session_id}") is None
+
+
 async def test_chatbot_confirm_without_action_token_does_not_execute(
     client,
     auth_tokens,
@@ -753,6 +878,80 @@ async def test_chatbot_history_rejects_other_users_session(client, auth_tokens):
     )
 
     assert other_user_response.status_code == 403
+
+
+async def test_delete_chatbot_session_deletes_owned_session(client, auth_tokens):
+    session_id = "delete-owned-session"
+    user_id = await _get_chatbot_test_user_id()
+    await _create_test_chat_session(
+        session_id=session_id,
+        user_id=user_id,
+        messages=[{"role": "user", "content": "private conversation"}],
+    )
+
+    response = await client.delete(
+        f"/api/v1/chatbot/session/{session_id}",
+        headers={"Authorization": f"Bearer {auth_tokens['access_token']}"},
+    )
+
+    assert response.status_code == 204
+
+    history_response = await client.get(
+        "/api/v1/chatbot/history",
+        params={"session_id": session_id},
+        headers={"Authorization": f"Bearer {auth_tokens['access_token']}"},
+    )
+    assert history_response.status_code == 404
+
+
+async def test_delete_chatbot_session_returns_404_for_missing(
+    client,
+    auth_tokens,
+):
+    response = await client.delete(
+        "/api/v1/chatbot/session/delete-session-does-not-exist",
+        headers={"Authorization": f"Bearer {auth_tokens['access_token']}"},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Chat session not found"
+
+
+async def test_delete_chatbot_session_requires_auth(client):
+    response = await client.delete(
+        "/api/v1/chatbot/session/delete-session-without-auth",
+    )
+
+    assert response.status_code == 401
+
+
+async def test_delete_chatbot_session_rejects_other_users_session(
+    client,
+    auth_tokens,
+):
+    owner_tokens = await _register_chatbot_user(client, "ownerdelete")
+    session_id = "delete-owned-by-other-user"
+    messages = [{"role": "user", "content": "owner-only conversation"}]
+    await _create_test_chat_session(
+        session_id=session_id,
+        user_id=int(owner_tokens["user"]["id"]),
+        messages=messages,
+    )
+
+    response = await client.delete(
+        f"/api/v1/chatbot/session/{session_id}",
+        headers={"Authorization": f"Bearer {auth_tokens['access_token']}"},
+    )
+
+    assert response.status_code == 403
+
+    owner_history = await client.get(
+        "/api/v1/chatbot/history",
+        params={"session_id": session_id},
+        headers={"Authorization": f"Bearer {owner_tokens['access_token']}"},
+    )
+    assert owner_history.status_code == 200
+    assert owner_history.json()["messages"] == messages
 
 
 async def test_chatbot_message_uses_20_per_minute_rate_limit(client, auth_tokens):

@@ -56,7 +56,7 @@ async def _top_up(client, access_token: str, wallet_id: int, amount: str) -> Non
         json={
             "wallet_id": wallet_id,
             "amount": amount,
-            "card_token": "tok_visa_test_123",
+            "payment_method_id": "pm_card_visa_test_123",
         },
     )
     assert response.status_code == 200, response.text

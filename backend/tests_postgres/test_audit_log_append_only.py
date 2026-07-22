@@ -90,7 +90,7 @@ async def test_transaction_audit_log_update_is_rejected_by_db_trigger(client, st
         json={
             "wallet_id": sender_wallet.id,
             "amount": "100.00",
-            "card_token": "tok_visa_test_123",
+            "payment_method_id": "pm_card_visa_test_123",
         },
     )
     assert top_up_response.status_code == 200, top_up_response.text
