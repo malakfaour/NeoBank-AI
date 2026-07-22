@@ -10,6 +10,7 @@ jobs:
   backend-lint-test:
     name: Ruff Lint + Pytest (Backend)
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -26,6 +27,7 @@ jobs:
 
       - name: Check Alembic head count
         run: python backend/scripts/check_single_alembic_head.py
+
       - name: Check env.example matches config.py
         run: python backend/scripts/check_env_example.py
 
@@ -45,9 +47,11 @@ jobs:
           cd backend
           pytest
 
+
   ml-tests:
     name: Pytest (ML)
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -62,11 +66,14 @@ jobs:
           pip install pytest
 
       - name: Run ML tests
-        run: pytest ml/tests -q
+        run: |
+          pytest ml/tests -q
+
 
   frontend-lint-test:
     name: Frontend lint + build
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -74,7 +81,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
+          cache: npm
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
@@ -92,9 +99,11 @@ jobs:
           cd frontend
           npm run build
 
+
   docker-build-check:
     name: Docker Compose Build Check
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -104,9 +113,11 @@ jobs:
       - name: Build services
         run: docker compose build
 
+
   postgres-e2e-test:
     name: Postgres E2E Money-Path Test
     runs-on: ubuntu-latest
+
     services:
       postgres:
         image: postgres:16-alpine
@@ -121,6 +132,7 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+
     steps:
       - uses: actions/checkout@v4
 
@@ -146,6 +158,11 @@ jobs:
       - name: Run Postgres E2E suite
         env:
           POSTGRES_TEST_URL: postgresql://e2e_test:e2e_test@localhost:5432/e2e_test
+          DATABASE_URL: postgresql+asyncpg://e2e_test:e2e_test@localhost:5432/e2e_test
+          DATABASE_URL_DIRECT: postgresql+asyncpg://e2e_test:e2e_test@localhost:5432/e2e_test
+          JWT_SECRET: ci_postgres_e2e_migration_secret_32chars_min
+          REDIS_URL: redis://localhost:6379
+          APP_ENV: development
         run: |
           cd backend
           python -m pytest tests_postgres -m postgres -q

@@ -86,7 +86,7 @@ async def test_admin_kyc_queue_returns_flagged_records_oldest_first(client, monk
     second_record_id = await _create_flagged_record(user_two[0].id, "newer")
 
     monkeypatch.setattr(
-        "app.api.v1.endpoints.admin.get_presigned_url",
+        "app.api.v1.endpoints.admin_kyc.get_presigned_url",
         lambda key: f"https://signed.example/{key}",
     )
 

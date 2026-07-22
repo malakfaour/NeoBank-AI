@@ -13,33 +13,29 @@ from app.api.v1.endpoints.transactions import router as transactions_router
 from app.api.v1.endpoints.transfer import router as transfer_router
 from app.api.v1.endpoints.beneficiaries import router as beneficiaries_router
 from app.api.v1.endpoints.bills import router as bills_router
-from app.api.v1.endpoints.admin import router as admin_router
+
+# Admin was split into 3 endpoint modules
+from app.api.v1.endpoints.admin_kyc import router as admin_kyc_router
+from app.api.v1.endpoints.admin_fraud import router as admin_fraud_router
+from app.api.v1.endpoints.admin_wallet import router as admin_wallet_router
+
 from app.api.v1.endpoints.users import router as users_router
 
-# Aggregate router for all v1 endpoints. Mounted once, at "/api/v1", in
-# main.py -- individual routers are NOT mounted directly there anymore.
-#
-# Sub-prefixes here exactly mirror what main.py used to pass to
-# include_router() for each router, so existing route shapes are
-# preserved except for the added "/api/v1" segment:
-#   auth       -> /api/v1/auth/...
-#   passcode   -> /api/v1/auth/passcode/...
-#   sessions   -> /api/v1/auth/sessions/...
-#   kyc        -> /api/v1/kyc/...
-#   chatbot    -> /api/v1/chatbot/...
-#
-# exchange, accounts, notifications, transactions, transfer,
-# beneficiaries, bills, and admin already declare their own prefix via
-# APIRouter(prefix=...) in their respective modules, so no prefix is
-# passed here for those -- adding one would double it up.
+
+# Aggregate router for all v1 endpoints.
+# Mounted once at "/api/v1" in main.py.
+
 router = APIRouter()
+
 
 router.include_router(auth_router, prefix="/auth", tags=["auth"])
 router.include_router(passcode_router, prefix="/auth/passcode", tags=["passcode"])
 router.include_router(biometric_router, prefix="/auth/biometric", tags=["biometric"])
 router.include_router(sessions_router, prefix="/auth/sessions", tags=["sessions"])
+
 router.include_router(kyc_router, prefix="/kyc", tags=["kyc"])
 router.include_router(chatbot_router, prefix="/chatbot", tags=["chatbot"])
+
 router.include_router(exchange_router)
 router.include_router(accounts_router)
 router.include_router(notifications_router)
@@ -47,5 +43,10 @@ router.include_router(transactions_router)
 router.include_router(transfer_router)
 router.include_router(beneficiaries_router)
 router.include_router(bills_router)
-router.include_router(admin_router)
+
+# Split admin routes
+router.include_router(admin_kyc_router)
+router.include_router(admin_fraud_router)
+router.include_router(admin_wallet_router)
+
 router.include_router(users_router, prefix="/users", tags=["users"])

@@ -63,7 +63,7 @@ async def test_kyc_resubmission_full_loop_retains_old_s3_objects(client, monkeyp
         lambda record_id: delayed_ids.append(record_id),
     )
     monkeypatch.setattr("app.api.v1.endpoints.kyc.time", lambda: next(timestamps))
-    monkeypatch.setattr("app.api.v1.endpoints.admin.notify", notify)
+    monkeypatch.setattr("app.api.v1.endpoints.admin_kyc.notify", notify)
 
     customer_headers = {
         "Authorization": f"Bearer {customer_tokens['access_token']}"
