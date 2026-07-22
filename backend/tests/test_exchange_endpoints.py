@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import uuid4
@@ -55,7 +56,7 @@ async def _top_up(client, access_token: str, wallet_id: int, amount: str) -> Non
         json={
             "wallet_id": wallet_id,
             "amount": amount,
-            "card_token": "tok_visa_test_123",
+            "payment_method_id": "pm_card_visa_test_123",
         },
     )
     assert response.status_code == 200, response.text
@@ -330,6 +331,75 @@ class _FakeSyncRedis:
 
     def setex(self, key, ttl, value):
         self.saved[key] = {"ttl": ttl, "value": value}
+
+    def get(self, key):
+        cached = self.saved.get(key)
+        return cached["value"] if cached is not None else None
+
+
+@pytest.mark.anyio
+async def test_forecast_serves_cached_artifact_when_available(
+    client,
+    monkeypatch,
+):
+    fake_sync_redis = _FakeSyncRedis()
+    cached_payload = {
+        "base_currency": "USD",
+        "target_currency": "LBP",
+        "days": 7,
+        "model": "Prophet",
+        "mae": 12.5,
+        "model_status": "accepted",
+        "predictions": [
+            {
+                "date": "2026-07-18",
+                "predicted_rate": "89501.2500",
+            },
+            {
+                "date": "2026-07-19",
+                "predicted_rate": "89502.7500",
+            },
+        ],
+    }
+    fake_sync_redis.setex(
+        exchange_tasks.EXCHANGE_FORECAST_CACHE_KEY,
+        7 * 24 * 60 * 60,
+        json.dumps(cached_payload),
+    )
+
+    monkeypatch.setattr(
+        redis.Redis,
+        "from_url",
+        lambda *args, **kwargs: fake_sync_redis,
+    )
+
+    def fail_if_forecast_called(*args, **kwargs):
+        raise AssertionError(
+            "train_and_forecast_usd_lbp should not be called"
+        )
+
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.exchange.train_and_forecast_usd_lbp",
+        fail_if_forecast_called,
+    )
+
+    response = await client.get(
+        "/api/v1/exchange/forecast"
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["model"] == "Prophet"
+    assert body["predictions"] == [
+        {
+            "date": "2026-07-18",
+            "predicted_rate": "89501.2500",
+        },
+        {
+            "date": "2026-07-19",
+            "predicted_rate": "89502.7500",
+        },
+    ]
 
 @pytest.mark.anyio
 async def test_retrain_exchange_forecast_persists_model_metrics(monkeypatch):

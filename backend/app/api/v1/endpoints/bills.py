@@ -37,7 +37,7 @@ from app.schemas.bill import (
     BillPayResponse,
 )
 
-from app.schemas.user import CurrentUser
+from app.schemas.auth import CurrentUser
 
 from app.services.audit_log import append_audit
 from app.services.biller_client import call_mock_biller

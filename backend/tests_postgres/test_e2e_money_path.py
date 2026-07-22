@@ -132,7 +132,7 @@ async def test_full_money_path_register_topup_send_score_audit_reversal(client, 
         json={
             "wallet_id": sender_wallet.id,
             "amount": "500.00",
-            "card_token": "tok_visa_test_123",
+            "payment_method_id": "pm_card_visa_test_123",
         },
     )
     assert top_up_response.status_code == 200, top_up_response.text

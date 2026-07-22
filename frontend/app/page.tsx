@@ -18,10 +18,7 @@ export default function WelcomePage() {
       {/* Logo */}
       <div style={{ marginTop: "80px", textAlign: "center" }}>
         <p style={{ fontSize: "12px", color: "#999", marginBottom: "16px", letterSpacing: "2px", textTransform: "uppercase" }}>Welcome to</p>
-        <div style={{ fontSize: "48px", fontWeight: "800", color: "#000", letterSpacing: "-2px" }}>
-          neo<span style={{ color: "#00C853" }}>.</span>
-        </div>
-        <p style={{ fontSize: "13px", color: "#888", marginTop: "8px" }}>by NeoBank Lebanon</p>
+<img src="/logo.svg" alt="NeoBank Lebanon" style={{ width: "200px", height: "auto" }} />
       </div>
 
       {/* Buttons */}

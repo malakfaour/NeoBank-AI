@@ -27,7 +27,7 @@ from app.schemas.chatbot import (
     ChatbotHistoryResponse,
     ChatbotMessageResponse,
 )
-from app.schemas.user import CurrentUser
+from app.schemas.auth import CurrentUser
 from app.services.chatbot_intent import classify_intent
 from app.services.rate_limiter import check_rate_limit
 from app.services.chatbot_service import (

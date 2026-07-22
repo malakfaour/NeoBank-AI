@@ -1,7 +1,7 @@
 import re
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,12 +15,19 @@ from app.schemas.beneficiary import (
     BeneficiaryUpdateRequest,
     DeleteBeneficiaryResponse,
 )
-from app.schemas.user import CurrentUser
+from app.schemas.auth import CurrentUser
+from app.services.rate_limiter import check_rate_limit
 
 router = APIRouter(prefix="/beneficiaries", tags=["beneficiaries"])
 
 LEBANESE_MOBILE_PATTERN = re.compile(r"^\+961\d{7,8}$")
 LEBANESE_IBAN_PATTERN = re.compile(r"^LB\d{2}[A-Z0-9]{24}$")
+
+# Write-endpoint rate-limiting gap flagged in the engineering gap analysis.
+# Lower money-risk than transfers/top-up/exchange, so a looser budget --
+# still enough to stop scripted create/delete abuse.
+_BENEFICIARY_WRITE_MAX_REQUESTS = 10
+_BENEFICIARY_WRITE_WINDOW_SECONDS = 60
 
 
 def get_user_id(current_user: CurrentUser) -> int:
@@ -85,11 +92,18 @@ def validate_beneficiary_value(
     status_code=status.HTTP_201_CREATED,
 )
 async def create_beneficiary(
+    request: Request,
     body: BeneficiaryCreateRequest,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
     user_id = get_user_id(current_user)
+    await check_rate_limit(
+        request,
+        key_prefix=f"beneficiary_write:{user_id}",
+        max_requests=_BENEFICIARY_WRITE_MAX_REQUESTS,
+        window_seconds=_BENEFICIARY_WRITE_WINDOW_SECONDS,
+    )
     nickname = body.nickname.strip()
     value = normalize_value(body.value)
 
@@ -204,12 +218,19 @@ async def get_beneficiary(
 
 @router.patch("/{beneficiary_id}", response_model=BeneficiaryResponse)
 async def update_beneficiary(
+    request: Request,
     beneficiary_id: int,
     body: BeneficiaryUpdateRequest,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
     user_id = get_user_id(current_user)
+    await check_rate_limit(
+        request,
+        key_prefix=f"beneficiary_write:{user_id}",
+        max_requests=_BENEFICIARY_WRITE_MAX_REQUESTS,
+        window_seconds=_BENEFICIARY_WRITE_WINDOW_SECONDS,
+    )
 
     result = await db.execute(
         select(Beneficiary).where(
@@ -236,11 +257,18 @@ async def update_beneficiary(
 
 @router.delete("/{beneficiary_id}", response_model=DeleteBeneficiaryResponse)
 async def delete_beneficiary(
+    request: Request,
     beneficiary_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
     user_id = get_user_id(current_user)
+    await check_rate_limit(
+        request,
+        key_prefix=f"beneficiary_write:{user_id}",
+        max_requests=_BENEFICIARY_WRITE_MAX_REQUESTS,
+        window_seconds=_BENEFICIARY_WRITE_WINDOW_SECONDS,
+    )
 
     result = await db.execute(
         select(Beneficiary).where(

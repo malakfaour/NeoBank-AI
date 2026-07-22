@@ -36,6 +36,12 @@ class Settings(BaseSettings):
     # Payment Gateway (Member 4 - top-up, NBL-411)
     PAYMENT_GATEWAY_URL: str = ""
 
+    # DEVATTECH-131: real PSP tokenization via Stripe, replacing the fake
+    # gateway stub above for USD/LBP top-ups. Empty by default so a
+    # missing key fails loudly (see stripe_gateway.py) rather than
+    # silently no-op'ing in an environment that forgot to set it.
+    STRIPE_SECRET_KEY: str = ""
+
     # ML
     DEEPFACE_MODEL: str = "ArcFace"
     KYC_MATCH_APPROVE_THRESHOLD: float = 0.80

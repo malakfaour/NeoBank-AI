@@ -459,3 +459,6 @@ ml/kyc/eval_data/
 # Companion _stats.json files stay locally tracked, unaffected.
 backend/app/ml_models/fraud_xgb.pkl
 backend/app/ml_models/isolation_forest.pkl
+!ml/kyc/eval_data/
+!ml/kyc/eval_data/spoof_dataset/
+!ml/kyc/eval_data/spoof_dataset/**

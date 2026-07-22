@@ -23,7 +23,7 @@ from app.core.security import (
 )
 from app.db.session import get_async_db
 from app.models.user import KYCStatus, User, UserRole
-from app.schemas.user import AuthUserResponse, CurrentUser, UserRegisterRequest, UserRegisterResponse
+from app.schemas.auth import AuthUserResponse, CurrentUser, UserRegisterRequest, UserRegisterResponse
 from app.services.account_service import create_wallets_for_user
 from app.services.email_service import send_welcome_email
 from app.api.v1.endpoints.sessions import create_session
