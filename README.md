@@ -59,3 +59,8 @@ Previous avatar objects are deleted from storage when a user successfully replac
 their avatar. KYC verification documents and bank statements are retained
 indefinitely for compliance and audit purposes and are never deleted by application
 code.
+
+Chat conversation content is automatically deleted after the configurable
+`CHATBOT_SESSION_RETENTION_DAYS` window (30 days by default), based on the
+conversation's last activity. This default is an engineering placeholder and
+requires product/compliance sign-off before being treated as the final policy.

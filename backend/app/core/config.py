@@ -54,6 +54,8 @@ class Settings(BaseSettings):
     FORECAST_MODEL: str = "LightGBM"
     FEE_PCT: float = 0.01
     REQUIRE_ACTION_TOKEN: bool = False
+    # Engineering default only; product/compliance must approve the policy.
+    CHATBOT_SESSION_RETENTION_DAYS: int = 30
 
     # AWS / S3
     AWS_ACCESS_KEY_ID: str = ""

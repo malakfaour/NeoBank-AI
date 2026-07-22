@@ -109,6 +109,11 @@ def _chat_action_key(session_id: str) -> str:
     return f"chat_action:{session_id}"
 
 
+def _chat_incomplete_action_key(session_id: str) -> str:
+    """Redis key for an incomplete chatbot transfer. TTL is always required."""
+    return f"chat_incomplete_action:{session_id}"
+
+
 async def store_chat_pending_action(
     session_id: str,
     payload: dict,
@@ -132,6 +137,27 @@ async def get_chat_pending_action(session_id: str) -> dict | None:
 
 async def delete_chat_pending_action(session_id: str) -> None:
     await redis_client.delete(_chat_action_key(session_id))
+
+
+async def store_chat_incomplete_action(
+    session_id: str,
+    payload: dict,
+    ttl: int = CHAT_ACTION_TTL_SECONDS,
+) -> None:
+    await redis_client.set(
+        _chat_incomplete_action_key(session_id),
+        json.dumps(payload),
+        ex=ttl,
+    )
+
+
+async def get_chat_incomplete_action(session_id: str) -> dict | None:
+    raw_payload = await redis_client.get(_chat_incomplete_action_key(session_id))
+    return json.loads(raw_payload) if raw_payload is not None else None
+
+
+async def delete_chat_incomplete_action(session_id: str) -> None:
+    await redis_client.delete(_chat_incomplete_action_key(session_id))
 
 
 def _passcode_attempts_key(user_id: str) -> str:
