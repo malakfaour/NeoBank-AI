@@ -1,7 +1,7 @@
 
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,6 +31,7 @@ from app.services.account_service import (
     get_user_balances,
 )
 from app.services.audit_log import append_audit
+from app.services.rate_limiter import check_rate_limit
 from app.services.stripe_gateway import (
     SUPPORTED_CURRENCIES,
     CardDeclinedError,
@@ -88,6 +89,7 @@ async def get_balance(
 
 @router.post("/top-up", response_model=CardTopUpResponse)
 async def card_top_up(
+    request: Request,
     payload: CardTopUpRequest,
     x_idempotency_key: str = Header(..., alias="X-Idempotency-Key"),
     current_user: CurrentUser = Depends(get_current_user),
@@ -114,6 +116,17 @@ async def card_top_up(
     on both endpoints. The prefix resolves this without touching the
     shared Redis helper at all.
     """
+
+    # Write-endpoint rate-limiting gap flagged in the engineering gap
+    # analysis. This hits an external gateway call (slow, costs money per
+    # attempt), so it gets its own budget rather than sharing the
+    # transfer-velocity prefix.
+    await check_rate_limit(
+        request,
+        key_prefix=f"topup:{current_user.id}",
+        max_requests=10,
+        window_seconds=60,
+    )
 
     user_id = int(current_user.id)
 
