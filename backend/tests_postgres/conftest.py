@@ -197,11 +197,24 @@ def mock_payment_gateway():
     charge_card, imported from stripe_gateway.py -- DEVATTECH-131) so
     this suite never makes a real Stripe call. accounts.py itself is not
     modified.
+
+    Patches via an explicit import + patch.object(...) rather than
+    mock.patch's dotted-string target resolution -- the string form
+    (patch("app.api.v1.endpoints.accounts.charge_card", ...)) was
+    raising AttributeError: module 'app.api.v1.endpoints' has no
+    attribute 'accounts', despite accounts.py genuinely existing and
+    being correctly imported via router.py. Doing a real Python import
+    first, then patching the resulting module object directly, sidesteps
+    mock.patch's internal __import__ + getattr walk entirely -- this is
+    the standard fix for this class of patch-target-resolution issue,
+    independent of its exact underlying cause.
     """
     from unittest.mock import AsyncMock, patch
+    from app.api.v1.endpoints import accounts as accounts_module
 
-    with patch(
-        "app.api.v1.endpoints.accounts.charge_card",
+    with patch.object(
+        accounts_module,
+        "charge_card",
         new=AsyncMock(return_value="pi_test_fake_payment_intent"),
     ):
         yield
@@ -245,6 +258,90 @@ def stub_fraud_scoring():
 
 
 @pytest.fixture
+def provide_isolation_forest_model():
+    """
+    DEVATTECH-143 follow-up: isolation_forest.pkl was moved to S3 by
+    that ticket (untracked from Git) and CI has no real S3/MinIO
+    configured (by design -- this suite's env var scoping above
+    deliberately omits AWS_*/S3_* so it never touches real credentials).
+    Without this fixture, the one test in this suite that runs REAL
+    Isolation Forest inference (a genuinely cold-start sender) has no
+    model file to load, and fraud_scoring.py's existing, already-
+    approved missing-file behavior (a raised FileNotFoundError, uncaught
+    by design for this specific loader) surfaces as a real test failure.
+
+    fraud_scoring.py is NOT modified. This fixture places a real,
+    minimally-fitted sklearn.ensemble.IsolationForest at that module's
+    existing ISOLATION_FOREST_PATH/ISOLATION_FOREST_STATS_PATH constants
+    -- the exact paths its current, unmodified code already loads from
+    -- then resets its module-level model cache so this test's real
+    model is actually used rather than shadowed by another test's cached
+    state. Same "real fitted model, not a placeholder object" approach
+    already approved in backend/tests/test_fraud_scoring.py's own
+    S3-fallback success tests; this fixture doesn't re-test the S3
+    fallback mechanics themselves (already covered there) -- it only
+    needs a real, loadable model to exist so the rest of this suite's
+    money-path can be exercised genuinely, end to end.
+
+    Any pre-existing local files at these paths (a developer's own local
+    checkout, before untracking) are left untouched -- this fixture only
+    removes what it itself created, so existing behavior for anyone who
+    still has the files locally is preserved.
+    """
+    import json as _json
+
+    import joblib
+    from sklearn.ensemble import IsolationForest
+
+    from app.services import fraud_scoring
+
+    model_path = fraud_scoring.ISOLATION_FOREST_PATH
+    stats_path = fraud_scoring.ISOLATION_FOREST_STATS_PATH
+
+    model_already_existed = os.path.exists(model_path)
+    stats_already_existed = os.path.exists(stats_path)
+
+    os.makedirs(os.path.dirname(model_path), exist_ok=True)
+
+    if not model_already_existed:
+        # Feature order: [amount_zscore, hour_of_day, is_new_recipient,
+        # currency_flag] -- see fraud_scoring._compute_features(). This
+        # proves the LOAD + INFERENCE path works end-to-end; it does not
+        # assert any specific fraud outcome for this transaction (the
+        # test itself already handles either outcome -- see that file's
+        # module docstring, point 2).
+        real_model = IsolationForest(n_estimators=10, random_state=42)
+        real_model.fit(
+            [
+                [0.1, 10, 0, 0],
+                [-0.2, 14, 1, 0],
+                [0.3, 9, 0, 1],
+                [-0.1, 22, 1, 0],
+            ]
+        )
+        joblib.dump(real_model, model_path)
+
+    if not stats_already_existed:
+        with open(stats_path, "w") as f:
+            _json.dump({"amount_mean": 100.0, "amount_std": 40.0}, f)
+
+    fraud_scoring._isolation_forest_model = None
+    fraud_scoring._isolation_forest_stats = None
+    fraud_scoring._s3_fetch_attempted = set()
+
+    yield
+
+    if not model_already_existed and os.path.exists(model_path):
+        os.remove(model_path)
+    if not stats_already_existed and os.path.exists(stats_path):
+        os.remove(stats_path)
+
+    fraud_scoring._isolation_forest_model = None
+    fraud_scoring._isolation_forest_stats = None
+    fraud_scoring._s3_fetch_attempted = set()
+
+
+@pytest.fixture
 async def client():
     """`from app.main import app` is deliberately inside this fixture
     body, not at module level -- see the module docstring above for why
@@ -256,3 +353,4 @@ async def client():
         transport=ASGITransport(app=app), base_url="http://test"
     ) as ac:
         yield ac
+        

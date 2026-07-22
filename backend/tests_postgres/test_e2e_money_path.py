@@ -46,9 +46,10 @@ Design decisions worth calling out explicitly:
    is wrong, this import could fail or hang without a reachable broker.
 
 No production file is modified. No dataset is required -- the
-Isolation Forest artifacts used for scoring are already-committed,
-pre-existing model artifacts (backend/app/ml_models/), not new data
-introduced by this ticket.
+Isolation Forest model used for scoring is provided by this suite's own
+provide_isolation_forest_model fixture (conftest.py), since
+isolation_forest.pkl was moved to S3 by DEVATTECH-143 and is not
+available in CI (no real S3/MinIO configured there, by design).
 """
 from decimal import Decimal
 from uuid import uuid4
@@ -103,7 +104,9 @@ async def _register_reviewer(client, label: str) -> dict:
 
 
 @pytest.mark.postgres
-async def test_full_money_path_register_topup_send_score_audit_reversal(client, stub_fraud_scoring):
+async def test_full_money_path_register_topup_send_score_audit_reversal(
+    client, stub_fraud_scoring, provide_isolation_forest_model
+):
     # --- register ---
     sender = await _register_user(client, "e2e-sender")
     receiver = await _register_user(client, "e2e-receiver")
@@ -255,3 +258,4 @@ async def test_full_money_path_register_topup_send_score_audit_reversal(client, 
         final_audit_actions = [row.action for row in result.scalars().all()]
 
     assert "reversed" in final_audit_actions
+    
