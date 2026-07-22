@@ -4,7 +4,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 import redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,6 +34,7 @@ from app.services.exchange_cache import (
 )
 from app.services.exchange_forecast import train_and_forecast_usd_lbp
 from app.services.market_hours import get_market_status, is_market_open
+from app.services.rate_limiter import check_rate_limit
 from app.services.wallet_status import WalletClosedError, WalletFrozenError, assert_wallet_active
 from app.services.exchange_cache import fetch_exchange_rates
 from app.tasks.exchange_tasks import EXCHANGE_FORECAST_CACHE_KEY
@@ -238,10 +239,23 @@ async def convert_currency(
 
 @router.post("/execute", response_model=ExchangeExecutionResponse)
 async def execute_exchange(
+    request: Request,
     payload: ExchangeExecutionRequest,
     current_user: CurrentUser = Depends(require_action_token),
     db: AsyncSession = Depends(get_db),
 ):
+    # Write-endpoint rate-limiting gap flagged in the engineering gap
+    # analysis. Scoped per user+IP like the DEVATTECH-107 transfer
+    # velocity guard (transactions.py) -- not a replacement for the
+    # market-hours/balance checks below, just a floor against burst
+    # abuse of this money-moving endpoint.
+    await check_rate_limit(
+        request,
+        key_prefix=f"exchange_execute:{current_user.id}",
+        max_requests=10,
+        window_seconds=60,
+    )
+
     from_currency = payload.from_currency.upper()
     to_currency = payload.to_currency.upper()
 
