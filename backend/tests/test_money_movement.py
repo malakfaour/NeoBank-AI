@@ -73,7 +73,7 @@ async def _top_up_wallet(
         json={
             "wallet_id": wallet_id,
             "amount": amount,
-            "card_token": "tok_visa_test_123",
+            "payment_method_id": "pm_card_visa_test_123",
         },
     )
     assert response.status_code == 200, response.text
@@ -307,7 +307,7 @@ async def _top_up_wallet_raw(
         json={
             "wallet_id": wallet_id,
             "amount": amount,
-            "card_token": "tok_visa_test_123",
+            "payment_method_id": "pm_card_visa_test_123",
         },
     )
 
@@ -315,9 +315,9 @@ async def _top_up_wallet_raw(
 @pytest.mark.anyio
 async def test_top_up_success_credits_wallet_balance(client):
     """
-    Happy path (NBL-411): a gateway approval credits the wallet by the
-    top-up amount. The default autouse mock_payment_gateway fixture
-    (conftest.py) already returns a 200 "approved" response, so no
+    Happy path (NBL-411): a successful Stripe charge credits the wallet by
+    the top-up amount. The default autouse mock_payment_gateway fixture
+    (conftest.py) already fakes a successful charge_card() call, so no
     per-test monkeypatch is needed here.
     """
     tokens = await _register_user(client, "topup-success")
@@ -336,32 +336,18 @@ async def test_top_up_success_credits_wallet_balance(client):
 @pytest.mark.anyio
 async def test_top_up_declined_by_gateway_does_not_credit_wallet(client, monkeypatch):
     """
-    NBL-411: a 402 from the gateway must surface as a 402 with the
-    card_declined shape and must NOT touch the wallet balance.
+    DEVATTECH-131 (was NBL-411, updated for the real Stripe integration):
+    a declined card must surface as a 402 with the card_declined shape
+    and must NOT touch the wallet balance.
     """
+    from app.services.stripe_gateway import CardDeclinedError
 
-    class _DeclinedGatewayClient:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            return False
-
-        async def post(self, url, json=None):
-            class _DeclinedResponse:
-                status_code = 402
-
-                def json(self):
-                    return {"message": "Insufficient funds on card"}
-
-            return _DeclinedResponse()
+    async def _declined_charge_card(payment_method_id, amount, currency, idempotency_key):
+        raise CardDeclinedError("Insufficient funds on card")
 
     monkeypatch.setattr(
-        "app.api.v1.endpoints.accounts.httpx.AsyncClient",
-        _DeclinedGatewayClient,
+        "app.api.v1.endpoints.accounts.charge_card",
+        _declined_charge_card,
     )
 
     tokens = await _register_user(client, "topup-declined")
@@ -374,6 +360,76 @@ async def test_top_up_declined_by_gateway_does_not_credit_wallet(client, monkeyp
         "error": "card_declined",
         "gateway_message": "Insufficient funds on card",
     }
+    assert await _get_wallet_balance(user.id, WalletCurrency.USD) == Decimal("0.0000")
+
+
+@pytest.mark.anyio
+async def test_top_up_rejects_usdt_wallet(client):
+    """
+    DEVATTECH-131: card top-up only supports USD/LBP -- Stripe charges a
+    card and settles in fiat, there's no path from that to crediting a
+    USDT wallet directly. Must reject before ever calling charge_card().
+    """
+    tokens = await _register_user(client, "topup-usdt")
+    user, usdt_wallet = await _get_user_and_wallet(tokens["email"], WalletCurrency.USDT)
+
+    response = await _top_up_wallet_raw(client, tokens["access_token"], usdt_wallet.id, "10.00")
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"]["error"] == "unsupported_topup_currency"
+    assert await _get_wallet_balance(user.id, WalletCurrency.USDT) == Decimal("0.0000")
+
+
+@pytest.mark.anyio
+async def test_top_up_lbp_wallet_succeeds(client):
+    """
+    DEVATTECH-131: LBP is in scope alongside USD (confirmed decision --
+    see stripe_gateway.py's SUPPORTED_CURRENCIES).
+
+    Amount is deliberately small (500 LBP, not a realistic top-up size):
+    TOPUP_DAILY_LIMIT (app/core/redis.py) is a flat Decimal("1000")
+    applied to every currency with no conversion -- pre-existing, not
+    introduced by this ticket, and out of scope to fix here. In practice
+    this caps LBP top-ups at ~1000 LBP/day (a fraction of a cent), which
+    makes real LBP top-up unusable. Flagged separately as a follow-up;
+    this test only needs an amount under that cap to prove the
+    USD-vs-LBP currency-conversion path itself (_to_minor_units) works.
+    """
+    tokens = await _register_user(client, "topup-lbp")
+    user, lbp_wallet = await _get_user_and_wallet(tokens["email"], WalletCurrency.LBP)
+
+    response = await _top_up_wallet_raw(client, tokens["access_token"], lbp_wallet.id, "500.00")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "success"
+    assert Decimal(body["new_balance"]) == Decimal("500.0000")
+    assert await _get_wallet_balance(user.id, WalletCurrency.LBP) == Decimal("500.0000")
+
+
+@pytest.mark.anyio
+async def test_top_up_gateway_unavailable_returns_502_without_crediting(client, monkeypatch):
+    """
+    DEVATTECH-131: a non-decline Stripe failure (network, API outage,
+    misconfiguration) must surface as 502, matching the old fake
+    gateway's 5xx contract, and must not touch the wallet balance.
+    """
+    from app.services.stripe_gateway import GatewayUnavailableError
+
+    async def _unavailable_charge_card(payment_method_id, amount, currency, idempotency_key):
+        raise GatewayUnavailableError("stripe api outage")
+
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.accounts.charge_card",
+        _unavailable_charge_card,
+    )
+
+    tokens = await _register_user(client, "topup-unavailable")
+    user, wallet = await _get_user_and_wallet(tokens["email"], WalletCurrency.USD)
+
+    response = await _top_up_wallet_raw(client, tokens["access_token"], wallet.id, "20.00")
+
+    assert response.status_code == 502, response.text
     assert await _get_wallet_balance(user.id, WalletCurrency.USD) == Decimal("0.0000")
 
 
@@ -443,30 +499,13 @@ async def test_top_up_is_idempotent(client, monkeypatch):
     """
     call_count = {"count": 0}
 
-    class _CountingGatewayClient:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            return False
-
-        async def post(self, url, json=None):
-            call_count["count"] += 1
-
-            class _ApprovedResponse:
-                status_code = 200
-
-                def json(self):
-                    return {"status": "approved"}
-
-            return _ApprovedResponse()
+    async def _counting_charge_card(payment_method_id, amount, currency, idempotency_key):
+        call_count["count"] += 1
+        return "pi_test_idempotent_123"
 
     monkeypatch.setattr(
-        "app.api.v1.endpoints.accounts.httpx.AsyncClient",
-        _CountingGatewayClient,
+        "app.api.v1.endpoints.accounts.charge_card",
+        _counting_charge_card,
     )
 
     tokens = await _register_user(client, "topup-idem")
@@ -480,7 +519,7 @@ async def test_top_up_is_idempotent(client, monkeypatch):
     request_body = {
         "wallet_id": wallet.id,
         "amount": "20.00",
-        "card_token": "tok_visa_test_123",
+        "payment_method_id": "pm_card_visa_test_123",
     }
 
     first = await client.post("/api/v1/accounts/top-up", headers=headers, json=request_body)
@@ -527,7 +566,7 @@ async def test_shared_idempotency_key_does_not_collide_across_endpoints(client, 
         json={
             "wallet_id": sender_wallet.id,
             "amount": "80.00",
-            "card_token": "tok_visa_test_123",
+            "payment_method_id": "pm_card_visa_test_123",
         },
     )
     assert top_up_response.status_code == 200, top_up_response.text

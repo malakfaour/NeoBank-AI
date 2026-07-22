@@ -190,31 +190,19 @@ def mock_redis():
         yield fake
 
 
-class _FakePaymentGatewayResponse:
-    """Minimal stand-in for the httpx.Response accounts.py's
-    _call_payment_gateway() returns on success. Only .status_code and
-    .json() are ever read by card_top_up() -- see accounts.py: a 402
-    means declined, >=500 means gateway unavailable, anything else
-    (this stub's 200) proceeds as success."""
-    status_code = 200
-
-    def json(self):
-        return {"message": "approved"}
-
-
 @pytest.fixture(autouse=True)
 def mock_payment_gateway():
     """
-    Mocks the external HTTP boundary in the top-up step (accounts.py's
-    _call_payment_gateway, a real httpx.AsyncClient POST to
-    settings.PAYMENT_GATEWAY_URL) so this suite never makes a real
-    network call. accounts.py itself is not modified.
+    Mocks the external boundary in the top-up step (accounts.py's
+    charge_card, imported from stripe_gateway.py -- DEVATTECH-131) so
+    this suite never makes a real Stripe call. accounts.py itself is not
+    modified.
     """
     from unittest.mock import AsyncMock, patch
 
     with patch(
-        "app.api.v1.endpoints.accounts._call_payment_gateway",
-        new=AsyncMock(return_value=_FakePaymentGatewayResponse()),
+        "app.api.v1.endpoints.accounts.charge_card",
+        new=AsyncMock(return_value="pi_test_fake_payment_intent"),
     ):
         yield
 

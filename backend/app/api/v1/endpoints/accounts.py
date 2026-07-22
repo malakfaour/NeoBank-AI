@@ -1,5 +1,6 @@
 
-import httpx
+from uuid import uuid4
+
 from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -7,7 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_current_user
 from app.core.cache_utils import invalidate_balance_cache
-from app.core.config import settings
 from app.core.redis import (
     TOPUP_DAILY_LIMIT,
     cache_idempotent_response,
@@ -31,6 +31,12 @@ from app.services.account_service import (
     get_user_balances,
 )
 from app.services.audit_log import append_audit
+from app.services.stripe_gateway import (
+    SUPPORTED_CURRENCIES,
+    CardDeclinedError,
+    GatewayUnavailableError,
+    charge_card,
+)
 from app.services.wallet_status import WalletClosedError, WalletFrozenError, assert_wallet_active, record_status_change
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
@@ -80,39 +86,6 @@ async def get_balance(
     return response
 
 
-async def _call_payment_gateway(
-    card_token: str,
-    amount,
-    currency: str,
-) -> httpx.Response:
-    """
-    Calls payment gateway stub.
-    """
-
-    payload = {
-        "token": card_token,
-        "amount": float(amount),
-    }
-
-    gateway_url = settings.PAYMENT_GATEWAY_URL.rstrip(
-        "/"
-    )
-
-    if not gateway_url.endswith(
-        "/payments/charge"
-    ):
-        gateway_url = (
-            f"{gateway_url}/payments/charge"
-        )
-
-    async with httpx.AsyncClient(timeout=10.0) as http_client:
-        response = await http_client.post(
-            gateway_url,
-            json=payload,
-        )
-
-        return response
-
 @router.post("/top-up", response_model=CardTopUpResponse)
 async def card_top_up(
     payload: CardTopUpRequest,
@@ -121,11 +94,13 @@ async def card_top_up(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Tokenized card top-up endpoint.
+    Real card top-up endpoint (DEVATTECH-131).
 
-    This endpoint does not accept or store real card numbers.
-    It only accepts a tokenized card reference such as tok_visa_test_123.
-    Only the authenticated owner of the wallet can top it up.
+    Card data itself never reaches this backend: the frontend tokenizes it
+    directly with Stripe (Stripe Elements) and sends only the resulting
+    payment_method_id here. Only the authenticated owner of the wallet can
+    top it up. USD and LBP wallets only -- see stripe_gateway.py for why
+    USDT is out of scope for a card charge.
 
     DEVATTECH-125: idempotency, matching send_money's pattern exactly.
     "topup:" prefix applied to the raw client-supplied key at every call
@@ -139,12 +114,6 @@ async def card_top_up(
     on both endpoints. The prefix resolves this without touching the
     shared Redis helper at all.
     """
-
-    if not payload.card_token.startswith("tok_"):
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid card token. Use a tokenized card reference.",
-        )
 
     user_id = int(current_user.id)
 
@@ -167,6 +136,18 @@ async def card_top_up(
     if wallet is None:
         raise HTTPException(status_code=404, detail="Wallet not found")
 
+    if wallet.currency.value not in SUPPORTED_CURRENCIES:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "unsupported_topup_currency",
+                "message": (
+                    f"Card top-up isn't available for {wallet.currency.value} wallets. "
+                    "Top up your USD or LBP wallet, then use Exchange to convert."
+                ),
+            },
+        )
+
     daily_total = await get_topup_daily_total(user_id)
     if daily_total + payload.amount > TOPUP_DAILY_LIMIT:
         raise HTTPException(
@@ -179,25 +160,29 @@ async def card_top_up(
             },
         )
 
-    gateway_response = await _call_payment_gateway(
-        payload.card_token,
-        payload.amount,
-        wallet.currency.value,
-    )
+    # Stripe-side idempotency key only -- distinct from the client's
+    # X-Idempotency-Key / Transaction.idempotency_key above (DEVATTECH-125).
+    # This one just needs to be stable per attempt so Stripe itself doesn't
+    # double-charge on a retried request; it does not replace the header-based
+    # key that makes this endpoint safely replayable end-to-end.
+    attempt_key = uuid4().hex
 
-    if gateway_response.status_code == 402:
+    try:
+        stripe_payment_intent_id = await charge_card(
+            payload.payment_method_id,
+            payload.amount,
+            wallet.currency.value,
+            idempotency_key=attempt_key,
+        )
+    except CardDeclinedError as exc:
         raise HTTPException(
             status_code=402,
             detail={
                 "error": "card_declined",
-                "gateway_message": gateway_response.json().get(
-                    "message",
-                    "Card declined",
-                ),
+                "gateway_message": exc.message,
             },
         )
-
-    if gateway_response.status_code >= 500:
+    except GatewayUnavailableError:
         raise HTTPException(
             status_code=502,
             detail="Payment gateway unavailable",
@@ -277,6 +262,7 @@ async def card_top_up(
             "amount": str(payload.amount),
             "currency": wallet.currency.value,
             "wallet_id": wallet.id,
+            "stripe_payment_intent_id": stripe_payment_intent_id,
         },
     )
 
