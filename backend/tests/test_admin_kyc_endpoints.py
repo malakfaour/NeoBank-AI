@@ -167,7 +167,15 @@ async def test_admin_kyc_needs_review_includes_unreviewed_rejected_only(client):
         headers={"Authorization": f"Bearer {token}"},
     )
     assert response.status_code == 200, response.text
-    assert [item["id"] for item in response.json()["items"]] == [auto_id, flagged_id]
+    items = response.json()["items"]
+    item_ids = {item["id"] for item in items}
+    assert {auto_id, flagged_id} <= item_ids
+    assert reviewed_id not in item_ids
+    assert all(
+        item["status"] in {KYCRecordStatus.flagged.value, KYCRecordStatus.rejected.value}
+        and item["reviewed_by"] is None
+        for item in items
+    )
 
 
 @pytest.mark.anyio

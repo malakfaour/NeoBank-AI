@@ -571,6 +571,50 @@ async def test_chatbot_cancel_discards_pending_action(
     assert await mock_redis.get(f"chat_action:{session_id}") is None
 
 
+async def test_chatbot_cancel_does_not_delete_another_users_pending_action(
+    client,
+    auth_tokens,
+    mock_redis,
+):
+    session_id = "test-unauthorized-cancel-session"
+    owner_user_id = await _get_chatbot_test_user_id()
+    other_user_tokens = await _register_chatbot_user(client, "cancelattacker")
+
+    await _store_test_pending_transfer(
+        mock_redis,
+        session_id,
+        owner_user_id,
+    )
+
+    with patch("httpx.AsyncClient.post", new=_groq_success("GENERAL", 0.1)):
+        response = await client.post(
+            "/api/v1/chatbot/message",
+            json={"session_id": session_id, "message": "cancel"},
+            headers={
+                "Authorization": (
+                    f"Bearer {other_user_tokens['access_token']}"
+                ),
+            },
+        )
+
+    assert response.status_code == 200, response.text
+    assert "no pending transfer to cancel" in response.json()["reply"].lower()
+    assert await mock_redis.get(f"chat_action:{session_id}") is not None
+
+
+async def test_chatbot_rejects_oversized_message(client, auth_tokens):
+    response = await client.post(
+        "/api/v1/chatbot/message",
+        json={
+            "session_id": "oversized-message-session",
+            "message": "x" * 2001,
+        },
+        headers={"Authorization": f"Bearer {auth_tokens['access_token']}"},
+    )
+
+    assert response.status_code == 422
+
+
 async def test_chatbot_confirm_without_pending_action_does_not_execute(
     client,
     auth_tokens,

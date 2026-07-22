@@ -70,9 +70,7 @@ async def _build_decision_response(
 
 @router.get("/kyc/queue", response_model=AdminKYCQueueResponse)
 async def get_kyc_queue(
-    status_filter: KYCRecordStatus = Query(
-        default=KYCRecordStatus.flagged, alias="status"
-    ),
+    status_filter: str = Query(default=KYCRecordStatus.flagged.value, alias="status"),
     date_from: datetime | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
@@ -81,7 +79,17 @@ async def get_kyc_queue(
     ),
     db: AsyncSession = Depends(get_db),
 ):
-    filters = [KYCRecord.status == status_filter]
+    if status_filter == "needs_review":
+        filters = [
+            KYCRecord.status.in_([KYCRecordStatus.flagged, KYCRecordStatus.rejected]),
+            KYCRecord.reviewed_by.is_(None),
+        ]
+    else:
+        try:
+            status_value = KYCRecordStatus(status_filter)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Invalid KYC status filter") from exc
+        filters = [KYCRecord.status == status_value]
     if date_from is not None:
         filters.append(KYCRecord.created_at >= date_from)
 

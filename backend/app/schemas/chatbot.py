@@ -16,6 +16,7 @@ class ChatbotMessageRequest(BaseModel):
     message: str = Field(
         ...,
         min_length=1,
+        max_length=2000,
     )
 
 
