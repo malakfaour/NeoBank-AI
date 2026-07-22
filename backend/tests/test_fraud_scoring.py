@@ -28,21 +28,40 @@ fraud_xgb.pkl available in the test environment:
   - test_score_with_xgboost_happy_path_returns_value_in_0_1_range
 """
 import importlib
+import json
 
+import joblib
 import pytest
 
 from app.services import fraud_scoring
+
+
+@pytest.fixture(autouse=True)
+def _reset_s3_fetch_state(monkeypatch):
+    """DEVATTECH-143: reset the single-attempt-per-process S3 fetch guard
+    before every test in this file, so tests don't leak state."""
+    monkeypatch.setattr(fraud_scoring, "_s3_fetch_attempted", set())
 
 
 def test_score_with_xgboost_missing_model_returns_safe_default(monkeypatch, tmp_path):
     """
     Core safety requirement: if fraud_xgb.pkl doesn't exist, scoring must
     not crash -- it should log a warning and return 0.0.
+
+    DEVATTECH-143: download_file mocked to raise -- must never reach
+    real S3/network in tests (ENGINEERING_RULES section 6).
     """
     # Force a clean cache state and point at a path that can't exist.
     monkeypatch.setattr(fraud_scoring, "_xgb_pipeline", None)
     monkeypatch.setattr(fraud_scoring, "_xgb_stats", None)
     monkeypatch.setattr(fraud_scoring, "FRAUD_XGB_PATH", str(tmp_path / "does_not_exist.pkl"))
+    monkeypatch.setattr(
+        fraud_scoring,
+        "download_file",
+        lambda source_key, destination_path: (_ for _ in ()).throw(
+            FileNotFoundError("mocked: S3 object not found")
+        ),
+    )
 
     # score_with_xgboost returns before touching db/transaction when the
     # model is missing, so None is safe to pass here.
@@ -52,9 +71,17 @@ def test_score_with_xgboost_missing_model_returns_safe_default(monkeypatch, tmp_
 
 
 def test_load_xgb_model_missing_returns_none_none(monkeypatch, tmp_path):
+    """DEVATTECH-143: download_file mocked to raise -- see above."""
     monkeypatch.setattr(fraud_scoring, "_xgb_pipeline", None)
     monkeypatch.setattr(fraud_scoring, "_xgb_stats", None)
     monkeypatch.setattr(fraud_scoring, "FRAUD_XGB_PATH", str(tmp_path / "does_not_exist.pkl"))
+    monkeypatch.setattr(
+        fraud_scoring,
+        "download_file",
+        lambda source_key, destination_path: (_ for _ in ()).throw(
+            FileNotFoundError("mocked: S3 object not found")
+        ),
+    )
 
     pipeline, stats = fraud_scoring._load_xgb_model()
 
@@ -63,9 +90,17 @@ def test_load_xgb_model_missing_returns_none_none(monkeypatch, tmp_path):
 
 
 def test_load_xgb_model_missing_logs_warning(monkeypatch, tmp_path, caplog):
+    """DEVATTECH-143: download_file mocked to raise -- see above."""
     monkeypatch.setattr(fraud_scoring, "_xgb_pipeline", None)
     monkeypatch.setattr(fraud_scoring, "_xgb_stats", None)
     monkeypatch.setattr(fraud_scoring, "FRAUD_XGB_PATH", str(tmp_path / "does_not_exist.pkl"))
+    monkeypatch.setattr(
+        fraud_scoring,
+        "download_file",
+        lambda source_key, destination_path: (_ for _ in ()).throw(
+            FileNotFoundError("mocked: S3 object not found")
+        ),
+    )
 
     with caplog.at_level("WARNING"):
         fraud_scoring._load_xgb_model()
@@ -113,3 +148,171 @@ def test_train_fraud_xgb_feature_order_matches_ticket_spec():
         "currency_match",
     ]
     
+
+
+# --- DEVATTECH-143: S3 fallback tests ---
+# download_file is mocked at fraud_scoring's own namespace -- never
+# reaches app.core.storage or boto3.
+
+
+def test_ensure_model_file_available_skips_download_when_file_exists(monkeypatch, tmp_path):
+    """download_file must NEVER be called when the local file already exists."""
+    existing_file = tmp_path / "already_here.pkl"
+    existing_file.write_bytes(b"not a real model, just needs to exist")
+
+    def _fail_if_called(source_key, destination_path):
+        raise AssertionError("download_file must not be called when the local file exists")
+
+    monkeypatch.setattr(fraud_scoring, "download_file", _fail_if_called)
+
+    fraud_scoring._ensure_model_file_available(str(existing_file), "ml-models/fraud/whatever.pkl")
+
+
+def test_ensure_model_file_available_calls_download_when_file_missing(monkeypatch, tmp_path):
+    missing_path = str(tmp_path / "missing.pkl")
+    calls = []
+
+    def _record_call(source_key, destination_path):
+        calls.append((source_key, destination_path))
+        raise FileNotFoundError("mocked: S3 object not found")
+
+    monkeypatch.setattr(fraud_scoring, "download_file", _record_call)
+
+    fraud_scoring._ensure_model_file_available(missing_path, "ml-models/fraud/whatever.pkl")
+
+    assert calls == [("ml-models/fraud/whatever.pkl", missing_path)]
+
+
+def test_ensure_model_file_available_does_not_retry_after_failure(monkeypatch, tmp_path):
+    missing_path = str(tmp_path / "missing.pkl")
+    call_count = {"count": 0}
+
+    def _count_and_fail(source_key, destination_path):
+        call_count["count"] += 1
+        raise FileNotFoundError("mocked: S3 object not found")
+
+    monkeypatch.setattr(fraud_scoring, "download_file", _count_and_fail)
+
+    fraud_scoring._ensure_model_file_available(missing_path, "ml-models/fraud/whatever.pkl")
+    fraud_scoring._ensure_model_file_available(missing_path, "ml-models/fraud/whatever.pkl")
+
+    assert call_count["count"] == 1
+
+
+def test_load_xgb_model_falls_back_to_s3_and_succeeds(monkeypatch, tmp_path):
+    """
+    Fully self-contained: both the .pkl and the _stats.json are written
+    to tmp_path by the mocks below -- no reliance on real repo files.
+    Uses a REAL, minimally-fitted sklearn Pipeline(StandardScaler,
+    XGBClassifier), matching _load_xgb_model()'s own documented artifact
+    shape, not an arbitrary placeholder object. Skipped if xgboost isn't
+    installed, same convention as this file's existing
+    test_train_fraud_xgb_feature_order_matches_ticket_spec.
+    """
+    pytest.importorskip("xgboost")
+    from sklearn.pipeline import Pipeline
+    from sklearn.preprocessing import StandardScaler
+    from xgboost import XGBClassifier
+
+    model_path = tmp_path / "fraud_xgb.pkl"
+    stats_path = tmp_path / "fraud_xgb_stats.json"
+    stats_path.write_text(json.dumps({"feature_order": ["amount"], "note": "test-stub"}))
+
+    def _fake_successful_download(source_key, destination_path):
+        real_pipeline = Pipeline(
+            [("scaler", StandardScaler()), ("clf", XGBClassifier(n_estimators=5, max_depth=2))]
+        )
+        real_pipeline.fit(
+            [[10, 1.0, 0, 12, 2, 3, 1], [20, 1.5, 1, 14, 3, 1, 0], [5, 0.5, 0, 9, 5, 10, 1]],
+            [0, 1, 0],
+        )
+        joblib.dump(real_pipeline, destination_path)
+
+    monkeypatch.setattr(fraud_scoring, "_xgb_pipeline", None)
+    monkeypatch.setattr(fraud_scoring, "_xgb_stats", None)
+    monkeypatch.setattr(fraud_scoring, "FRAUD_XGB_PATH", str(model_path))
+    monkeypatch.setattr(fraud_scoring, "FRAUD_XGB_STATS_PATH", str(stats_path))
+    monkeypatch.setattr(fraud_scoring, "download_file", _fake_successful_download)
+
+    pipeline, stats = fraud_scoring._load_xgb_model()
+
+    assert isinstance(pipeline, Pipeline)
+    predictions = pipeline.predict_proba([[10.0, 1.0, 0, 12, 2, 3, 1]])
+    assert predictions.shape == (1, 2)
+    assert stats == {"feature_order": ["amount"], "note": "test-stub"}
+
+
+def test_load_isolation_forest_falls_back_to_s3_and_succeeds(monkeypatch, tmp_path):
+    """
+    Fully self-contained, real fitted sklearn.ensemble.IsolationForest
+    (scikit-learn is a hard backend dependency, unlike xgboost -- no
+    importorskip needed). Mirrors the XGBoost success test above.
+    """
+    from sklearn.ensemble import IsolationForest
+
+    model_path = tmp_path / "isolation_forest.pkl"
+    stats_path = tmp_path / "isolation_forest_stats.json"
+    stats_path.write_text(json.dumps({"amount_mean": 100.0, "amount_std": 25.0}))
+
+    def _fake_successful_download(source_key, destination_path):
+        real_model = IsolationForest(n_estimators=10, random_state=42)
+        real_model.fit([[1.0, 2.0, 0, 0], [1.1, 3.0, 0, 1], [0.9, 1.0, 1, 0]])
+        joblib.dump(real_model, destination_path)
+
+    monkeypatch.setattr(fraud_scoring, "_isolation_forest_model", None)
+    monkeypatch.setattr(fraud_scoring, "_isolation_forest_stats", None)
+    monkeypatch.setattr(fraud_scoring, "ISOLATION_FOREST_PATH", str(model_path))
+    monkeypatch.setattr(fraud_scoring, "ISOLATION_FOREST_STATS_PATH", str(stats_path))
+    monkeypatch.setattr(fraud_scoring, "download_file", _fake_successful_download)
+
+    model, stats = fraud_scoring._load_isolation_forest()
+
+    assert isinstance(model, IsolationForest)
+    decision = model.decision_function([[1.0, 2.0, 0, 0]])
+    assert len(decision) == 1
+    assert stats == {"amount_mean": 100.0, "amount_std": 25.0}
+
+
+def test_load_xgb_model_s3_failure_falls_back_to_missing_model_behavior(monkeypatch, tmp_path, caplog):
+    """Local file missing AND S3 fails -> identical to today's plain
+    missing-file case (None, None + warning), no new failure mode."""
+    monkeypatch.setattr(fraud_scoring, "_xgb_pipeline", None)
+    monkeypatch.setattr(fraud_scoring, "_xgb_stats", None)
+    monkeypatch.setattr(fraud_scoring, "FRAUD_XGB_PATH", str(tmp_path / "does_not_exist.pkl"))
+    monkeypatch.setattr(
+        fraud_scoring,
+        "download_file",
+        lambda source_key, destination_path: (_ for _ in ()).throw(
+            FileNotFoundError("mocked: S3 object not found")
+        ),
+    )
+
+    with caplog.at_level("WARNING"):
+        pipeline, stats = fraud_scoring._load_xgb_model()
+
+    assert pipeline is None
+    assert stats is None
+    assert any("fraud_xgb.pkl not found" in record.message for record in caplog.records)
+
+
+def test_load_isolation_forest_s3_failure_raises_file_not_found(monkeypatch, tmp_path):
+    """
+    _load_isolation_forest() has no try/except today (unlike
+    _load_xgb_model()) -- a still-missing file after a failed S3 fetch
+    raises FileNotFoundError uncaught, exactly as it does today when the
+    file is simply absent. Proves the fallback doesn't change that.
+    """
+    monkeypatch.setattr(fraud_scoring, "_isolation_forest_model", None)
+    monkeypatch.setattr(fraud_scoring, "_isolation_forest_stats", None)
+    monkeypatch.setattr(fraud_scoring, "ISOLATION_FOREST_PATH", str(tmp_path / "does_not_exist.pkl"))
+    monkeypatch.setattr(
+        fraud_scoring,
+        "download_file",
+        lambda source_key, destination_path: (_ for _ in ()).throw(
+            FileNotFoundError("mocked: S3 object not found")
+        ),
+    )
+
+    with pytest.raises(FileNotFoundError):
+        fraud_scoring._load_isolation_forest()
+        
