@@ -19,7 +19,7 @@ export default function RegisterPage() {
     if (!form.phone.trim()) e.phone = "Phone number is required.";
     else if (!/^[0-9]{7,8}$/.test(form.phone.trim().replace(/\s/g, ""))) e.phone = "Enter a valid Lebanese number (e.g. 70 123 456).";
     if (!form.password) e.password = "Password is required.";
-    else if (form.password.length < 6) e.password = "Password must be at least 6 characters.";
+    else if (form.password.length < 8) e.password = "Password must be at least 8 characters.";
     return e;
   };
 

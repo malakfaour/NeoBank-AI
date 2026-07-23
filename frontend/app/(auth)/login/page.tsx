@@ -9,8 +9,15 @@ import { isBiometricEnrolled, getDeviceId, signNonce } from "@/lib/biometric";
 export default function LoginPage() {
   const router = useRouter();
   const { setTokens, setUser } = useAuthStore();
-  const [form, setForm] = useState({ phone: "", passcode: "" });
-  const [errors, setErrors] = useState<{ phone?: string; passcode?: string; general?: string }>({});
+  const [loginMethod, setLoginMethod] = useState<"email" | "phone">("email");
+  const [form, setForm] = useState({ email: "", password: "", phone: "", passcode: "" });
+  const [errors, setErrors] = useState<{
+    email?: string;
+    password?: string;
+    phone?: string;
+    passcode?: string;
+    general?: string;
+  }>({});
   const [loading, setLoading] = useState(false);
   const [biometricAvailable] = useState(() =>
     typeof window !== "undefined" ? isBiometricEnrolled() : false
@@ -19,10 +26,17 @@ export default function LoginPage() {
 
   const validate = () => {
     const e: typeof errors = {};
-    if (!form.phone.trim()) e.phone = "Mobile number is required.";
-    else if (!/^\+?[0-9]{7,15}$/.test(form.phone.trim().replace(/\s/g, ""))) e.phone = "Enter a valid mobile number.";
-    if (!form.passcode) e.passcode = "Passcode is required.";
-    else if (form.passcode.length < 4) e.passcode = "Passcode must be at least 4 digits.";
+    if (loginMethod === "email") {
+      if (!form.email.trim()) e.email = "Email is required.";
+      else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) e.email = "Enter a valid email address.";
+      if (!form.password) e.password = "Password is required.";
+      else if (form.password.length < 8) e.password = "Password must be at least 8 characters.";
+    } else {
+      if (!form.phone.trim()) e.phone = "Mobile number is required.";
+      else if (!/^\+?[0-9]{7,15}$/.test(form.phone.trim().replace(/\s/g, ""))) e.phone = "Enter a valid mobile number.";
+      if (!form.passcode) e.passcode = "Passcode is required.";
+      else if (form.passcode.length < 4) e.passcode = "Passcode must be at least 4 digits.";
+    }
     return e;
   };
 
@@ -32,17 +46,19 @@ export default function LoginPage() {
     setErrors({});
     setLoading(true);
     try {
-      const res = await api.post("/auth/login", {
-        phone: form.phone.trim(),
-        passcode: form.passcode,
-      });
+      const credentials = loginMethod === "email"
+        ? { email: form.email.trim(), password: form.password }
+        : { phone: form.phone.trim(), passcode: form.passcode };
+      const res = await api.post("/auth/login", credentials);
       setTokens(res.data.access_token, res.data.refresh_token);
-      const userRes = await api.get("/users/me");
-      setUser(userRes.data);
+      setUser(res.data.user);
       router.push("/otp");
     } catch (err: unknown) {
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setErrors({ general: typeof detail === "string" ? detail : "Invalid mobile number or passcode." });
+      const fallback = loginMethod === "email"
+        ? "Invalid email or password."
+        : "Invalid mobile number or passcode.";
+      setErrors({ general: typeof detail === "string" ? detail : fallback });
     } finally { setLoading(false); }
   };
 
@@ -55,8 +71,7 @@ export default function LoginPage() {
       const signedNonce = await signNonce(nonce);
       const res = await api.post("/auth/biometric/login", { device_id: deviceId, signed_nonce: signedNonce });
       setTokens(res.data.access_token, res.data.refresh_token);
-      const userRes = await api.get("/users/me");
-      setUser(userRes.data);
+      setUser(res.data.user);
       router.push("/otp");
     } catch {
       setErrors({ general: "Device login failed. Use mobile number and passcode instead." });
@@ -72,34 +87,78 @@ export default function LoginPage() {
         <h2 style={{ fontSize: "22px", fontWeight: "700", color: "#000", marginBottom: "4px" }}>Welcome back</h2>
         <p style={{ color: "#999", fontSize: "13px", marginBottom: "20px" }}>Sign in to your account</p>
 
+        <div style={{ display: "flex", gap: "8px", marginBottom: "20px" }}>
+          {(["email", "phone"] as const).map((method) => (
+            <button
+              key={method}
+              type="button"
+              onClick={() => {
+                setLoginMethod(method);
+                setErrors({});
+              }}
+              style={{ flex: 1, padding: "10px", borderRadius: "12px", border: "none", backgroundColor: loginMethod === method ? "#00C853" : "#E5E7EB", color: loginMethod === method ? "#fff" : "#666", fontWeight: "600", fontSize: "13px", cursor: "pointer" }}
+            >
+              {method === "email" ? "Email" : "Phone"}
+            </button>
+          ))}
+        </div>
+
         {errors.general && (
           <div style={{ backgroundColor: "#FEF2F2", border: "1px solid #FECACA", borderRadius: "12px", padding: "12px 16px", color: "#DC2626", fontSize: "13px", marginBottom: "16px" }}>
             {errors.general}
           </div>
         )}
 
-        <div style={{ marginBottom: "16px" }}>
-          <label style={{ display: "block", fontSize: "13px", fontWeight: "600", color: "#333", marginBottom: "8px" }}>Mobile number</label>
-          <div style={{ display: "flex", border: `1.5px solid ${errors.phone ? "#EF4444" : "#E5E7EB"}`, borderRadius: "14px", overflow: "hidden" }}>
-            <div style={{ padding: "12px", backgroundColor: "#F5F5F5", borderRight: "1.5px solid #E5E7EB", fontSize: "13px", color: "#666", display: "flex", alignItems: "center", whiteSpace: "nowrap" }}>
-              LB +961
+        {loginMethod === "email" ? (
+          <>
+            <div style={{ marginBottom: "16px" }}>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: "600", color: "#333", marginBottom: "8px" }}>Email</label>
+              <input type="email" placeholder="you@example.com" value={form.email}
+                onChange={(e) => setForm({ ...form, email: e.target.value })}
+                autoComplete="email"
+                style={{ width: "100%", border: `1.5px solid ${errors.email ? "#EF4444" : "#E5E7EB"}`, borderRadius: "14px", padding: "12px 16px", fontSize: "14px", color: "#000", outline: "none", boxSizing: "border-box" }} />
+              {errors.email && <p style={{ color: "#EF4444", fontSize: "12px", marginTop: "6px" }}>{errors.email}</p>}
             </div>
-            <input type="tel" placeholder="71 123 456" value={form.phone}
-              onChange={(e) => setForm({ ...form, phone: e.target.value })}
-              style={{ flex: 1, border: "none", padding: "12px 16px", fontSize: "14px", color: "#000", outline: "none" }} />
-          </div>
-          {errors.phone && <p style={{ color: "#EF4444", fontSize: "12px", marginTop: "6px" }}>{errors.phone}</p>}
-        </div>
-
-        <div style={{ marginBottom: "24px" }}>
-          <label style={{ display: "block", fontSize: "13px", fontWeight: "600", color: "#333", marginBottom: "8px" }}>Passcode</label>
-          <input type="password" placeholder="••••••" value={form.passcode}
-            onChange={(e) => setForm({ ...form, passcode: e.target.value.replace(/\D/g, "").slice(0, 6) })}
-            onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
-            maxLength={6}
-            style={{ width: "100%", border: `1.5px solid ${errors.passcode ? "#EF4444" : "#E5E7EB"}`, borderRadius: "14px", padding: "12px 16px", fontSize: "20px", letterSpacing: "8px", color: "#000", outline: "none", boxSizing: "border-box" }} />
-          {errors.passcode && <p style={{ color: "#EF4444", fontSize: "12px", marginTop: "6px" }}>{errors.passcode}</p>}
-        </div>
+            <div style={{ marginBottom: "24px" }}>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: "600", color: "#333", marginBottom: "8px" }}>Password</label>
+              <input type="password" placeholder="••••••••" value={form.password}
+                onChange={(e) => setForm({ ...form, password: e.target.value })}
+                onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+                minLength={8}
+                autoComplete="current-password"
+                style={{ width: "100%", border: `1.5px solid ${errors.password ? "#EF4444" : "#E5E7EB"}`, borderRadius: "14px", padding: "12px 16px", fontSize: "14px", color: "#000", outline: "none", boxSizing: "border-box" }} />
+              {errors.password && <p style={{ color: "#EF4444", fontSize: "12px", marginTop: "6px" }}>{errors.password}</p>}
+            </div>
+          </>
+        ) : (
+          <>
+            <p style={{ color: "#999", fontSize: "12px", marginBottom: "16px" }}>
+              Phone login requires a passcode set in Profile → Settings.
+            </p>
+            <div style={{ marginBottom: "16px" }}>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: "600", color: "#333", marginBottom: "8px" }}>Mobile number</label>
+              <div style={{ display: "flex", border: `1.5px solid ${errors.phone ? "#EF4444" : "#E5E7EB"}`, borderRadius: "14px", overflow: "hidden" }}>
+                <div style={{ padding: "12px", backgroundColor: "#F5F5F5", borderRight: "1.5px solid #E5E7EB", fontSize: "13px", color: "#666", display: "flex", alignItems: "center", whiteSpace: "nowrap" }}>
+                  LB +961
+                </div>
+                <input type="tel" placeholder="71 123 456" value={form.phone}
+                  onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                  style={{ flex: 1, border: "none", padding: "12px 16px", fontSize: "14px", color: "#000", outline: "none" }} />
+              </div>
+              {errors.phone && <p style={{ color: "#EF4444", fontSize: "12px", marginTop: "6px" }}>{errors.phone}</p>}
+            </div>
+            <div style={{ marginBottom: "24px" }}>
+              <label style={{ display: "block", fontSize: "13px", fontWeight: "600", color: "#333", marginBottom: "8px" }}>Passcode</label>
+              <input type="password" placeholder="••••••" value={form.passcode}
+                onChange={(e) => setForm({ ...form, passcode: e.target.value.replace(/\D/g, "").slice(0, 6) })}
+                onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+                inputMode="numeric"
+                maxLength={6}
+                style={{ width: "100%", border: `1.5px solid ${errors.passcode ? "#EF4444" : "#E5E7EB"}`, borderRadius: "14px", padding: "12px 16px", fontSize: "20px", letterSpacing: "8px", color: "#000", outline: "none", boxSizing: "border-box" }} />
+              {errors.passcode && <p style={{ color: "#EF4444", fontSize: "12px", marginTop: "6px" }}>{errors.passcode}</p>}
+            </div>
+          </>
+        )}
 
         <button onClick={handleSubmit} disabled={loading}
           style={{ width: "100%", backgroundColor: "#0A0A0A", color: "#00C853", fontWeight: "700", fontSize: "15px", border: "none", borderRadius: "14px", padding: "16px", cursor: loading ? "not-allowed" : "pointer", letterSpacing: "1px" }}>

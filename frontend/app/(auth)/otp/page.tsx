@@ -17,7 +17,7 @@ export default function OTPPage() {
   useEffect(() => {
   inputs.current[0]?.focus();
   // Auto-send OTP on page load
-  const user_id = useAuthStore.getState().user?.id;
+  const user_id = String(useAuthStore.getState().user?.id ?? "");
   if (user_id) {
     api.post("/auth/send-otp", { user_id }).catch(() => {});
   }
@@ -52,7 +52,7 @@ export default function OTPPage() {
     setLoading(true);
     setError("");
     try {
-     const user_id = useAuthStore.getState().user?.id;
+     const user_id = String(useAuthStore.getState().user?.id ?? "");
 await api.post("/auth/verify-otp", { user_id, code });
       router.push("/kyc");
     } catch (err: unknown) {
@@ -65,7 +65,7 @@ await api.post("/auth/verify-otp", { user_id, code });
 
   const handleResend = async () => {
     try {
-     const user_id = useAuthStore.getState().user?.id;
+     const user_id = String(useAuthStore.getState().user?.id ?? "");
 await api.post("/auth/send-otp", { user_id });
       setResent(true);
       setDigits(Array(6).fill(""));
@@ -84,7 +84,7 @@ await api.post("/auth/send-otp", { user_id });
 
       <div style={{ width: "100%", maxWidth: "380px", backgroundColor: "#fff", borderRadius: "24px", padding: "28px", boxShadow: "0 2px 20px rgba(0,0,0,0.08)" }}>
         <h2 style={{ fontSize: "22px", fontWeight: "700", color: "#000", marginBottom: "4px" }}>Verify your number</h2>
-        <p style={{ color: "#999", fontSize: "14px", marginBottom: "24px" }}>Enter the 6-digit code sent to your phone.</p>
+        <p style={{ color: "#999", fontSize: "14px", marginBottom: "24px" }}>Enter the 6-digit code sent to your email.</p>
 
         <div style={{ display: "flex", gap: "8px", justifyContent: "space-between", marginBottom: "24px" }} onPaste={handlePaste}>
           {digits.map((d, i) => (
