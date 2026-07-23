@@ -264,7 +264,7 @@ async def send_otp(
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    await generate_and_store_otp(body.user_id, phone_number=user.phone)
+    await generate_and_store_otp(body.user_id, email=user.email)
     return {"message": f"OTP sent to user {body.user_id}"}
 
 
