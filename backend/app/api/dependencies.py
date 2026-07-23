@@ -7,7 +7,7 @@ from app.core.redis import consume_action_token, is_blacklisted
 from app.core.security import decode_token
 from app.schemas.auth import CurrentUser, UserRole
 
-bearer_scheme = HTTPBearer()
+bearer_scheme = HTTPBearer(auto_error=False)
 
 
 async def get_current_user(
@@ -17,6 +17,13 @@ async def get_current_user(
     FastAPI dependency — validates Bearer token and returns current user.
     Raises 401 on missing, invalid, expired, or blacklisted tokens.
     """
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     token = credentials.credentials
 
     try:

@@ -4,6 +4,7 @@ changes, so these test main.py's middleware and exception handler
 directly rather than any specific business endpoint.
 """
 import pytest
+from httpx import ASGITransport, AsyncClient
 
 
 async def test_response_includes_x_request_id_header(client):
@@ -32,16 +33,12 @@ async def test_unhandled_exception_returns_generic_error_with_request_id(auth_to
     doesn't intercept it. dependency_overrides is looked up per-request,
     so it's the correct way to inject a failure here.
 
-    Uses Starlette's TestClient (not httpx.AsyncClient directly): another
-    fixture in this suite globally patches httpx.AsyncClient for payment-
-    gateway mocking, which collides with building a second AsyncClient
-    here. TestClient is a separate class, unaffected by that patch, and
-    its raise_server_exceptions=False is the documented way to test a
-    global exception handler -- a real client behind uvicorn always gets
-    the 500 JSON response regardless of this setting.
+    Uses a direct ASGI client instead of Starlette's TestClient: the
+    installed Starlette/httpx combination in this workspace no longer
+    accepts the older TestClient constructor path, so ASGITransport keeps
+    the test aligned with the rest of the suite and exercises the same
+    app instance.
     """
-    from starlette.testclient import TestClient
-
     from app.api.dependencies import get_current_user
     from app.main import app
 
@@ -50,8 +47,11 @@ async def test_unhandled_exception_returns_generic_error_with_request_id(auth_to
 
     app.dependency_overrides[get_current_user] = _boom
     try:
-        with TestClient(app, raise_server_exceptions=False) as local_client:
-            response = local_client.get(
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://test",
+        ) as local_client:
+            response = await local_client.get(
                 "/api/v1/users/me",
                 headers={"Authorization": f"Bearer {auth_tokens['access_token']}"},
             )
