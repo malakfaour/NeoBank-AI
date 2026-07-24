@@ -1,7 +1,7 @@
 from pydantic import BaseModel
 
 from app.models.user import KYCStatus
-from app.models.kyc_record import KYCRecordStatus
+from app.models.kyc_record import KYCDocumentType, KYCRecordStatus
 
 
 class KYCStatusResponse(BaseModel):
@@ -18,6 +18,7 @@ class KYCUploadResponse(BaseModel):
     kyc_record_id: int
     selfie_url: str
     id_photo_url: str
+    document_type: KYCDocumentType
     status: KYCRecordStatus
 
 

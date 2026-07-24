@@ -134,6 +134,7 @@ async def get_kyc_queue(
                 reviewed_by=record.reviewed_by,
                 selfie_url=record.selfie_url,
                 id_photo_url=record.id_photo_url,
+                document_type=record.document_type,
                 selfie_presigned_url=selfie_presigned_url,
                 id_photo_presigned_url=id_photo_presigned_url,
             )
