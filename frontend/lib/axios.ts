@@ -1,4 +1,5 @@
-import axios, { AxiosError, InternalAxiosRequestConfig } from "axios";
+﻿import axios, { AxiosError, InternalAxiosRequestConfig } from "axios";
+import { redirectToLogin } from "@/lib/authNavigation";
 import { useAuthStore } from "@/store/authStore";
 
 type RetryableRequestConfig = InternalAxiosRequestConfig & {
@@ -18,17 +19,13 @@ function readToken(key: "access_token" | "refresh_token"): string | null {
   if (typeof window === "undefined") {
     return null;
   }
-  return localStorage.getItem(key);
-}
 
-function redirectToLogin() {
-  if (typeof window !== "undefined" && window.location.pathname !== "/login") {
-    window.location.href = "/login";
-  }
+  return localStorage.getItem(key);
 }
 
 async function refreshAccessToken(): Promise<string | null> {
   const refreshToken = readToken("refresh_token");
+
   if (!refreshToken) {
     return null;
   }
@@ -44,6 +41,7 @@ async function refreshAccessToken(): Promise<string | null> {
   );
 
   const { access_token, refresh_token } = response.data ?? {};
+
   if (!access_token || !refresh_token) {
     return null;
   }
@@ -52,11 +50,18 @@ async function refreshAccessToken(): Promise<string | null> {
   return access_token;
 }
 
+function logoutAndRedirect() {
+  useAuthStore.getState().logout();
+  redirectToLogin();
+}
+
 api.interceptors.request.use((config) => {
   const token = readToken("access_token");
+
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+
   return config;
 });
 
@@ -66,12 +71,21 @@ api.interceptors.response.use(
     const originalRequest = error.config as RetryableRequestConfig | undefined;
     const status = error.response?.status;
 
-    if (!originalRequest || status !== 401 || originalRequest._retry) {
+    if (!originalRequest || status !== 401) {
       return Promise.reject(error);
     }
 
-    // Never recurse on auth endpoints themselves.
-    if (originalRequest.url?.includes("/auth/login") || originalRequest.url?.includes("/auth/refresh")) {
+    // Never attempt token refresh recursively for authentication endpoints.
+    if (
+      originalRequest.url?.includes("/auth/login") ||
+      originalRequest.url?.includes("/auth/refresh")
+    ) {
+      return Promise.reject(error);
+    }
+
+    // The request was already retried with a refreshed token and still failed.
+    if (originalRequest._retry) {
+      logoutAndRedirect();
       return Promise.reject(error);
     }
 
@@ -83,17 +97,16 @@ api.interceptors.response.use(
       });
 
       const newAccessToken = await refreshPromise;
+
       if (!newAccessToken) {
-        useAuthStore.getState().logout();
-        redirectToLogin();
+        logoutAndRedirect();
         return Promise.reject(error);
       }
 
       originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
       return api(originalRequest);
     } catch (refreshError) {
-      useAuthStore.getState().logout();
-      redirectToLogin();
+      logoutAndRedirect();
       return Promise.reject(refreshError);
     }
   }

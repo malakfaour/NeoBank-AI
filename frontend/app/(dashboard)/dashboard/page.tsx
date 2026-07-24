@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
@@ -58,6 +58,7 @@ export default function DashboardPage() {
   const [rateAge, setRateAge] = useState<string>("");
   const [summary, setSummary] = useState<SummaryItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
 
   const currentMonth = new Date().toISOString().slice(0, 7);
@@ -70,6 +71,9 @@ export default function DashboardPage() {
         api.get("/exchange/rates/live"),
         api.get(`/transactions/summary?month=${currentMonth}`),
       ]);
+      const results = [balanceRes, txRes, rateRes, summaryRes];
+      setLoadError(results.some((result) => result.status === "rejected"));
+
       if (balanceRes.status === "fulfilled") setWallets(balanceRes.value.data.balances ?? []);
       if (txRes.status === "fulfilled") setTransactions(txRes.value.data.items ?? []);
      if (rateRes.status === "fulfilled") {
@@ -124,6 +128,22 @@ export default function DashboardPage() {
 
   return (
     <div style={pageStyle}>
+      {loadError && (
+        <div
+          role="alert"
+          style={{
+            borderRadius: "16px",
+            padding: "14px 16px",
+            backgroundColor: "#FEF2F2",
+            border: "1px solid #FECACA",
+            color: "#991B1B",
+            fontSize: "13px",
+            fontWeight: "600",
+          }}
+        >
+          Some dashboard data could not be loaded. Please try again.
+        </div>
+      )}
 
       {/* KYC banner */}
       {user?.kyc_status && user.kyc_status !== "approved" && (
