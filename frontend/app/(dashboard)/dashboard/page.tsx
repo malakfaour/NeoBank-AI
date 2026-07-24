@@ -15,6 +15,10 @@ interface Transaction {
   currency: string; counterparty_name: string | null;
   category: string | null; status: string; created_at: string;
 }
+interface ExchangeRateApiItem {
+  base_currency: string; target_currency: string;
+  rate: string | number; provider: string; last_updated_at: string | null;
+}
 interface ExchangeRate {
   base_currency: string; target_currency: string;
   rate: number; provider: string; last_updated_at: string | null;
@@ -68,22 +72,58 @@ export default function DashboardPage() {
       const [balanceRes, txRes, rateRes, summaryRes] = await Promise.allSettled([
         api.get("/accounts/balance"),
         api.get("/transactions?page_size=5"),
-        api.get("/exchange/rates/live"),
+        api.get("/exchange/rates"),
         api.get(`/transactions/summary?month=${currentMonth}`),
       ]);
       const results = [balanceRes, txRes, rateRes, summaryRes];
-      setLoadError(results.some((result) => result.status === "rejected"));
+      let hasLoadError = results.some(
+        (result) => result.status === "rejected"
+      );
 
       if (balanceRes.status === "fulfilled") setWallets(balanceRes.value.data.balances ?? []);
       if (txRes.status === "fulfilled") setTransactions(txRes.value.data.items ?? []);
-     if (rateRes.status === "fulfilled") {
-  const data = rateRes.value.data;
-  setExchangeRate(data);
-  if (data?.cache_age_seconds !== undefined) {
-    setRateAge(`${data.cache_age_seconds}s ago`);
-  }
-}
+      if (rateRes.status === "fulfilled") {
+        const rates: ExchangeRateApiItem[] = Array.isArray(
+          rateRes.value.data
+        )
+          ? rateRes.value.data
+          : [];
+
+        const usdToLbpRate = rates.find(
+          (item) =>
+            item.base_currency === "USD" &&
+            item.target_currency === "LBP"
+        );
+
+        const numericRate = usdToLbpRate
+          ? Number(usdToLbpRate.rate)
+          : Number.NaN;
+
+        if (
+          usdToLbpRate &&
+          Number.isFinite(numericRate)
+        ) {
+          setExchangeRate({
+            ...usdToLbpRate,
+            rate: numericRate,
+          });
+
+          setRateAge(
+            usdToLbpRate.last_updated_at
+              ? timeAgo(usdToLbpRate.last_updated_at)
+              : ""
+          );
+        } else {
+          setExchangeRate(null);
+          setRateAge("");
+          hasLoadError = true;
+        }
+      } else {
+        setExchangeRate(null);
+        setRateAge("");
+      }
       if (summaryRes.status === "fulfilled") setSummary(summaryRes.value.data.summary ?? []);
+      setLoadError(hasLoadError);
     } finally {
       setLoading(false);
     }

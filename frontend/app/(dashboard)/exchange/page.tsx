@@ -5,9 +5,22 @@ import { useRouter } from "next/navigation";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import api from "@/lib/axios";
 
-interface MarketStatus { is_open: boolean; reason?: string; }
+interface MarketStatus {
+  market_open: boolean;
+  timezone: string;
+  current_time: string;
+  opens_at: string;
+  closes_at: string;
+}
 interface HistoryPoint { date: string; rate: number; provider: string; }
 interface ForecastPoint { date: string; predicted_rate: number; }
+interface ExchangeRateItem {
+  base_currency: string;
+  target_currency: string;
+  rate: string | number;
+  provider: string;
+  last_updated_at: string | null;
+}
 type Step = "form" | "passcode" | "confirm" | "receipt";
 
 const Wrap = ({ children }: { children: React.ReactNode }) => (
@@ -32,10 +45,10 @@ export default function ExchangePage() {
   const [amount, setAmount] = useState("");
   const [convertedAmount, setConvertedAmount] = useState<number | null>(null);
   const [rate, setRate] = useState<number | null>(null);
+  const [rates, setRates] = useState<ExchangeRateItem[]>([]);
   const [marketStatus, setMarketStatus] = useState<MarketStatus | null>(null);
   const [forecast, setForecast] = useState<ForecastPoint[]>([]);
   const [history, setHistory] = useState<HistoryPoint[]>([]);
-const [isStale, setIsStale] = useState(false);
   const [passcode, setPasscode] = useState("");
   const [actionToken, setActionToken] = useState("");
   const [loading, setLoading] = useState(false);
@@ -47,27 +60,72 @@ const [isStale, setIsStale] = useState(false);
     api.get("/exchange/market-status").then((r) => setMarketStatus(r.data)).catch(() => {});
     api.get("/exchange/rates/history?days=30").then((r) => setHistory(r.data ?? [])).catch(() => {});
     api.get("/exchange/forecast").then((r) => setForecast(r.data.predictions ?? [])).catch(() => {});
-   api.get("/exchange/rates").then((r) => {
-  const rates: { base_currency: string; target_currency: string; rate: number }[] = r.data;
-  const r1 = rates.find((x) => x.base_currency === "USD" && x.target_currency === "LBP");
-  if (r1) setRate(r1.rate);
-  else setError("Exchange rate unavailable. Try again later.");
-}).catch(() => setError("Could not load exchange rates. Please try again."));
-api.get("/exchange/rates/live").then((r) => {
-  if (r.data.stale !== undefined) setIsStale(r.data.stale);
-  else if (r.data.cache_age_seconds > 300) setIsStale(true);
-}).catch(() => {});
+    api.get("/exchange/rates").then((r) => {
+      const data: ExchangeRateItem[] = Array.isArray(r.data)
+        ? r.data
+        : [];
+
+      setRates(data);
+      setError("");
+    }).catch(() => {
+      setRates([]);
+      setError("Could not load exchange rates. Please try again.");
+    });
   }, []);
+
+  const selectedRate =
+    rates.find(
+      (item) =>
+        item.base_currency === fromCurrency &&
+        item.target_currency === toCurrency
+    ) ?? null;
+
+  const numericMarketRate = selectedRate
+    ? Number(selectedRate.rate)
+    : Number.NaN;
+
+  const marketRate = Number.isFinite(
+    numericMarketRate
+  )
+    ? numericMarketRate
+    : null;
+
+  const selectedRateUpdatedAt =
+    selectedRate?.last_updated_at
+      ? new Date(selectedRate.last_updated_at).getTime()
+      : Number.NaN;
+
+  const marketCurrentTime =
+    marketStatus?.current_time
+      ? new Date(marketStatus.current_time).getTime()
+      : Number.NaN;
+
+  const isStale =
+    Number.isFinite(selectedRateUpdatedAt) &&
+    Number.isFinite(marketCurrentTime) &&
+    marketCurrentTime - selectedRateUpdatedAt >
+      5 * 60 * 1000;
+
+  const rateAvailabilityError =
+    rates.length > 0 && marketRate === null
+      ? `Exchange pair ${fromCurrency} ? ${toCurrency} is unavailable.`
+      : "";
 
   const swap = () => {
     setFromCurrency(toCurrency);
     setToCurrency(fromCurrency);
     setConvertedAmount(null);
+    setRate(null);
     setAmount("");
+    setError("");
   };
 
   const handlePreview = async () => {
-    if (!amount || parseFloat(amount) <= 0) return;
+    if (
+      !amount ||
+      parseFloat(amount) <= 0 ||
+      marketRate === null
+    ) return;
     setConverting(true);
     setError("");
     try {
@@ -119,7 +177,9 @@ api.get("/exchange/rates/live").then((r) => {
     else if (step === "confirm") setStep("passcode");
   };
 
-  const marketClosed = marketStatus && !marketStatus.is_open;
+  const marketClosed =
+    marketStatus !== null &&
+    !marketStatus.market_open;
 
   if (step === "form") return (
     <Wrap>
@@ -151,7 +211,7 @@ api.get("/exchange/rates/live").then((r) => {
         <input type="number" placeholder="0.00" value={amount} onChange={(e) => { setAmount(e.target.value); setConvertedAmount(null); }}
           style={{ width: "100%", border: "1.5px solid #E5E7EB", borderRadius: "14px", padding: "12px 16px", fontSize: "24px", fontWeight: "800", outline: "none", boxSizing: "border-box", color: "#000" }} />
 
-        {rate && <p style={{ color: "#aaa", fontSize: "12px", marginTop: "8px" }}>Rate: 1 {fromCurrency} = {Number(rate).toLocaleString()} {toCurrency}</p>}
+        {marketRate !== null && <p style={{ color: "#aaa", fontSize: "12px", marginTop: "8px" }}>Rate: 1 {fromCurrency} = {marketRate.toLocaleString()} {toCurrency}</p>}
 
         <div style={{ display: "flex", gap: "8px", marginTop: "8px" }}>
           {["25", "50", "100", "200"].map((q) => (
@@ -197,10 +257,10 @@ api.get("/exchange/rates/live").then((r) => {
   </div>
 )}
 
-      {error && <p style={{ color: "#EF4444", fontSize: "13px", marginBottom: "12px" }}>{error}</p>}
+      {(error || rateAvailabilityError) && <p style={{ color: "#EF4444", fontSize: "13px", marginBottom: "12px" }}>{error || rateAvailabilityError}</p>}
 
-      <button onClick={handlePreview} disabled={!amount || parseFloat(amount) <= 0 || converting || !!marketClosed}
-        style={{ width: "100%", backgroundColor: !amount || !!marketClosed ? "#E5E7EB" : "#00C853", color: !amount || !!marketClosed ? "#999" : "#fff", fontWeight: "700", fontSize: "15px", border: "none", borderRadius: "14px", padding: "14px", cursor: !amount || !!marketClosed ? "not-allowed" : "pointer" }}>
+      <button onClick={handlePreview} disabled={!amount || parseFloat(amount) <= 0 || converting || !!marketClosed || marketRate === null}
+        style={{ width: "100%", backgroundColor: !amount || !!marketClosed || marketRate === null ? "#E5E7EB" : "#00C853", color: !amount || !!marketClosed || marketRate === null ? "#999" : "#fff", fontWeight: "700", fontSize: "15px", border: "none", borderRadius: "14px", padding: "14px", cursor: !amount || !!marketClosed || marketRate === null ? "not-allowed" : "pointer" }}>
         {converting ? "Getting rate..." : marketClosed ? "Market Closed" : "Preview Exchange"}
       </button>
     </Wrap>
