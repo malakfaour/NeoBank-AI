@@ -54,14 +54,13 @@ interface DashboardMockData {
     status: string;
     created_at: string;
   }>;
-  exchangeRate?: {
+  exchangeRates?: Array<{
     base_currency: string;
     target_currency: string;
-    rate: number;
+    rate: string | number;
     provider: string;
     last_updated_at: string | null;
-    cache_age_seconds?: number;
-  } | null;
+  }>;
   summary?: Array<{
     category: string | null;
     currency: string;
@@ -73,7 +72,15 @@ interface DashboardMockData {
 function mockSuccessfulDashboardRequests({
   balances = [],
   transactions = [],
-  exchangeRate = null,
+  exchangeRates = [
+    {
+      base_currency: "USD",
+      target_currency: "LBP",
+      rate: "89500",
+      provider: "test-provider",
+      last_updated_at: null,
+    },
+  ],
   summary = [],
 }: DashboardMockData) {
   apiGetMock.mockImplementation((url: string) => {
@@ -89,9 +96,9 @@ function mockSuccessfulDashboardRequests({
       });
     }
 
-    if (url === "/exchange/rates/live") {
+    if (url === "/exchange/rates") {
       return Promise.resolve({
-        data: exchangeRate,
+        data: exchangeRates,
       });
     }
 
@@ -150,14 +157,15 @@ describe("DashboardPage", () => {
           created_at: new Date().toISOString(),
         },
       ],
-      exchangeRate: {
-        base_currency: "USD",
-        target_currency: "LBP",
-        rate: 89500,
-        provider: "test-provider",
-        last_updated_at: new Date().toISOString(),
-        cache_age_seconds: 10,
-      },
+      exchangeRates: [
+        {
+          base_currency: "USD",
+          target_currency: "LBP",
+          rate: "89500",
+          provider: "test-provider",
+          last_updated_at: new Date().toISOString(),
+        },
+      ],
       summary: [
         {
           category: "Food",
@@ -193,7 +201,8 @@ describe("DashboardPage", () => {
 
     expect(apiGetMock).toHaveBeenCalledWith("/accounts/balance");
     expect(apiGetMock).toHaveBeenCalledWith("/transactions?page_size=5");
-    expect(apiGetMock).toHaveBeenCalledWith("/exchange/rates/live");
+    expect(apiGetMock).toHaveBeenCalledWith("/exchange/rates");
+    expect(apiGetMock).not.toHaveBeenCalledWith("/exchange/rates/live");
     expect(apiGetMock).toHaveBeenCalledWith(
       expect.stringMatching(/^\/transactions\/summary\?month=\d{4}-\d{2}$/)
     );
