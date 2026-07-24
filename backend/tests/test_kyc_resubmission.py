@@ -71,6 +71,7 @@ async def test_kyc_resubmission_full_loop_retains_old_s3_objects(client, monkeyp
     first = await client.post(
         "/api/v1/kyc/upload",
         headers=customer_headers,
+        data={"document_type": "passport"},
         files=_upload_files("first"),
     )
     assert first.status_code == 202, first.text
@@ -82,6 +83,7 @@ async def test_kyc_resubmission_full_loop_retains_old_s3_objects(client, monkeyp
     duplicate = await client.post(
         "/api/v1/kyc/upload",
         headers=customer_headers,
+        data={"document_type": "passport"},
         files=_upload_files("duplicate"),
     )
     assert duplicate.status_code == 409
@@ -109,6 +111,7 @@ async def test_kyc_resubmission_full_loop_retains_old_s3_objects(client, monkeyp
     second = await client.post(
         "/api/v1/kyc/upload",
         headers=customer_headers,
+        data={"document_type": "national_id"},
         files=_upload_files("second"),
     )
     assert second.status_code == 202, second.text
@@ -125,6 +128,7 @@ async def test_kyc_resubmission_full_loop_retains_old_s3_objects(client, monkeyp
         record = await session.get(KYCRecord, first_body["kyc_record_id"])
         user = await session.get(User, record.user_id)
         assert record.status == KYCRecordStatus.pending
+        assert record.document_type.value == "national_id"
         assert {record.selfie_url, record.id_photo_url} == second_keys
         assert record.rejection_reason is None
         assert record.reviewed_at is None

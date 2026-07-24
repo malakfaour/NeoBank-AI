@@ -4,8 +4,9 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import api from "@/lib/axios";
 
-type Step = "selfie" | "id_upload" | "status";
+type Step = "selfie" | "document_type" | "id_upload" | "status";
 type KYCStatus = "pending" | "approved" | "rejected" | "flagged";
+export type KYCDocumentType = "passport" | "drivers_license" | "national_id";
 
 // Layout moved outside component to fix ESLint error
 function KYCLayout({ stepNum, title, subtitle, children }: {
@@ -16,7 +17,7 @@ function KYCLayout({ stepNum, title, subtitle, children }: {
       <div style={{ marginBottom: "24px", textAlign: "center" }}>
        <img src="/logo.svg" alt="NeoBank Lebanon" style={{ width: "160px", height: "auto" }} />
         <div style={{ display: "flex", justifyContent: "center", gap: "8px", marginTop: "16px" }}>
-          {[1, 2, 3].map((s) => (
+          {[1, 2, 3, 4].map((s) => (
             <div key={s} style={{ height: "6px", borderRadius: "999px", backgroundColor: s <= stepNum ? "#00C853" : "#E5E7EB", width: s === stepNum ? "32px" : "16px", transition: "all 0.3s" }} />
           ))}
         </div>
@@ -38,6 +39,70 @@ function ErrorBanner({ msg }: { msg: string }) {
   );
 }
 
+const DOCUMENT_TYPE_OPTIONS: { value: KYCDocumentType; label: string; icon: string }[] = [
+  { value: "passport", label: "Passport", icon: "🛂" },
+  { value: "drivers_license", label: "Driver's License", icon: "🚗" },
+  { value: "national_id", label: "National ID", icon: "🪪" },
+];
+
+export function DocumentTypeSelection({
+  selected,
+  onSelect,
+  onBack,
+  onContinue,
+}: {
+  selected: KYCDocumentType | null;
+  onSelect: (documentType: KYCDocumentType) => void;
+  onBack: () => void;
+  onContinue: () => void;
+}) {
+  return (
+    <>
+      <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+        {DOCUMENT_TYPE_OPTIONS.map((option) => {
+          const isSelected = selected === option.value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              aria-pressed={isSelected}
+              onClick={() => onSelect(option.value)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "12px",
+                width: "100%",
+                padding: "16px",
+                borderRadius: "16px",
+                border: `2px solid ${isSelected ? "#00C853" : "#E5E7EB"}`,
+                backgroundColor: isSelected ? "#F0FDF4" : "#fff",
+                color: "#111",
+                fontSize: "15px",
+                fontWeight: "600",
+                cursor: "pointer",
+                textAlign: "left",
+              }}
+            >
+              <span aria-hidden="true" style={{ fontSize: "24px" }}>{option.icon}</span>
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+      <div style={{ display: "flex", gap: "12px", marginTop: "16px" }}>
+        <button type="button" onClick={onBack}
+          style={{ flex: 1, padding: "13px", borderRadius: "14px", border: "1.5px solid #E5E7EB", backgroundColor: "#fff", fontSize: "14px", fontWeight: "600", cursor: "pointer" }}>
+          Back
+        </button>
+        <button type="button" onClick={onContinue} disabled={!selected}
+          style={{ flex: 1, padding: "13px", borderRadius: "14px", border: "none", backgroundColor: selected ? "#00C853" : "#E5E7EB", color: selected ? "#fff" : "#999", fontSize: "14px", fontWeight: "700", cursor: selected ? "pointer" : "not-allowed" }}>
+          Continue
+        </button>
+      </div>
+    </>
+  );
+}
+
 export default function KYCPage() {
   const router = useRouter();
   const [step, setStep] = useState<Step>("selfie");
@@ -45,6 +110,7 @@ export default function KYCPage() {
   const [selfiePreview, setSelfiePreview] = useState<string | null>(null);
   const [idFile, setIdFile] = useState<File | null>(null);
   const [idPreview, setIdPreview] = useState<string | null>(null);
+  const [documentType, setDocumentType] = useState<KYCDocumentType | null>(null);
   const [status, setStatus] = useState<KYCStatus>("pending");
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
@@ -92,13 +158,14 @@ useEffect(() => {
   };
 
   const handleUpload = async () => {
-    if (!selfieBlob || !idFile) { setError("Both selfie and ID are required."); return; }
+    if (!selfieBlob || !idFile || !documentType) { setError("Selfie, document type, and ID are required."); return; }
     setUploading(true);
     setError("");
     try {
       const form = new FormData();
       form.append("selfie", selfieBlob, "selfie.jpg");
       form.append("id_photo", idFile);
+      form.append("document_type", documentType);
       await api.post("/kyc/upload", form, { headers: { "Content-Type": "multipart/form-data" } });
       setStep("status");
       pollRef.current = setInterval(async () => {
@@ -142,7 +209,7 @@ useEffect(() => {
               style={{ flex: 1, padding: "13px", borderRadius: "14px", border: "1.5px solid #E5E7EB", backgroundColor: "#fff", fontSize: "14px", fontWeight: "600", cursor: "pointer" }}>
               Retake
             </button>
-            <button onClick={() => setStep("id_upload")}
+            <button onClick={() => setStep("document_type")}
               style={{ flex: 1, padding: "13px", borderRadius: "14px", border: "none", backgroundColor: "#00C853", color: "#fff", fontSize: "14px", fontWeight: "700", cursor: "pointer" }}>
               Use this photo
             </button>
@@ -152,8 +219,19 @@ useEffect(() => {
     </KYCLayout>
   );
 
+  if (step === "document_type") return (
+    <KYCLayout stepNum={2} title="Choose your document" subtitle="Select the type of identity document you will upload.">
+      <DocumentTypeSelection
+        selected={documentType}
+        onSelect={setDocumentType}
+        onBack={() => setStep("selfie")}
+        onContinue={() => setStep("id_upload")}
+      />
+    </KYCLayout>
+  );
+
   if (step === "id_upload") return (
-    <KYCLayout stepNum={2} title="Upload your ID" subtitle="Take a clear photo of your national ID or passport.">
+    <KYCLayout stepNum={3} title="Upload your ID" subtitle="Take a clear photo of your selected identity document.">
       {error && <ErrorBanner msg={error} />}
       <label style={{ display: "block", width: "100%", borderRadius: "20px", border: `2px dashed ${idPreview ? "#00C853" : "#E5E7EB"}`, cursor: "pointer", overflow: "hidden" }}>
         <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => {
@@ -176,7 +254,7 @@ useEffect(() => {
       </label>
       {idPreview && <p style={{ color: "#00C853", fontSize: "13px", textAlign: "center", marginTop: "8px" }}>✓ {idFile?.name}</p>}
       <div style={{ display: "flex", gap: "12px", marginTop: "16px" }}>
-        <button onClick={() => { setStep("selfie"); setIdFile(null); setIdPreview(null); }}
+        <button onClick={() => { setStep("document_type"); setIdFile(null); setIdPreview(null); }}
           style={{ flex: 1, padding: "13px", borderRadius: "14px", border: "1.5px solid #E5E7EB", backgroundColor: "#fff", fontSize: "14px", fontWeight: "600", cursor: "pointer" }}>
           Back
         </button>
@@ -189,7 +267,7 @@ useEffect(() => {
   );
 
   return (
-    <KYCLayout stepNum={3} title="Verification status" subtitle="We&apos;re reviewing your documents.">
+    <KYCLayout stepNum={4} title="Verification status" subtitle="We&apos;re reviewing your documents.">
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "16px", padding: "16px 0" }}>
         {status === "pending" && (
           <>
@@ -222,7 +300,7 @@ useEffect(() => {
               <p style={{ color: "#999", fontSize: "13px", marginTop: "4px" }}>{status === "flagged" ? "Under manual review." : "Please try again."}</p>
             </div>
             {status === "rejected" && (
-              <button onClick={() => { setStep("selfie"); setSelfieBlob(null); setSelfiePreview(null); setIdFile(null); setIdPreview(null); setStatus("pending"); }}
+              <button onClick={() => { setStep("selfie"); setSelfieBlob(null); setSelfiePreview(null); setIdFile(null); setIdPreview(null); setDocumentType(null); setStatus("pending"); }}
                 style={{ width: "100%", padding: "13px", borderRadius: "14px", border: "none", backgroundColor: "#00C853", color: "#fff", fontSize: "14px", fontWeight: "700", cursor: "pointer" }}>
                 Try again
               </button>

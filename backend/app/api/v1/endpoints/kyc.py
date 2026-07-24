@@ -2,14 +2,14 @@ import asyncio
 from functools import partial
 from time import time
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_current_user, require_role
 from app.core.storage import get_presigned_url, upload_file
 from app.db.session import get_async_db
-from app.models.kyc_record import KYCRecord, KYCRecordStatus
+from app.models.kyc_record import KYCDocumentType, KYCRecord, KYCRecordStatus
 from app.models.user import KYCStatus, User, UserRole
 from app.schemas.kyc import (
     KYCDocumentAccessResponse,
@@ -62,6 +62,7 @@ async def get_kyc_status(
 async def upload_kyc_documents(
     selfie: UploadFile = File(...),
     id_photo: UploadFile = File(...),
+    document_type: KYCDocumentType = Form(...),
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db),
 ):
@@ -121,6 +122,7 @@ async def upload_kyc_documents(
 
     kyc_record.selfie_url = selfie_key
     kyc_record.id_photo_url = id_photo_key
+    kyc_record.document_type = document_type
     kyc_record.match_score = None
     kyc_record.liveness_score = None
     kyc_record.status = KYCRecordStatus.pending
@@ -136,6 +138,7 @@ async def upload_kyc_documents(
         kyc_record_id=kyc_record.id,
         selfie_url=kyc_record.selfie_url,
         id_photo_url=kyc_record.id_photo_url,
+        document_type=kyc_record.document_type,
         status=kyc_record.status,
     )
 

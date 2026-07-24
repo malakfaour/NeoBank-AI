@@ -2,7 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
-from app.models.kyc_record import KYCRecordStatus
+from app.models.kyc_record import KYCDocumentType, KYCRecordStatus
 from app.models.user import KYCStatus
 
 
@@ -19,6 +19,7 @@ class AdminKYCQueueItem(BaseModel):
     reviewed_by: int | None
     selfie_url: str | None
     id_photo_url: str | None
+    document_type: KYCDocumentType | None
     selfie_presigned_url: str | None
     id_photo_presigned_url: str | None
 
