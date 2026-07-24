@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy import select
 
 from app.db.session import AsyncSessionLocal
-from app.models.kyc_record import KYCRecord, KYCRecordStatus
+from app.models.kyc_record import KYCDocumentType, KYCRecord, KYCRecordStatus
 from app.models.user import KYCStatus, User
 
 
@@ -25,7 +25,8 @@ async def _register_user(client, label: str) -> dict:
 
 
 @pytest.mark.anyio
-async def test_upload_kyc_enqueues_task_after_commit(client, monkeypatch):
+@pytest.mark.parametrize("document_type", list(KYCDocumentType))
+async def test_upload_kyc_enqueues_task_after_commit(client, monkeypatch, document_type):
     tokens = await _register_user(client, "kyc-upload")
     uploads = []
     delayed_ids = []
@@ -50,6 +51,7 @@ async def test_upload_kyc_enqueues_task_after_commit(client, monkeypatch):
     response = await client.post(
         "/api/v1/kyc/upload",
         headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        data={"document_type": document_type.value},
         files={
             "selfie": ("selfie.jpg", b"fake-selfie", "image/jpeg"),
             "id_photo": ("id.jpg", b"fake-id", "image/jpeg"),
@@ -59,6 +61,7 @@ async def test_upload_kyc_enqueues_task_after_commit(client, monkeypatch):
     assert response.status_code == 202, response.text
     body = response.json()
     assert body["status"] == KYCRecordStatus.pending.value
+    assert body["document_type"] == document_type.value
     assert len(uploads) == 2
     assert delayed_ids == [body["kyc_record_id"]]
 
@@ -67,6 +70,7 @@ async def test_upload_kyc_enqueues_task_after_commit(client, monkeypatch):
         user = await session.scalar(select(User).where(User.id == record.user_id))
         assert record is not None
         assert record.status == KYCRecordStatus.pending
+        assert record.document_type == document_type
         assert record.match_score is None
         assert record.liveness_score is None
         assert record.rejection_reason is None
@@ -95,6 +99,7 @@ async def test_upload_kyc_rejects_invalid_file_type(client):
     response = await client.post(
         "/api/v1/kyc/upload",
         headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        data={"document_type": KYCDocumentType.passport.value},
         files={
             "selfie": ("selfie.txt", b"not-an-image", "text/plain"),
             "id_photo": ("id.jpg", b"fake-id", "image/jpeg"),
@@ -103,3 +108,20 @@ async def test_upload_kyc_rejects_invalid_file_type(client):
 
     assert response.status_code == 400
     assert response.json()["detail"] == "selfie must be a JPEG or PNG image"
+
+
+@pytest.mark.anyio
+async def test_upload_kyc_rejects_invalid_document_type(client):
+    tokens = await _register_user(client, "kyc-invalid-document")
+
+    response = await client.post(
+        "/api/v1/kyc/upload",
+        headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        data={"document_type": "residence_permit"},
+        files={
+            "selfie": ("selfie.jpg", b"fake-selfie", "image/jpeg"),
+            "id_photo": ("id.jpg", b"fake-id", "image/jpeg"),
+        },
+    )
+
+    assert response.status_code == 422

@@ -13,6 +13,12 @@ class KYCRecordStatus(str, enum.Enum):
     rejected = "rejected"
 
 
+class KYCDocumentType(str, enum.Enum):
+    passport = "passport"
+    drivers_license = "drivers_license"
+    national_id = "national_id"
+
+
 class KYCRecord(Base):
     __tablename__ = "kyc_records"
 
@@ -20,6 +26,7 @@ class KYCRecord(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     selfie_url = Column(String(500), nullable=True)
     id_photo_url = Column(String(500), nullable=True)
+    document_type = Column(SAEnum(KYCDocumentType), nullable=True)
     match_score = Column(Float, nullable=True)
     liveness_score = Column(Float, nullable=True)
     status = Column(SAEnum(KYCRecordStatus), nullable=False, default=KYCRecordStatus.pending)

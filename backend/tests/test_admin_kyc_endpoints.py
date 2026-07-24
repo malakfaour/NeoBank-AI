@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from app.core.security import create_access_token
 from app.db.session import AsyncSessionLocal
-from app.models.kyc_record import KYCRecord, KYCRecordStatus
+from app.models.kyc_record import KYCDocumentType, KYCRecord, KYCRecordStatus
 from app.models.kyc_audit_log import KYCAuditLog
 from app.models.user import KYCStatus, User, UserRole
 
@@ -43,12 +43,14 @@ async def _create_record(
     *,
     status: KYCRecordStatus = KYCRecordStatus.flagged,
     created_at: datetime | None = None,
+    document_type: KYCDocumentType | None = None,
 ) -> int:
     async with AsyncSessionLocal() as session:
         record = KYCRecord(
             user_id=user_id,
             selfie_url=f"{suffix}/selfie.jpg",
             id_photo_url=f"{suffix}/id.jpg",
+            document_type=document_type,
             match_score=0.7,
             liveness_score=0.9,
             status=status,
@@ -82,7 +84,11 @@ async def test_admin_kyc_queue_returns_flagged_records_oldest_first(client, monk
     _, admin_access_token = await _promote_user(admin_tokens["email"], UserRole.admin)
     user_one = await _promote_user(flagged_one["email"], UserRole.customer)
     user_two = await _promote_user(flagged_two["email"], UserRole.customer)
-    first_record_id = await _create_flagged_record(user_one[0].id, "older")
+    first_record_id = await _create_record(
+        user_one[0].id,
+        "older",
+        document_type=KYCDocumentType.passport,
+    )
     second_record_id = await _create_flagged_record(user_two[0].id, "newer")
 
     monkeypatch.setattr(
@@ -99,6 +105,7 @@ async def test_admin_kyc_queue_returns_flagged_records_oldest_first(client, monk
     body = response.json()
     assert [item["id"] for item in body["items"]] == [first_record_id, second_record_id]
     assert body["items"][0]["selfie_presigned_url"].endswith("/older/selfie.jpg")
+    assert body["items"][0]["document_type"] == KYCDocumentType.passport.value
     assert body["page"] == 1
     assert body["page_size"] == 20
     assert body["total"] == 2
