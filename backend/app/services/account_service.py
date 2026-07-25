@@ -206,6 +206,7 @@ async def get_user_balances(
         "user_id": user_id,
         "balances": [
             {
+                "id": wallet.id,
                 "currency": wallet.currency.value,
                 "balance": float(wallet.balance),
                 "account_number": wallet.account_number,

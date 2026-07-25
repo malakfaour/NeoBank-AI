@@ -240,7 +240,23 @@ async def test_send_money_from_frozen_wallet_rejected(client):
     assert response.status_code == 422, response.text
     assert response.json()["detail"]["error"] == "wallet_frozen"
     assert await _get_wallet_status(sender_wallet.id) == WalletStatus.frozen
+@pytest.mark.anyio
+async def test_balance_response_includes_wallet_id(client):
+    # DEVATTECH-131: the frontend needs a real wallet id to submit
+    # /accounts/top-up (wallet_id is a required field there). Regression
+    # guard for that id actually being present in the balance response.
+    tokens = await _register_user(client, "balance-id-check")
+    _, wallet = await _get_user_and_wallet(tokens["email"], WalletCurrency.USD)
 
+    response = await client.get(
+        "/api/v1/accounts/balance",
+        headers={"Authorization": f"Bearer {tokens['access_token']}"},
+    )
+    assert response.status_code == 200, response.text
+
+    balances = response.json()["balances"]
+    usd_balance = next(b for b in balances if b["currency"] == "USD")
+    assert usd_balance["id"] == wallet.id
 
 @pytest.mark.anyio
 async def test_top_up_to_frozen_wallet_rejected(client):
