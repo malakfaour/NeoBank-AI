@@ -1,7 +1,7 @@
 import re
 from decimal import Decimal
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +18,7 @@ LEBANESE_IBAN_PATTERN = re.compile(r"^LB[A-Za-z0-9]{26}$")
 
 async def execute_transfer(
     *,
+    request: Request,
     sender_id: int,
     receiver: User,
     amount: Decimal,
@@ -78,6 +79,7 @@ async def execute_transfer(
         )
 
     send_result = await send_money(
+        request=request,
         payload=SendMoneyRequest(
             receiver_id=str(receiver.id),
             amount=amount,
@@ -113,6 +115,7 @@ async def execute_transfer(
 
 async def execute_transfer_by_mobile(
     *,
+    request: Request,
     sender_id: int,
     receiver_phone: str,
     amount: Decimal,
@@ -131,6 +134,7 @@ async def execute_transfer_by_mobile(
         )
 
     return await execute_transfer(
+        request=request,
         sender_id=sender_id,
         receiver=receiver,
         amount=amount,
@@ -143,6 +147,7 @@ async def execute_transfer_by_mobile(
 
 async def execute_transfer_by_iban(
     *,
+    request: Request,
     sender_id: int,
     receiver_iban: str,
     amount: Decimal,
@@ -182,6 +187,7 @@ async def execute_transfer_by_iban(
         )
 
     return await execute_transfer(
+        request=request,
         sender_id=sender_id,
         receiver=receiver,
         amount=amount,
