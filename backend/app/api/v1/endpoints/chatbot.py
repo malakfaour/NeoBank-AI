@@ -60,6 +60,7 @@ _TRANSFER_CONFIRMATION_THRESHOLD = 0.8
 
 async def _execute_pending_transfer(
     *,
+    request: Request,
     pending_action: dict,
     user_id: int,
     current_user: CurrentUser,
@@ -69,6 +70,7 @@ async def _execute_pending_transfer(
 
     if method == "mobile":
         return await execute_transfer_by_mobile(
+            request=request,
             sender_id=user_id,
             receiver_phone=str(pending_action["receiver_phone"]),
             amount=Decimal(str(pending_action["amount"])),
@@ -80,6 +82,7 @@ async def _execute_pending_transfer(
 
     if method == "iban":
         return await execute_transfer_by_iban(
+            request=request,
             sender_id=user_id,
             receiver_iban=str(pending_action["receiver_iban"]),
             amount=Decimal(str(pending_action["amount"])),
@@ -226,6 +229,7 @@ async def send_chatbot_message(
                 )
 
             receipt = await _execute_pending_transfer(
+                request=request,
                 pending_action=pending_action,
                 user_id=user_id,
                 current_user=current_user,

@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from app.core.config import settings
 from app.db.session import AsyncSessionLocal
-from app.models.user import User
+from app.models.user import KYCStatus, User
 from app.models.wallet import Wallet, WalletCurrency
 from app.services.otp import generate_and_store_otp
 
@@ -15,8 +15,29 @@ from app.services.otp import generate_and_store_otp
 def _enable_action_token(monkeypatch):
     monkeypatch.setattr(settings, "REQUIRE_ACTION_TOKEN", True)
 
+async def _approve_kyc(user_id: int) -> None:
+    async with AsyncSessionLocal() as session:
+        user = await session.get(User, user_id)
+        user.kyc_status = KYCStatus.approved
+        await session.commit()
+
+
+async def _set_iban(user_id: int, currency: WalletCurrency, iban: str) -> None:
+    async with AsyncSessionLocal() as session:
+        wallet = (
+            await session.execute(
+                select(Wallet).where(
+                    Wallet.user_id == user_id,
+                    Wallet.currency == currency,
+                )
+            )
+        ).scalar_one()
+        wallet.iban = iban
+        await session.commit()
+
 
 async def _register_user(client, label: str) -> dict:
+
     suffix = uuid4().hex[:10]
     phone = f"+96170{suffix[:6]}"
     email = f"{label.lower()}-{suffix}@example.com"
@@ -292,3 +313,95 @@ async def test_neo_transfer_mobile_missing_action_token_returns_403(client):
     )
 
     assert response.status_code == 403
+
+@pytest.mark.anyio
+async def test_neo_transfer_mobile_happy_path_succeeds(client):
+    # Regression test: transfer_service.execute_transfer() calls
+    # transactions.send_money() directly (not over HTTP), and send_money()
+    # requires a `request: Request` argument for its DEVATTECH-107 rate
+    # limiting. That argument was missing on this call path -- every real
+    # /transfer/neo/mobile and /transfer/neo/iban request 500'd with
+    # `TypeError: send_money() missing 1 required positional argument:
+    # 'request'`, and nothing caught it because the only existing tests on
+    # these endpoints were rejection-path tests (missing action token,
+    # rate limits) that never reach the actual send_money() call.
+    sender = await _register_user(client, "neohappy")
+    receiver = await _register_user(client, "neohappyreceiver")
+
+    sender_id = await _get_user_id(sender["email"])
+    receiver_id = await _get_user_id(receiver["email"])
+    sender_wallet_id = await _get_wallet_id(sender_id)
+
+    await _approve_kyc(receiver_id)
+    await _top_up(client, sender["access_token"], sender_wallet_id, "50.00")
+    token = await _get_action_token(
+        client,
+        sender["access_token"],
+        sender_id,
+        sender["phone"],
+    )
+
+    with patch("app.api.v1.endpoints.transactions.score_transaction.delay"):
+        response = await client.post(
+            "/api/v1/transfer/neo/mobile",
+            headers={
+                "Authorization": f"Bearer {sender['access_token']}",
+                "X-Idempotency-Key": uuid4().hex,
+                "X-Action-Token": token,
+            },
+            json={
+                "receiver_phone": receiver["phone"],
+                "amount": "10.00",
+                "currency": "USD",
+            },
+        )
+
+    assert response.status_code == 200, response.text
+
+
+@pytest.mark.anyio
+async def test_neo_transfer_iban_happy_path_succeeds(client):
+    # Same regression as test_neo_transfer_mobile_happy_path_succeeds
+    # above, for the IBAN path specifically (execute_transfer_by_iban ->
+    # execute_transfer -> send_money).
+    sender = await _register_user(client, "neoibanhappy")
+    receiver = await _register_user(client, "neoibanhappyreceiver")
+
+    sender_id = await _get_user_id(sender["email"])
+    receiver_id = await _get_user_id(receiver["email"])
+    sender_wallet_id = await _get_wallet_id(sender_id)
+    # generate_iban() (account_utils.py) produces a 24-character IBAN
+    # ("LB" + 2 check digits + 20-char BBAN), but this endpoint's own
+    # LEBANESE_IBAN_PATTERN requires 28 ("LB" + 26) -- a separate,
+    # pre-existing format mismatch that makes every real generated IBAN
+    # fail this endpoint's validation. Not this test's concern (or this
+    # fix's scope) -- write a pattern-compliant IBAN directly so this
+    # test isolates the request-param regression it exists to catch.
+    receiver_iban = "LB" + ("02" + "1234567890" * 3)[:26]
+    await _set_iban(receiver_id, WalletCurrency.USD, receiver_iban)
+
+    await _approve_kyc(receiver_id)
+    await _top_up(client, sender["access_token"], sender_wallet_id, "50.00")
+    token = await _get_action_token(
+        client,
+        sender["access_token"],
+        sender_id,
+        sender["phone"],
+    )
+
+    with patch("app.api.v1.endpoints.transactions.score_transaction.delay"):
+        response = await client.post(
+            "/api/v1/transfer/neo/iban",
+            headers={
+                "Authorization": f"Bearer {sender['access_token']}",
+                "X-Idempotency-Key": uuid4().hex,
+                "X-Action-Token": token,
+            },
+            json={
+                "receiver_iban": receiver_iban,
+                "amount": "10.00",
+                "currency": "USD",
+            },
+        )
+
+    assert response.status_code == 200, response.text

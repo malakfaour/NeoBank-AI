@@ -40,6 +40,7 @@ async def transfer_by_mobile(
         window_seconds=_TRANSFER_WINDOW_SECONDS,
     )
     return await execute_transfer_by_mobile(
+        request=request,
         sender_id=int(current_user.id),
         receiver_phone=payload.receiver_phone,
         amount=payload.amount,
@@ -67,6 +68,7 @@ async def transfer_by_iban(
         window_seconds=_TRANSFER_WINDOW_SECONDS,
     )
     return await execute_transfer_by_iban(
+        request=request,
         sender_id=int(current_user.id),
         receiver_iban=payload.receiver_iban,
         amount=payload.amount,
