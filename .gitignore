@@ -462,3 +462,9 @@ backend/app/ml_models/isolation_forest.pkl
 !ml/kyc/eval_data/
 !ml/kyc/eval_data/spoof_dataset/
 !ml/kyc/eval_data/spoof_dataset/**
+
+# Local tooling and generated development artifacts
+.claude/
+frontend/audit.json
+ml/kyc/eval_data/genuine_pairs/
+backend/app/ml_models/*.tmp
