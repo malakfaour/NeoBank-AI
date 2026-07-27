@@ -21,9 +21,12 @@ def _extract_faces(image_path: str) -> list[dict]:
 
 def check_liveness(image_path: str) -> dict[str, bool | float]:
     """Return the deployed DeepFace decision, score, and thresholded outcome."""
-    faces = _extract_faces(image_path)
+    try:
+        faces = _extract_faces(image_path)
+    except ValueError as exc:
+        raise RuntimeError("no_face_detected:0.0") from exc
     if not faces:
-        raise ValueError("No face detected in selfie")
+        raise RuntimeError("no_face_detected:0.0")
 
     face = faces[0]
     is_real = bool(face.get("is_real", False))

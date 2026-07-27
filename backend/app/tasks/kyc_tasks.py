@@ -137,7 +137,20 @@ def process_kyc(kyc_record_id: int):
                     notification_type="KYC_REJECTED",
                 )
 
-            verification = verify_face(selfie_temp.name, id_temp.name)
+            try:
+                verification = verify_face(selfie_temp.name, id_temp.name)
+            except ValueError as exc:
+                return _persist_decision(
+                    db,
+                    kyc_record=kyc_record,
+                    user=user,
+                    status=KYCRecordStatus.rejected,
+                    user_status=KYCStatus.rejected,
+                    match_score=None,
+                    liveness_score=liveness_score,
+                    rejection_reason=f"face_verification_failed:{exc}",
+                    notification_type="KYC_REJECTED",
+                )
             match_score = float(verification["match_score"])
 
             if match_score >= settings.KYC_MATCH_APPROVE_THRESHOLD:
