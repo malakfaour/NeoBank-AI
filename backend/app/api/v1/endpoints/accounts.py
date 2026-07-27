@@ -1,4 +1,3 @@
-
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
@@ -25,7 +24,13 @@ from app.models.transaction import (
 from app.models.user import KYCStatus, User, UserRole
 from app.models.wallet import Wallet, WalletStatus
 from app.schemas.auth import CurrentUser
-from app.schemas.wallet import CardTopUpRequest, CardTopUpResponse, WalletStatusChangeResponse
+from app.schemas.wallet import (
+    CardTopUpRequest,
+    CardTopUpResponse,
+    CardTopUpRequiresActionResponse,
+    ConfirmTopUpRequest,
+    WalletStatusChangeResponse,
+)
 from app.services.account_service import (
     create_wallets_for_user,
     get_user_balances,
@@ -36,7 +41,9 @@ from app.services.stripe_gateway import (
     SUPPORTED_CURRENCIES,
     CardDeclinedError,
     GatewayUnavailableError,
+    RequiresActionError,
     charge_card,
+    get_confirmed_charge,
 )
 from app.services.wallet_status import WalletClosedError, WalletFrozenError, assert_wallet_active, record_status_change
 
@@ -87,7 +94,118 @@ async def get_balance(
     return response
 
 
-@router.post("/top-up", response_model=CardTopUpResponse)
+async def _finalize_topup(
+    db: AsyncSession,
+    *,
+    wallet: Wallet,
+    user_id: int,
+    amount,
+    x_idempotency_key: str,
+    stripe_payment_intent_id: str,
+) -> CardTopUpResponse:
+    """
+    Shared tail end of a top-up, used by both the direct-success path in
+    card_top_up and the post-3DS-challenge path in confirm_top_up: credit
+    the wallet, write the ledger transaction, invalidate caches, and
+    audit-log the result. Only ever called once Stripe has confirmed the
+    charge actually succeeded.
+    """
+    # Row-locked re-fetch right before the mutation (NBL-411). Deliberately
+    # NOT locked earlier: the gateway call can take up to ~22s worst-case
+    # (10s timeout + 2s retry pause + 10s retry), and holding a SELECT FOR
+    # UPDATE across that entire external call would block every other
+    # operation on this wallet for the duration. Locking only here matches
+    # the pattern in transactions.send_money.
+    result = await db.execute(
+        select(Wallet).where(Wallet.id == wallet.id).with_for_update()
+    )
+    wallet = result.scalar_one()
+    try:
+        assert_wallet_active(wallet)
+    except (WalletFrozenError, WalletClosedError) as e:
+        reason = "wallet_frozen" if isinstance(e, WalletFrozenError) else "wallet_closed"
+        raise HTTPException(
+            status_code=422,
+            detail={"error": reason},
+        )
+
+    wallet.balance = wallet.balance + amount
+
+    # NBL-411: top-ups are modeled as sender_id == receiver_id == the
+    # topping-up user, since Transaction.sender_id is NOT NULL and this
+    # table has no separate type/direction column -- category='TopUp'
+    # is the discriminator (see transactions.py list/detail/summary,
+    # which key off this same category value). This intentionally does
+    # NOT go through fraud scoring (score_transaction is only dispatched
+    # from send_money) since a self-top-up has no fraud-relevant
+    # sender/receiver relationship to score.
+    #
+    # idempotency_key: DEVATTECH-125 -- derived from the required
+    # X-Idempotency-Key header via hash_idempotency_key(), same pattern
+    # as send_money. "topup:" prefix distinguishes this endpoint's keys
+    # from send_money's within the shared Redis idempotency helper.
+    transaction = Transaction(
+        sender_id=wallet.user_id,
+        receiver_id=wallet.user_id,
+        amount=amount,
+        currency=TransactionCurrency(wallet.currency.value),
+        category="TopUp",
+        status=TransactionStatus.completed,
+        idempotency_key=hash_idempotency_key(user_id, f"topup:{x_idempotency_key}"),
+    )
+    db.add(transaction)
+
+    try:
+        await db.commit()
+    except IntegrityError:
+        # Redis-level idempotency check raced and both requests got past
+        # it -- the DB's unique constraint on idempotency_key is the real
+        # safety net, same pattern as send_money. Roll back so the
+        # balance mutation staged above never lands twice.
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Duplicate request: this idempotency key is already being processed",
+        )
+
+    await db.refresh(wallet)
+    await db.refresh(transaction)
+
+    await invalidate_balance_cache(wallet.user_id)
+    await increment_topup_daily(wallet.user_id, amount)
+
+    await append_audit(
+        db,
+        transaction_id=transaction.id,
+        action="topup_completed",
+        actor_id=wallet.user_id,
+        metadata={
+            "amount": str(amount),
+            "currency": wallet.currency.value,
+            "wallet_id": wallet.id,
+            "stripe_payment_intent_id": stripe_payment_intent_id,
+        },
+    )
+
+    response = CardTopUpResponse(
+        wallet_id=wallet.id,
+        currency=(
+            wallet.currency.value
+            if hasattr(wallet.currency, "value")
+            else str(wallet.currency)
+        ),
+        top_up_amount=amount,
+        new_balance=wallet.balance,
+        status="success",
+        message="Card top-up completed successfully",
+    )
+
+    await cache_idempotent_response(user_id, f"topup:{x_idempotency_key}", response.model_dump(mode="json"))
+
+    return response
+
+
+@router.post("/top-up", response_model=CardTopUpResponse | CardTopUpRequiresActionResponse)
 async def card_top_up(
     request: Request,
     payload: CardTopUpRequest,
@@ -115,6 +233,14 @@ async def card_top_up(
     across /transactions/send and /accounts/top-up would hash identically
     on both endpoints. The prefix resolves this without touching the
     shared Redis helper at all.
+
+    3D Secure: if Stripe requires a challenge, the wallet is NOT credited
+    here -- this returns CardTopUpRequiresActionResponse instead, and the
+    frontend must run stripe.confirmCardPayment(client_secret) then call
+    POST /accounts/top-up/confirm to complete the top-up. The idempotency
+    cache is deliberately not written on this branch (it's not a terminal
+    outcome yet); confirm_top_up below writes it once the charge actually
+    succeeds.
     """
 
     # Write-endpoint rate-limiting gap flagged in the engineering gap
@@ -187,6 +313,11 @@ async def card_top_up(
             wallet.currency.value,
             idempotency_key=attempt_key,
         )
+    except RequiresActionError as exc:
+        return CardTopUpRequiresActionResponse(
+            payment_intent_id=exc.payment_intent_id,
+            client_secret=exc.client_secret,
+        )
     except CardDeclinedError as exc:
         raise HTTPException(
             status_code=402,
@@ -201,100 +332,90 @@ async def card_top_up(
             detail="Payment gateway unavailable",
         )
 
-    # Row-locked re-fetch right before the mutation (NBL-411). Deliberately
-    # NOT locked earlier: the gateway call above can take up to ~22s
-    # worst-case (10s timeout + 2s retry pause + 10s retry), and holding a
-    # SELECT FOR UPDATE across that entire external call would block every
-    # other operation on this wallet for the duration. Locking only here
-    # matches the pattern in transactions.send_money.
-    result = await db.execute(
-        select(Wallet).where(Wallet.id == wallet.id).with_for_update()
-    )
-    wallet = result.scalar_one()
-    try:
-        assert_wallet_active(wallet)
-    except (WalletFrozenError, WalletClosedError) as e:
-        reason = "wallet_frozen" if isinstance(e, WalletFrozenError) else "wallet_closed"
-        raise HTTPException(
-            status_code=422,
-            detail={"error": reason},
-        )
-
-    wallet.balance = wallet.balance + payload.amount
-
-    # NBL-411: top-ups are modeled as sender_id == receiver_id == the
-    # topping-up user, since Transaction.sender_id is NOT NULL and this
-    # table has no separate type/direction column -- category='TopUp'
-    # is the discriminator (see transactions.py list/detail/summary,
-    # which key off this same category value). This intentionally does
-    # NOT go through fraud scoring (score_transaction is only dispatched
-    # from send_money) since a self-top-up has no fraud-relevant
-    # sender/receiver relationship to score.
-    #
-    # idempotency_key: DEVATTECH-125 -- now derived from the required
-    # X-Idempotency-Key header via hash_idempotency_key(), same pattern
-    # as send_money. "topup:" prefix distinguishes this endpoint's keys
-    # from send_money's within the shared Redis idempotency helper (see
-    # this function's docstring for why that prefix is required).
-    transaction = Transaction(
-        sender_id=wallet.user_id,
-        receiver_id=wallet.user_id,
-        amount=payload.amount,
-        currency=TransactionCurrency(wallet.currency.value),
-        category="TopUp",
-        status=TransactionStatus.completed,
-        idempotency_key=hash_idempotency_key(user_id, f"topup:{x_idempotency_key}"),
-    )
-    db.add(transaction)
-
-    try:
-        await db.commit()
-    except IntegrityError:
-        # Redis-level idempotency check above raced and both requests got
-        # past it -- the DB's unique constraint on idempotency_key is the
-        # real safety net, same pattern as send_money. Roll back so the
-        # balance mutation staged above never lands twice.
-        await db.rollback()
-        raise HTTPException(
-            status_code=409,
-            detail="Duplicate request: this idempotency key is already being processed",
-        )
-
-    await db.refresh(wallet)
-    await db.refresh(transaction)
-
-    await invalidate_balance_cache(wallet.user_id)
-    await increment_topup_daily(wallet.user_id, payload.amount)
-
-    await append_audit(
+    return await _finalize_topup(
         db,
-        transaction_id=transaction.id,
-        action="topup_completed",
-        actor_id=wallet.user_id,
-        metadata={
-            "amount": str(payload.amount),
-            "currency": wallet.currency.value,
-            "wallet_id": wallet.id,
-            "stripe_payment_intent_id": stripe_payment_intent_id,
-        },
+        wallet=wallet,
+        user_id=user_id,
+        amount=payload.amount,
+        x_idempotency_key=x_idempotency_key,
+        stripe_payment_intent_id=stripe_payment_intent_id,
     )
 
-    response = CardTopUpResponse(
-        wallet_id=wallet.id,
-        currency=(
-            wallet.currency.value
-            if hasattr(wallet.currency, "value")
-            else str(wallet.currency)
-        ),
-        top_up_amount=payload.amount,
-        new_balance=wallet.balance,
-        status="success",
-        message="Card top-up completed successfully",
+
+@router.post("/top-up/confirm", response_model=CardTopUpResponse)
+async def confirm_top_up(
+    request: Request,
+    payload: ConfirmTopUpRequest,
+    x_idempotency_key: str = Header(..., alias="X-Idempotency-Key"),
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Completes a top-up after the frontend has run a 3D Secure challenge
+    (stripe.confirmCardPayment) against the client_secret returned by
+    POST /accounts/top-up's CardTopUpRequiresActionResponse.
+
+    Reuses the SAME X-Idempotency-Key as the original /top-up attempt --
+    this is a continuation of that attempt, not a new one, so it must
+    replay from the idempotency cache the same way a retried /top-up
+    call would if this confirm call itself gets retried.
+
+    Never trusts the client's claim that the challenge succeeded:
+    get_confirmed_charge re-verifies the PaymentIntent's status and
+    amount/currency directly with Stripe before any wallet is touched.
+    """
+    await check_rate_limit(
+        request,
+        key_prefix=f"topup:{current_user.id}",
+        max_requests=10,
+        window_seconds=60,
     )
 
-    await cache_idempotent_response(user_id, f"topup:{x_idempotency_key}", response.model_dump(mode="json"))
+    user_id = int(current_user.id)
 
-    return response
+    cached_response = await get_cached_idempotent_response(user_id, f"topup:{x_idempotency_key}")
+    if cached_response is not None:
+        return CardTopUpResponse(**cached_response)
+
+    result = await db.execute(
+        select(Wallet).where(
+            Wallet.id == payload.wallet_id,
+            Wallet.user_id == user_id,
+        )
+    )
+    wallet = result.scalar_one_or_none()
+
+    if wallet is None:
+        raise HTTPException(status_code=404, detail="Wallet not found")
+
+    try:
+        stripe_payment_intent_id = await get_confirmed_charge(
+            payload.payment_intent_id,
+            payload.amount,
+            wallet.currency.value,
+        )
+    except CardDeclinedError as exc:
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "error": "card_declined",
+                "gateway_message": exc.message,
+            },
+        )
+    except GatewayUnavailableError:
+        raise HTTPException(
+            status_code=502,
+            detail="Payment gateway unavailable",
+        )
+
+    return await _finalize_topup(
+        db,
+        wallet=wallet,
+        user_id=user_id,
+        amount=payload.amount,
+        x_idempotency_key=x_idempotency_key,
+        stripe_payment_intent_id=stripe_payment_intent_id,
+    )
 
 
 @router.get("/validate-recipient")

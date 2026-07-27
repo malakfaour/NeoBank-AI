@@ -48,3 +48,19 @@ class CardTopUpResponse(BaseModel):
     new_balance: Decimal
     status: str
     message: str
+class CardTopUpRequiresActionResponse(BaseModel):
+    """
+    Returned instead of CardTopUpResponse when Stripe requires a 3D
+    Secure challenge before the charge can complete. The wallet has NOT
+    been credited yet -- the frontend must run stripe.confirmCardPayment
+    (client_secret) and then call POST /accounts/top-up/confirm.
+    """
+    status: str = "requires_action"
+    payment_intent_id: str
+    client_secret: str
+
+
+class ConfirmTopUpRequest(BaseModel):
+    wallet_id: int = Field(..., gt=0)
+    amount: Decimal = Field(..., gt=0)
+    payment_intent_id: str = Field(..., min_length=8)

@@ -610,3 +610,115 @@ async def test_shared_idempotency_key_does_not_collide_across_endpoints(client, 
 
     assert topup_tx.idempotency_key != send_tx.idempotency_key
     assert stub_fraud_scoring == [send_tx.id]
+
+# --- 3D Secure: requires_action -> confirm ---
+
+
+@pytest.mark.anyio
+async def test_top_up_requires_action_does_not_credit_wallet_until_confirmed(client, monkeypatch):
+    """
+    When Stripe requires a 3DS challenge, /accounts/top-up must return
+    CardTopUpRequiresActionResponse WITHOUT touching the wallet balance --
+    the balance should only move after the frontend runs the challenge
+    and POSTs to /accounts/top-up/confirm.
+    """
+    tokens = await _register_user(client, "topup3ds")
+    user, wallet = await _get_user_and_wallet(tokens["email"], WalletCurrency.USD)
+    balance_before = await _get_wallet_balance(user.id, WalletCurrency.USD)
+
+    async def _requires_action_charge(payment_method_id, amount, currency, idempotency_key):
+        from app.services.stripe_gateway import RequiresActionError
+        raise RequiresActionError("pi_3ds_test_1", "pi_3ds_test_1_secret_abc")
+
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.accounts.charge_card",
+        _requires_action_charge,
+    )
+
+    idem_key = uuid4().hex
+    response = await client.post(
+        "/api/v1/accounts/top-up",
+        headers={
+            "Authorization": f"Bearer {tokens['access_token']}",
+            "X-Idempotency-Key": idem_key,
+        },
+        json={
+            "wallet_id": wallet.id,
+            "amount": "20.00",
+            "payment_method_id": "pm_card_threeDSecure2Required",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "requires_action"
+    assert body["payment_intent_id"] == "pi_3ds_test_1"
+    assert body["client_secret"] == "pi_3ds_test_1_secret_abc"
+
+    balance_after_requires_action = await _get_wallet_balance(user.id, WalletCurrency.USD)
+    assert balance_after_requires_action == balance_before
+
+    # Now the frontend has (hypothetically) run stripe.confirmCardPayment
+    # and calls the confirm endpoint. The default autouse
+    # mock_payment_gateway fixture fakes get_confirmed_charge as a
+    # success returning the same payment_intent_id.
+    confirm_response = await client.post(
+        "/api/v1/accounts/top-up/confirm",
+        headers={
+            "Authorization": f"Bearer {tokens['access_token']}",
+            "X-Idempotency-Key": idem_key,
+        },
+        json={
+            "wallet_id": wallet.id,
+            "amount": "20.00",
+            "payment_intent_id": "pi_3ds_test_1",
+        },
+    )
+
+    assert confirm_response.status_code == 200, confirm_response.text
+    confirm_body = confirm_response.json()
+    assert confirm_body["status"] == "success"
+    assert Decimal(confirm_body["new_balance"]) == balance_before + Decimal("20.00")
+
+    balance_after_confirm = await _get_wallet_balance(user.id, WalletCurrency.USD)
+    assert balance_after_confirm == balance_before + Decimal("20.00")
+
+
+@pytest.mark.anyio
+async def test_top_up_confirm_declined_challenge_does_not_credit_wallet(client, monkeypatch):
+    """
+    If the 3DS challenge itself gets declined, confirm_top_up must
+    surface a 402 (matching the direct-decline contract) and leave the
+    wallet untouched.
+    """
+    tokens = await _register_user(client, "topup3dsdeclined")
+    user, wallet = await _get_user_and_wallet(tokens["email"], WalletCurrency.USD)
+    balance_before = await _get_wallet_balance(user.id, WalletCurrency.USD)
+
+    async def _declined_confirm(payment_intent_id, expected_amount, expected_currency):
+        from app.services.stripe_gateway import CardDeclinedError
+        raise CardDeclinedError("Card authentication failed")
+
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.accounts.get_confirmed_charge",
+        _declined_confirm,
+    )
+
+    response = await client.post(
+        "/api/v1/accounts/top-up/confirm",
+        headers={
+            "Authorization": f"Bearer {tokens['access_token']}",
+            "X-Idempotency-Key": uuid4().hex,
+        },
+        json={
+            "wallet_id": wallet.id,
+            "amount": "20.00",
+            "payment_intent_id": "pi_3ds_test_declined",
+        },
+    )
+
+    assert response.status_code == 402
+    assert response.json()["detail"]["error"] == "card_declined"
+
+    balance_after = await _get_wallet_balance(user.id, WalletCurrency.USD)
+    assert balance_after == balance_before

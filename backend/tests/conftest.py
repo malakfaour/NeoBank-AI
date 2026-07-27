@@ -144,17 +144,28 @@ class _FakeGatewayClient:
     async def post(self, url, json=None):
         return _FakeGatewayResponse(status_code=200)
 
-
 async def _fake_charge_card(payment_method_id, amount, currency, idempotency_key):
     """
     Stand-in for stripe_gateway.charge_card, used by accounts.py's
     card_top_up (DEVATTECH-131). Defaults to a successful charge for
     every test; individual tests override this same patch target locally
-    to simulate a decline (raise CardDeclinedError) or a gateway failure
-    (raise GatewayUnavailableError) -- same override pattern the old
-    httpx-based fake used.
+    to simulate a decline (raise CardDeclinedError), a gateway failure
+    (raise GatewayUnavailableError), or a 3DS challenge (raise
+    RequiresActionError) -- same override pattern the old httpx-based
+    fake used.
     """
     return f"pi_test_{idempotency_key[:24]}"
+
+
+async def _fake_get_confirmed_charge(payment_intent_id, expected_amount, expected_currency):
+    """
+    Stand-in for stripe_gateway.get_confirmed_charge, used by accounts.py's
+    confirm_top_up (3D Secure follow-up). Defaults to confirming success
+    for every test; individual tests override this same patch target
+    locally to simulate a failed challenge (raise CardDeclinedError) or a
+    gateway failure (raise GatewayUnavailableError).
+    """
+    return payment_intent_id
 
 
 @pytest.fixture(autouse=True)
@@ -172,10 +183,14 @@ def mock_payment_gateway(monkeypatch):
     )
 
     monkeypatch.setattr(
-    "app.api.v1.endpoints.bills.httpx.AsyncClient",
-    _FakeGatewayClient,
-)
+        "app.api.v1.endpoints.accounts.get_confirmed_charge",
+        _fake_get_confirmed_charge,
+    )
 
+    monkeypatch.setattr(
+    "app.api.v1.endpoints.bills.httpx.AsyncClient",
+        _FakeGatewayClient,
+    )
 
 @pytest_asyncio.fixture
 async def client():

@@ -111,6 +111,23 @@ function AddMoneyForm() {
     }
   };
 
+ 
+ // Shared between the initial /accounts/top-up call and the
+  // post-3DS-challenge /accounts/top-up/confirm call -- both can fail
+  // with the same error shapes (card_declined, wallet_frozen, etc.).
+  const applyTopUpError = (e: unknown) => {
+    const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+    if (detail && typeof detail === "object") {
+      const d = detail as { error?: string; gateway_message?: string };
+      if (d.error === "wallet_frozen") setError("Your wallet is frozen. Please contact support.");
+      else if (d.error === "wallet_closed") setError("Your wallet is closed. Please contact support.");
+      else if (d.error === "card_declined") setError(d.gateway_message ?? "Your card was declined.");
+      else setError(JSON.stringify(d));
+    } else {
+      setError(typeof detail === "string" ? detail : "Top-up failed.");
+    }
+  };
+
   const handleTopUp = async () => {
     if (!selected || !paymentMethodId) return;
     setLoading(true);
@@ -135,24 +152,51 @@ function AddMoneyForm() {
           headers: { "X-Idempotency-Key": idempotencyKeyRef.current },
         },
       );
+
+      if (res.data.status === "requires_action") {
+        // 3D Secure: the wallet has NOT been credited yet. Run the
+        // challenge in-page via Stripe.js, then ask the backend to
+        // verify and finalize -- the backend independently re-checks
+        // with Stripe rather than trusting this client's outcome.
+        if (!stripe) {
+          setError("Payment form is still loading. Try again in a moment.");
+          return;
+        }
+        const { paymentIntent, error: confirmError } = await stripe.confirmCardPayment(
+          res.data.client_secret,
+        );
+        if (confirmError || paymentIntent?.status !== "succeeded") {
+          setError(confirmError?.message ?? "Card authentication failed.");
+          return;
+        }
+
+        const confirmRes = await api.post(
+          "/accounts/top-up/confirm",
+          {
+            wallet_id: selected.id,
+            amount: parseFloat(amount),
+            payment_intent_id: res.data.payment_intent_id,
+          },
+          {
+            headers: { "X-Idempotency-Key": idempotencyKeyRef.current },
+          },
+        );
+        setNewBalance(Number(confirmRes.data.new_balance));
+        idempotencyKeyRef.current = null;
+        setStep("receipt");
+        return;
+      }
+
       setNewBalance(Number(res.data.new_balance));
       // Success -- this attempt is complete; a future top-up must get a
       // fresh key, not reuse this one.
       idempotencyKeyRef.current = null;
       setStep("receipt");
     } catch (e: unknown) {
-    const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
-if (detail && typeof detail === "object") {
-  const d = detail as { error?: string; gateway_message?: string };
-  if (d.error === "wallet_frozen") setError("Your wallet is frozen. Please contact support.");
-  else if (d.error === "wallet_closed") setError("Your wallet is closed. Please contact support.");
-  else if (d.error === "card_declined") setError(d.gateway_message ?? "Your card was declined.");
-  else setError(JSON.stringify(d));
-} else {
-  setError(typeof detail === "string" ? detail : "Top-up failed.");
-}
+      applyTopUpError(e);
     } finally { setLoading(false); }
   };
+ 
 
   const goBack = () => {
     // DEVATTECH-125: going back abandons the in-progress attempt (if
