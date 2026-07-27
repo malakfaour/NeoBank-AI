@@ -50,6 +50,21 @@ class GatewayUnavailableError(Exception):
     """Any other Stripe-side failure: network, config, rate limit, etc."""
 
 
+class RequiresActionError(Exception):
+    """
+    Stripe needs an additional client-side authentication step (3D Secure)
+    before this PaymentIntent can be confirmed. Carries what the frontend
+    needs to run that challenge via stripe.confirmCardPayment(), and what
+    the backend needs afterward to independently verify the outcome
+    (get_confirmed_charge below) rather than trusting the client's say-so.
+    """
+
+    def __init__(self, payment_intent_id: str, client_secret: str):
+        self.payment_intent_id = payment_intent_id
+        self.client_secret = client_secret
+        super().__init__(f"PaymentIntent {payment_intent_id} requires_action")
+
+
 def _to_minor_units(amount: Decimal, currency: str) -> int:
     """
     Convert a decimal wallet amount to the integer minor-unit amount
@@ -131,14 +146,80 @@ async def charge_card(
         )
         raise GatewayUnavailableError(str(exc)) from exc
 
+    if intent.status == "requires_action":
+        # 3D Secure (or another SCA challenge) is needed. allow_redirects=
+        # "never" above only rules out redirect-based payment *methods*
+        # (e.g. iDEAL) -- it does not disable 3DS, which Stripe.js
+        # resolves in-page via stripe.confirmCardPayment(). The caller
+        # (accounts.py) surfaces this to the frontend rather than
+        # treating it as a failure.
+        raise RequiresActionError(intent.id, intent.client_secret)
+
     if intent.status != "succeeded":
-        # A confirmed card payment with redirects disabled should resolve
-        # to "succeeded" or raise CardError above. Any other status here
-        # (e.g. "requires_action") means Stripe wants a client-side flow
-        # this endpoint doesn't support -- treat as unavailable rather
-        # than silently crediting a wallet for an unresolved payment.
+        # Any other non-succeeded status (canceled, processing, etc.) is
+        # genuinely unexpected for a synchronous card confirmation --
+        # treat as unavailable rather than silently crediting a wallet
+        # for an unresolved payment.
         raise GatewayUnavailableError(
             f"Unexpected PaymentIntent status: {intent.status}"
         )
+
+    return intent.id
+
+
+def _retrieve_payment_intent(payment_intent_id: str) -> "stripe.PaymentIntent":
+    return stripe.PaymentIntent.retrieve(payment_intent_id)
+
+
+async def get_confirmed_charge(
+    payment_intent_id: str,
+    expected_amount: Decimal,
+    expected_currency: str,
+) -> str:
+    """
+    Re-checks a PaymentIntent's status directly with Stripe -- never
+    trusts the client's say-so -- after the frontend has run a 3D Secure
+    challenge via stripe.confirmCardPayment(). Returns the PaymentIntent
+    id if, and only if, Stripe confirms it actually succeeded AND its
+    amount/currency match what this specific top-up attempt expects (so
+    a client can't point a legitimately-confirmed PaymentIntent from one
+    attempt at crediting an unrelated wallet/amount).
+
+    Raises CardDeclinedError if the challenge resulted in a decline
+    (Stripe moves the PaymentIntent to "requires_payment_method" in that
+    case, not a stripe.CardError -- there's no synchronous exception to
+    catch here, the failure just shows up as this status on retrieval),
+    GatewayUnavailableError for any other non-succeeded outcome, an
+    amount/currency mismatch, or a Stripe-side failure.
+    """
+    try:
+        intent = await run_in_threadpool(_retrieve_payment_intent, payment_intent_id)
+    except stripe.StripeError as exc:
+        logger.warning(
+            "Stripe gateway error on top-up confirmation: %s",
+            exc.user_message or str(exc),
+        )
+        raise GatewayUnavailableError(str(exc)) from exc
+
+    if intent.status == "requires_payment_method":
+        raise CardDeclinedError("Card authentication failed")
+
+    if intent.status != "succeeded":
+        raise GatewayUnavailableError(
+            f"Unexpected PaymentIntent status after confirmation: {intent.status}"
+        )
+
+    expected_minor = _to_minor_units(expected_amount, expected_currency)
+    if intent.amount != expected_minor or intent.currency != expected_currency.lower():
+        logger.warning(
+            "PaymentIntent %s amount/currency mismatch on confirm: "
+            "expected %s %s, got %s %s",
+            payment_intent_id,
+            expected_minor,
+            expected_currency.lower(),
+            intent.amount,
+            intent.currency,
+        )
+        raise GatewayUnavailableError("Payment amount/currency mismatch")
 
     return intent.id
