@@ -8,12 +8,23 @@ def liveness_threshold() -> float:
     return float(os.environ.get("KYC_LIVENESS_THRESHOLD", "0.7"))
 
 
+def _normalize_orientation(image_path: str) -> None:
+    """Apply EXIF rotation in-place so sideways/upside-down phone photos are upright."""
+    from PIL import Image, ImageOps
+
+    with Image.open(image_path) as image:
+        oriented = ImageOps.exif_transpose(image)
+        oriented.convert("RGB").save(image_path)
+
+
 def _extract_faces(image_path: str) -> list[dict]:
     """Call the external DeepFace anti-spoofing boundary."""
     from deepface import DeepFace
 
+    _normalize_orientation(image_path)
     return DeepFace.extract_faces(
         img_path=image_path,
+        detector_backend="mtcnn",
         anti_spoofing=True,
         enforce_detection=True,
     )
