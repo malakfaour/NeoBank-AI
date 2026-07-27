@@ -121,7 +121,7 @@ export default function KYCPage() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const pollRef = useRef<NodeJS.Timeout | null>(null);
-  const faceDetectRef = useRef<NodeJS.Timeout | null>(null);
+  const faceDetectRafRef = useRef<number | null>(null);
 
   useEffect(() => {
     void getPostAuthDestination().then((destination) => {
@@ -141,8 +141,8 @@ export default function KYCPage() {
     streamRef.current = null;
     setCameraActive(false);
     setFaceDetected(false);
-    if (faceDetectRef.current) clearInterval(faceDetectRef.current);
-    faceDetectRef.current = null;
+    if (faceDetectRafRef.current) cancelAnimationFrame(faceDetectRafRef.current);
+    faceDetectRafRef.current = null;
   }, []);
 
   const startCamera = useCallback(async () => {
@@ -165,22 +165,45 @@ useEffect(() => {
 
   useEffect(() => {
     if (!cameraActive) return;
-    type BrowserFaceDetector = { detect: (source: HTMLVideoElement) => Promise<unknown[]> };
-    const FaceDetectorCtor = (window as unknown as { FaceDetector?: new () => BrowserFaceDetector }).FaceDetector;
-    if (!FaceDetectorCtor) return;
-    const detector = new FaceDetectorCtor();
-    faceDetectRef.current = setInterval(async () => {
-      if (!videoRef.current) return;
-      try {
-        const faces = await detector.detect(videoRef.current);
-        setFaceDetected(faces.length > 0);
-      } catch {
-        /* ignore transient detection errors */
+    let cancelled = false;
+    let detector: import("@mediapipe/tasks-vision").FaceDetector | null = null;
+
+    (async () => {
+      const { FaceDetector, FilesetResolver } = await import("@mediapipe/tasks-vision");
+      const filesetResolver = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm"
+      );
+      if (cancelled) return;
+      detector = await FaceDetector.createFromOptions(filesetResolver, {
+        baseOptions: {
+          modelAssetPath:
+            "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite",
+        },
+        runningMode: "VIDEO",
+      });
+      if (cancelled || !detector) {
+        detector?.close();
+        return;
       }
-    }, 400);
+
+      const loop = () => {
+        if (cancelled || !videoRef.current || !detector) return;
+        if (videoRef.current.readyState >= 2) {
+          const result = detector.detectForVideo(videoRef.current, performance.now());
+          setFaceDetected(result.detections.length > 0);
+        }
+        faceDetectRafRef.current = requestAnimationFrame(loop);
+      };
+      loop();
+    })().catch(() => {
+      /* face detector unavailable (e.g. offline, blocked CDN) - capture flow still works without the live indicator */
+    });
+
     return () => {
-      if (faceDetectRef.current) clearInterval(faceDetectRef.current);
-      faceDetectRef.current = null;
+      cancelled = true;
+      if (faceDetectRafRef.current) cancelAnimationFrame(faceDetectRafRef.current);
+      faceDetectRafRef.current = null;
+      detector?.close();
     };
   }, [cameraActive]);
 
