@@ -31,6 +31,7 @@ from app.schemas.wallet import (
     ConfirmTopUpRequest,
     WalletStatusChangeResponse,
 )
+from app.services.currency_conversion import to_usd_equivalent
 from app.services.account_service import (
     create_wallets_for_user,
     get_user_balances,
@@ -100,6 +101,7 @@ async def _finalize_topup(
     wallet: Wallet,
     user_id: int,
     amount,
+    usd_equivalent,
     x_idempotency_key: str,
     stripe_payment_intent_id: str,
 ) -> CardTopUpResponse:
@@ -172,7 +174,7 @@ async def _finalize_topup(
     await db.refresh(transaction)
 
     await invalidate_balance_cache(wallet.user_id)
-    await increment_topup_daily(wallet.user_id, amount)
+    await increment_topup_daily(wallet.user_id, usd_equivalent)
 
     await append_audit(
         db,
@@ -287,8 +289,10 @@ async def card_top_up(
             },
         )
 
+    usd_equivalent = await to_usd_equivalent(payload.amount, wallet.currency.value, db)
+
     daily_total = await get_topup_daily_total(user_id)
-    if daily_total + payload.amount > TOPUP_DAILY_LIMIT:
+    if daily_total + usd_equivalent > TOPUP_DAILY_LIMIT:
         raise HTTPException(
             status_code=422,
             detail={
@@ -337,6 +341,7 @@ async def card_top_up(
         wallet=wallet,
         user_id=user_id,
         amount=payload.amount,
+        usd_equivalent=usd_equivalent,
         x_idempotency_key=x_idempotency_key,
         stripe_payment_intent_id=stripe_payment_intent_id,
     )
@@ -408,11 +413,14 @@ async def confirm_top_up(
             detail="Payment gateway unavailable",
         )
 
+    usd_equivalent = await to_usd_equivalent(payload.amount, wallet.currency.value, db)
+
     return await _finalize_topup(
         db,
         wallet=wallet,
         user_id=user_id,
         amount=payload.amount,
+        usd_equivalent=usd_equivalent,
         x_idempotency_key=x_idempotency_key,
         stripe_payment_intent_id=stripe_payment_intent_id,
     )

@@ -18,6 +18,7 @@ from app.schemas.kyc import (
     KYCUploadResponse,
 )
 from app.schemas.auth import CurrentUser
+from app.services.audit_log import append_kyc_audit
 from app.tasks.kyc_tasks import process_kyc
 
 router = APIRouter()
@@ -48,6 +49,48 @@ async def get_kyc_status(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found",
         )
+
+    return KYCStatusResponse(user_id=user.id, kyc_status=user.kyc_status)
+
+
+@router.post(
+    "/request-manual-review",
+    response_model=KYCStatusResponse,
+    summary="Escalate a rejected KYC record for manual compliance review",
+)
+async def request_manual_review(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+):
+    user = await db.scalar(select(User).where(User.id == int(current_user.id)))
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+    kyc_record = await db.scalar(
+        select(KYCRecord)
+        .where(KYCRecord.user_id == user.id)
+        .order_by(KYCRecord.id.desc())
+    )
+    if not kyc_record or kyc_record.status != KYCRecordStatus.rejected:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Manual review can only be requested for a rejected verification",
+        )
+
+    kyc_record.status = KYCRecordStatus.flagged
+    kyc_record.reviewed_at = None
+    kyc_record.reviewed_by = None
+    user.kyc_status = KYCStatus.flagged
+    await append_kyc_audit(
+        db,
+        kyc_record_id=kyc_record.id,
+        action="kyc_manual_review_requested",
+        actor_id=user.id,
+    )
+    await db.refresh(user)
 
     return KYCStatusResponse(user_id=user.id, kyc_status=user.kyc_status)
 

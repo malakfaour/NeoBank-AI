@@ -90,8 +90,10 @@ async def _onboarding_state(user: User, db: AsyncSession) -> dict:
         state = "not_submitted"
     elif record.status == KYCRecordStatus.approved:
         state = "approved"
-    elif record.status in (KYCRecordStatus.rejected, KYCRecordStatus.flagged):
+    elif record.status == KYCRecordStatus.rejected:
         state = "rejected"
+    elif record.status == KYCRecordStatus.flagged:
+        state = "flagged"
     else:
         state = "pending"
     return {

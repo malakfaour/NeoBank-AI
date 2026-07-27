@@ -15,6 +15,14 @@ import { getStripe } from "@/lib/stripe";
 interface Wallet { id?: number; currency: string; balance: number; account_number: string | null; iban: string | null; }
 type Step = "account" | "card" | "confirm" | "receipt";
 
+const WALLET_LABELS: Record<string, string> = { USD: "Fresh USD", LBP: "Cash LBP", USDT: "USDT" };
+const walletLabel = (currency?: string) => (currency && WALLET_LABELS[currency]) || currency || "";
+const formatAmount = (currency: string | undefined, value: number) => {
+  if (currency === "USD") return `$${value.toFixed(2)}`;
+  if (currency === "LBP") return `${value.toLocaleString()} ل.ل`;
+  return `${value.toLocaleString()} ${currency ?? ""}`;
+};
+
 const Wrap = ({ children }: { children: React.ReactNode }) => (
   <div style={{ minHeight: "100vh", backgroundColor: "#F5F5F5", padding: "20px" }}>{children}</div>
 );
@@ -223,10 +231,10 @@ function AddMoneyForm() {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
                 <span style={{ backgroundColor: "#00C853", color: "#fff", fontSize: "10px", fontWeight: "700", padding: "2px 8px", borderRadius: "6px", marginRight: "8px" }}>{w.currency}</span>
-                <span style={{ fontSize: "14px", fontWeight: "600", color: "#000" }}>{w.currency === "USD" ? "Fresh USD" : "Cash LBP"}</span>
+                <span style={{ fontSize: "14px", fontWeight: "600", color: "#000" }}>{walletLabel(w.currency)}</span>
               </div>
               <span style={{ fontSize: "16px", fontWeight: "700", color: "#000" }}>
-                {w.currency === "USD" ? `$${w.balance.toFixed(2)}` : `${w.balance.toLocaleString()} ل.ل`}
+                {formatAmount(w.currency, w.balance)}
               </span>
             </div>
           </button>
@@ -271,8 +279,8 @@ function AddMoneyForm() {
       <Header title="Confirm Top-Up" onBack={goBack} />
       <div style={{ backgroundColor: "#fff", borderRadius: "20px", padding: "24px", marginBottom: "16px", display: "flex", flexDirection: "column", gap: "16px" }}>
         {[
-          { label: "To", value: `${selected?.currency === "USD" ? "Fresh USD" : "Cash LBP"} wallet` },
-          { label: "Amount", value: `${selected?.currency === "USD" ? `$${parseFloat(amount).toFixed(2)}` : `${parseFloat(amount).toLocaleString()} ل.ل`}` },
+          { label: "To", value: `${walletLabel(selected?.currency)} wallet` },
+          { label: "Amount", value: formatAmount(selected?.currency, parseFloat(amount)) },
           { label: "Card", value: cardLast4 ? `•••• ${cardLast4}` : "Card on file" },
         ].map(({ label, value }) => (
           <div key={label} style={{ display: "flex", justifyContent: "space-between" }}>
@@ -296,9 +304,9 @@ function AddMoneyForm() {
         <h2 style={{ fontSize: "22px", fontWeight: "700", color: "#000" }}>Top-Up Successful!</h2>
         <div style={{ backgroundColor: "#fff", borderRadius: "20px", padding: "24px", width: "100%", display: "flex", flexDirection: "column", gap: "12px" }}>
           {[
-            { label: "Wallet", value: `${selected?.currency === "USD" ? "Fresh USD" : "Cash LBP"}` },
-            { label: "Amount added", value: `${selected?.currency === "USD" ? `$${parseFloat(amount).toFixed(2)}` : `${parseFloat(amount).toLocaleString()} ل.ل`}` },
-            { label: "New balance", value: `${selected?.currency === "USD" ? `$${newBalance?.toFixed(2)}` : `${newBalance?.toLocaleString()} ل.ل`}` },
+            { label: "Wallet", value: walletLabel(selected?.currency) },
+            { label: "Amount added", value: formatAmount(selected?.currency, parseFloat(amount)) },
+            { label: "New balance", value: newBalance != null ? formatAmount(selected?.currency, newBalance) : "" },
           ].map(({ label, value }) => (
             <div key={label} style={{ display: "flex", justifyContent: "space-between" }}>
               <p style={{ color: "#aaa", fontSize: "14px" }}>{label}</p>

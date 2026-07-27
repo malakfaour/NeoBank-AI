@@ -115,6 +115,8 @@ export default function KYCPage() {
   const [status, setStatus] = useState<KYCStatus>("pending");
   const [rejectionReason, setRejectionReason] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [requestingReview, setRequestingReview] = useState(false);
+  const [reviewError, setReviewError] = useState("");
   const [error, setError] = useState("");
   const [cameraActive, setCameraActive] = useState(false);
   const [faceDetected, setFaceDetected] = useState(false);
@@ -131,6 +133,9 @@ export default function KYCPage() {
       if (response.data.kyc_onboarding_state === "rejected") {
         setStatus("rejected");
         setRejectionReason(response.data.kyc_rejection_reason ?? "");
+        setStep("status");
+      } else if (response.data.kyc_onboarding_state === "flagged") {
+        setStatus("flagged");
         setStep("status");
       }
     }).catch(() => {});
@@ -169,18 +174,29 @@ useEffect(() => {
     let detector: import("@mediapipe/tasks-vision").FaceDetector | null = null;
 
     (async () => {
-      const { FaceDetector, FilesetResolver } = await import("@mediapipe/tasks-vision");
-      const filesetResolver = await FilesetResolver.forVisionTasks(
-        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm"
-      );
-      if (cancelled) return;
-      detector = await FaceDetector.createFromOptions(filesetResolver, {
-        baseOptions: {
-          modelAssetPath:
-            "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite",
-        },
-        runningMode: "VIDEO",
-      });
+      // @mediapipe/tasks-vision logs its own internal WASM runtime messages
+      // (e.g. "Created TensorFlow Lite XNNPACK delegate for CPU") through
+      // console.error instead of console.log, which trips the Next.js dev
+      // overlay into showing them as blocking errors. Silence console.error
+      // for the duration of this library's init only.
+      const originalConsoleError = console.error;
+      console.error = () => {};
+      try {
+        const { FaceDetector, FilesetResolver } = await import("@mediapipe/tasks-vision");
+        const filesetResolver = await FilesetResolver.forVisionTasks(
+          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm"
+        );
+        if (cancelled) return;
+        detector = await FaceDetector.createFromOptions(filesetResolver, {
+          baseOptions: {
+            modelAssetPath:
+              "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite",
+          },
+          runningMode: "VIDEO",
+        });
+      } finally {
+        console.error = originalConsoleError;
+      }
       if (cancelled || !detector) {
         detector?.close();
         return;
@@ -245,6 +261,17 @@ useEffect(() => {
       const message = err instanceof Error ? err.message : "Upload failed.";
       setError(message);
     } finally { setUploading(false); }
+  };
+
+  const handleRequestManualReview = async () => {
+    setRequestingReview(true);
+    setReviewError("");
+    try {
+      const res = await api.post("/kyc/request-manual-review");
+      setStatus(res.data.kyc_status);
+    } catch {
+      setReviewError("Could not request manual review. Try again.");
+    } finally { setRequestingReview(false); }
   };
 
   if (step === "selfie") return (
@@ -361,17 +388,31 @@ useEffect(() => {
             </div>
           </>
         )}
-        {(status === "rejected" || status === "flagged") && (
+        {status === "rejected" && (
           <>
             <div style={{ width: "64px", height: "64px", borderRadius: "50%", backgroundColor: "#FEF2F2", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "28px" }}>❌</div>
             <div style={{ textAlign: "center" }}>
               <p style={{ fontWeight: "700", color: "#000" }}>Verification failed</p>
               <p style={{ color: "#999", fontSize: "13px", marginTop: "4px" }}>{rejectionReason || "Please try again."}</p>
             </div>
+            {reviewError && <ErrorBanner msg={reviewError} />}
             <button onClick={() => { setStep("selfie"); setSelfieBlob(null); setSelfiePreview(null); setIdFile(null); setIdPreview(null); setDocumentType(null); setStatus("pending"); setError(""); }}
               style={{ width: "100%", padding: "13px", borderRadius: "14px", border: "none", backgroundColor: "#00C853", color: "#fff", fontSize: "14px", fontWeight: "700", cursor: "pointer" }}>
               Try again
             </button>
+            <button onClick={handleRequestManualReview} disabled={requestingReview}
+              style={{ width: "100%", padding: "13px", borderRadius: "14px", border: "1.5px solid #E5E7EB", backgroundColor: "#fff", color: requestingReview ? "#999" : "#000", fontSize: "14px", fontWeight: "700", cursor: requestingReview ? "not-allowed" : "pointer" }}>
+              {requestingReview ? "Requesting..." : "Request manual review"}
+            </button>
+          </>
+        )}
+        {status === "flagged" && (
+          <>
+            <div style={{ width: "64px", height: "64px", borderRadius: "50%", backgroundColor: "#FFFBEB", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "28px" }}>🕵️</div>
+            <div style={{ textAlign: "center" }}>
+              <p style={{ fontWeight: "700", color: "#000" }}>Under manual review</p>
+              <p style={{ color: "#999", fontSize: "13px", marginTop: "4px" }}>A compliance officer is reviewing your documents. We&apos;ll notify you once it&apos;s done.</p>
+            </div>
           </>
         )}
       </div>
