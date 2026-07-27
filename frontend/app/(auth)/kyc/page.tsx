@@ -181,16 +181,34 @@ useEffect(() => {
         },
         runningMode: "VIDEO",
       });
-      if (cancelled || !detector) {
-        detector?.close();
+      if (cancelled) {
+        try {
+          detector?.close();
+        } catch {
+          // The detector may already be closing during async initialization.
+        }
+        return;
+      }
+      if (!detector) {
         return;
       }
 
       const loop = () => {
         if (cancelled || !videoRef.current || !detector) return;
-        if (videoRef.current.readyState >= 2) {
-          const result = detector.detectForVideo(videoRef.current, performance.now());
-          setFaceDetected(result.detections.length > 0);
+        if (
+          videoRef.current.readyState >= 2 &&
+          videoRef.current.videoWidth > 0 &&
+          videoRef.current.videoHeight > 0
+        ) {
+          try {
+            const result = detector.detectForVideo(
+              videoRef.current,
+              performance.now()
+            );
+            setFaceDetected(result.detections.length > 0);
+          } catch (error) {
+            console.warn("MediaPipe face detection skipped:", error);
+          }
         }
         faceDetectRafRef.current = requestAnimationFrame(loop);
       };
@@ -203,7 +221,11 @@ useEffect(() => {
       cancelled = true;
       if (faceDetectRafRef.current) cancelAnimationFrame(faceDetectRafRef.current);
       faceDetectRafRef.current = null;
-      detector?.close();
+      try {
+        detector?.close();
+      } catch {
+        // Ignore cleanup errors from a partially initialized detector.
+      }
     };
   }, [cameraActive]);
 
