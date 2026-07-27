@@ -39,6 +39,7 @@ class User(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     passcode_hash = Column(String(255), nullable=True)
+    email_verified_at = Column(DateTime(timezone=True), nullable=True)
     notification_preferences = Column(
         JSONB().with_variant(JSON, "sqlite"),
         nullable=False,

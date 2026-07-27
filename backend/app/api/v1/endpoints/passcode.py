@@ -13,7 +13,10 @@ from app.core.redis import (
     reset_passcode_attempts,
     store_action_token,
 )
-from app.services.otp import verify_and_consume_otp
+from app.services.otp import (
+    consume_reset_authorization,
+    issue_reset_authorization,
+)
 from app.core.security import hash_password, verify_password
 from app.db.session import get_async_db
 from app.models.user import User
@@ -25,13 +28,20 @@ router = APIRouter()
 
 class SetPasscodeRequest(BaseModel):
     passcode: str = Field(..., min_length=6, max_length=6, pattern=r"^\d{6}$")
-    otp_code: str = Field(..., min_length=6, max_length=6)
 
 
 class ChangePasscodeRequest(BaseModel):
     current_passcode: str = Field(..., min_length=6, max_length=6, pattern=r"^\d{6}$")
     new_passcode: str = Field(..., min_length=6, max_length=6, pattern=r"^\d{6}$")
-    otp_code: str = Field(..., min_length=6, max_length=6)
+
+
+class ReauthenticateRequest(BaseModel):
+    password: str = Field(..., min_length=1)
+
+
+class ResetPasscodeRequest(BaseModel):
+    reset_token: str
+    passcode: str = Field(..., min_length=6, max_length=6, pattern=r"^\d{6}$")
 
 
 class VerifyPasscodeRequest(BaseModel):
@@ -46,14 +56,31 @@ async def _get_user(user_id: str, db: AsyncSession) -> User:
     return user
 
 
+def _reject_weak_passcode(passcode: str) -> None:
+    if (
+        len(set(passcode)) == 1
+        or passcode in {"123456", "654321"}
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Choose a less predictable passcode",
+        )
+
+
 @router.post("/set", summary="Set passcode for the first time")
 async def set_passcode(
     body: SetPasscodeRequest,
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db),
 ):
-    """First-time passcode setup. Requires OTP confirmation."""
+    """First-time passcode setup for an authenticated, verified account."""
     user = await _get_user(current_user.id, db)
+
+    if user.email_verified_at is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Email verification required",
+        )
 
     if user.passcode_hash:
         raise HTTPException(
@@ -61,12 +88,7 @@ async def set_passcode(
             detail="Passcode already set. Use /passcode/change to update it.",
         )
 
-    if not await verify_and_consume_otp(current_user.id, body.otp_code):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired OTP",
-        )
-
+    _reject_weak_passcode(body.passcode)
     user.passcode_hash = hash_password(body.passcode)
     await db.commit()
 
@@ -94,12 +116,7 @@ async def change_passcode(
             detail="Current passcode is incorrect",
         )
 
-    if not await verify_and_consume_otp(current_user.id, body.otp_code):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired OTP",
-        )
-
+    _reject_weak_passcode(body.new_passcode)
     user.passcode_hash = hash_password(body.new_passcode)
     await db.commit()
 
@@ -154,3 +171,33 @@ async def verify_passcode(
         "action_token": action_token,
         "expires_in": 300,
     }
+
+
+@router.post("/reset/reauthenticate", summary="Authorize passcode reset")
+async def authorize_passcode_reset(
+    body: ReauthenticateRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+):
+    user = await _get_user(current_user.id, db)
+    if not verify_password(body.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    token = await issue_reset_authorization("passcode", current_user.id)
+    return {"reset_token": token, "expires_in": 300}
+
+
+@router.post("/reset", summary="Replace passcode after reauthentication")
+async def reset_passcode(
+    body: ResetPasscodeRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+):
+    authorized_user = await consume_reset_authorization("passcode", body.reset_token)
+    if authorized_user != current_user.id:
+        raise HTTPException(status_code=403, detail="Invalid or expired reset authorization")
+    _reject_weak_passcode(body.passcode)
+    user = await _get_user(current_user.id, db)
+    user.passcode_hash = hash_password(body.passcode)
+    await db.commit()
+    await reset_passcode_attempts(current_user.id)
+    return {"message": "Passcode reset successfully"}

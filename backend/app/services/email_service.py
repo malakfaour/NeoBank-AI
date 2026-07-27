@@ -24,7 +24,7 @@ def send_email(
         logger.info("To: %s", to_email)
         logger.info("From: %s", settings.EMAIL_FROM)
         logger.info("Subject: %s", subject)
-        logger.info("Body: %s", body)
+        logger.info("Email body omitted from logs.")
         return
 
     if provider == "smtp":

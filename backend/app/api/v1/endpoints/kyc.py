@@ -23,7 +23,6 @@ from app.tasks.kyc_tasks import process_kyc
 router = APIRouter()
 
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/jpg"}
-SSE_S3_EXTRA_ARGS = {"ServerSideEncryption": "AES256"}
 
 
 def _validate_image_upload(upload: UploadFile, field_name: str) -> None:
@@ -103,7 +102,7 @@ async def upload_kyc_documents(
             upload_file,
             selfie_bytes,
             selfie_key,
-            extra_args={**SSE_S3_EXTRA_ARGS, "ContentType": selfie.content_type},
+            extra_args={"ContentType": selfie.content_type},
         ),
     )
     await loop.run_in_executor(
@@ -112,7 +111,7 @@ async def upload_kyc_documents(
             upload_file,
             id_photo_bytes,
             id_photo_key,
-            extra_args={**SSE_S3_EXTRA_ARGS, "ContentType": id_photo.content_type},
+            extra_args={"ContentType": id_photo.content_type},
         ),
     )
 

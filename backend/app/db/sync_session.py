@@ -14,12 +14,29 @@ already uses for migrations. No asyncio involved, no event-loop risk.
 """
 
 from sqlalchemy import create_engine
+from sqlalchemy.engine import URL, make_url
 from sqlalchemy.orm import sessionmaker
 
 from app.core.config import settings
 
+
+def _sync_database_url(database_url: str) -> URL:
+    """Return a URL backed by a synchronous SQLAlchemy driver."""
+    url = make_url(database_url)
+    drivername = {
+        "postgresql+asyncpg": "postgresql+psycopg2",
+        "sqlite+aiosqlite": "sqlite",
+    }.get(url.drivername, url.drivername)
+
+    query = dict(url.query)
+    if drivername.startswith("postgresql") and "ssl" in query:
+        query.setdefault("sslmode", query.pop("ssl"))
+
+    return url.set(drivername=drivername, query=query)
+
+
 sync_engine = create_engine(
-    settings.DATABASE_URL_DIRECT,
+    _sync_database_url(settings.DATABASE_URL_DIRECT),
     pool_pre_ping=True,
 )
 

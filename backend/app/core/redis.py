@@ -65,10 +65,13 @@ async def rotate_refresh_jti(user_id: str, old_jti: str, new_jti: str) -> None:
     await pipe.execute()
 
 
-async def revoke_all_user_tokens(user_id: str, current_refresh_jti: str) -> None:
+async def revoke_all_user_tokens(user_id: str, current_refresh_jti: str = "") -> None:
     ttl = settings.JWT_REFRESH_EXPIRE_DAYS * 24 * 60 * 60
+    if not current_refresh_jti:
+        current_refresh_jti = await redis_client.get(_user_refresh_key(user_id)) or ""
     pipe = redis_client.pipeline()
-    pipe.set(f"blacklist:{current_refresh_jti}", "1", ex=ttl)
+    if current_refresh_jti:
+        pipe.set(f"blacklist:{current_refresh_jti}", "1", ex=ttl)
     pipe.delete(_user_refresh_key(user_id))
     await pipe.execute()
 

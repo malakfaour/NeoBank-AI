@@ -4,6 +4,7 @@ import Sidebar from "@/components/layout/Sidebar";
 import Header from "@/components/layout/Header";
 import BottomNav from "@/components/layout/BottomNav";
 import ChatWidget from "@/components/chat/ChatWidget";
+import DashboardAuthGate from "@/components/auth/DashboardAuthGate";
 
 export const metadata: Metadata = {
   robots: { index: false, follow: false },
@@ -11,7 +12,7 @@ export const metadata: Metadata = {
 
 export default function DashboardLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
-    <>
+    <DashboardAuthGate>
       <Sidebar />
       <div className="dashboard-main">
         <Header />
@@ -19,6 +20,6 @@ export default function DashboardLayout({ children }: Readonly<{ children: React
       </div>
       <BottomNav />
       <ChatWidget />
-    </>
+    </DashboardAuthGate>
   );
 }

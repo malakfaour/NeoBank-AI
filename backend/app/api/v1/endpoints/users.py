@@ -25,7 +25,6 @@ from app.services.otp import verify_and_consume_otp
 router = APIRouter()
 
 ALLOWED_AVATAR_TYPES = {"image/jpeg", "image/png", "image/jpg"}
-SSE_S3_EXTRA_ARGS = {"ServerSideEncryption": "AES256", "ContentType": "image/jpeg"}
 
 
 async def _get_user_or_404(db: AsyncSession, current_user: CurrentUser) -> User:
@@ -200,7 +199,7 @@ async def upload_avatar(
             upload_file,
             resized,
             avatar_key,
-            extra_args=SSE_S3_EXTRA_ARGS,
+            extra_args={"ContentType": "image/jpeg"},
         ),
     )
 
