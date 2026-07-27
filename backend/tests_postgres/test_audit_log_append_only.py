@@ -28,6 +28,7 @@ The actual assertion this test makes has nothing to do with send_money's
 business logic -- only with whether the resulting audit log row can be
 updated. No production file is modified.
 """
+from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
@@ -52,7 +53,26 @@ async def _register_user(client, label: str, password: str = "TestPass123") -> d
     # is passed to @router.post("/register", ...), so FastAPI's default
     # (200, not 201) applies.
     assert response.status_code == 200, response.text
-    return response.json()
+
+    # Registration intentionally no longer authenticates an unverified
+    # account. Email delivery/OTP verification is covered by the auth suite;
+    # this money-path test marks its fixture user verified in the database,
+    # then obtains tokens through the real email/password login endpoint.
+    from app.db.session import AsyncSessionLocal
+    from app.models.user import User
+
+    async with AsyncSessionLocal() as db:
+        user = await db.scalar(select(User).where(User.email == email))
+        assert user is not None
+        user.email_verified_at = datetime.now(timezone.utc)
+        await db.commit()
+
+    login_response = await client.post(
+        "/api/v1/auth/login",
+        json={"email": email, "password": password},
+    )
+    assert login_response.status_code == 200, login_response.text
+    return login_response.json()
 
 
 @pytest.mark.postgres

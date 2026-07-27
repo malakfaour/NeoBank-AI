@@ -1,0 +1,62 @@
+# Local Python environments
+venv/
+.venv/
+**/venv/
+**/.venv/
+
+# Python bytecode and tool caches
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+**/*.pyc
+**/*.pyo
+**/*.pyd
+.pytest_cache/
+**/.pytest_cache/
+.mypy_cache/
+**/.mypy_cache/
+.ruff_cache/
+**/.ruff_cache/
+.cache/
+**/.cache/
+
+# Source-control and local editor metadata
+.git/
+**/.git/
+.gitignore
+.vscode/
+**/.vscode/
+.idea/
+**/.idea/
+
+# Local environment files and secrets
+.env
+.env.*
+**/.env
+**/.env.*
+
+# Tests, coverage output, and local databases
+test_neobank.db
+test_*.db
+*.sqlite
+*.sqlite3
+.coverage
+.coverage.*
+htmlcov/
+test-results/
+
+# Logs and runtime artifacts
+*.log
+logs/
+**/logs/
+*.pid
+
+# Package/build output
+build/
+**/build/
+dist/
+**/dist/
+*.egg-info/
+**/*.egg-info/

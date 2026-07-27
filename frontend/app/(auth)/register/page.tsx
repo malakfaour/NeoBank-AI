@@ -1,113 +1,76 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import api from "@/lib/axios";
+import AuthCard from "@/components/auth/AuthCard";
+import PasswordInput from "@/components/auth/PasswordInput";
+import { normalizeLebanesePhone, passwordError, passwordRules } from "@/lib/authValidation";
 
 export default function RegisterPage() {
   const router = useRouter();
-  const [form, setForm] = useState({ full_name: "", email: "", phone: "", password: "" });
-  const [errors, setErrors] = useState<{ full_name?: string; email?: string; phone?: string; password?: string; general?: string }>({});
+  const [form, setForm] = useState({ full_name: "", email: "", phone: "", password: "", confirm: "", accepted: false });
+  const [errors, setErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
 
-  const validate = () => {
-    const e: typeof errors = {};
-    if (!form.full_name.trim()) e.full_name = "Full name is required.";
-    if (!form.email.trim()) e.email = "Email is required.";
-    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) e.email = "Enter a valid email.";
-    if (!form.phone.trim()) e.phone = "Phone number is required.";
-    else if (!/^[0-9]{7,8}$/.test(form.phone.trim().replace(/\s/g, ""))) e.phone = "Enter a valid Lebanese number (e.g. 70 123 456).";
-    if (!form.password) e.password = "Password is required.";
-    else if (form.password.length < 8) e.password = "Password must be at least 8 characters.";
-    return e;
-  };
-
-  const handleSubmit = async () => {
-    const e = validate();
-    if (Object.keys(e).length) { setErrors(e); return; }
-    setErrors({});
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    const next: Record<string, string> = {};
+    const phone = normalizeLebanesePhone(form.phone);
+    if (!form.full_name.trim()) next.full_name = "Full name is required.";
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) next.email = "Enter a valid email.";
+    if (!phone) next.phone = "Enter a valid Lebanese mobile number.";
+    const passwordMessage = passwordError(form.password);
+    if (passwordMessage) next.password = passwordMessage;
+    if (form.password !== form.confirm) next.confirm = "Passwords do not match.";
+    if (!form.accepted) next.accepted = "You must accept the Terms and Privacy Policy.";
+    if (Object.keys(next).length) return setErrors(next);
     setLoading(true);
+    setErrors({});
     try {
-      await api.post("/auth/register", {
-        full_name: form.full_name.trim(),
-        email: form.email.trim(),
-        phone: `+961${form.phone.trim().replace(/\s/g, "")}`,
-        password: form.password,
-      });
-      router.push("/login");
-    } catch (err: unknown) {
-      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setErrors({ general: typeof detail === "string" ? detail : "Registration failed. Please try again." });
+      await api.post("/auth/register", { full_name: form.full_name.trim(), email: form.email.trim().toLowerCase(), phone, password: form.password });
+      sessionStorage.setItem("verification_email", form.email.trim().toLowerCase());
+      router.replace("/verify-registration-otp");
+    } catch (error: unknown) {
+      const detail = (error as { response?: { data?: { detail?: string } } }).response?.data?.detail;
+      if ((error as { response?: { status?: number } }).response?.status === 503) {
+        sessionStorage.setItem("verification_email", form.email.trim().toLowerCase());
+        sessionStorage.setItem("verification_delivery_error", typeof detail === "string" ? detail : "Email delivery failed.");
+        router.replace("/verify-registration-otp");
+      } else {
+        setErrors({ general: typeof detail === "string" ? detail : "Registration failed. Please try again." });
+      }
     } finally { setLoading(false); }
-  };
+  }
+
+  const field = (name: "full_name" | "email" | "phone", label: string, type = "text") => (
+    <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#333", marginBottom: 16 }}>
+      {label}
+      <input type={type} value={form[name]} onChange={(e) => setForm({ ...form, [name]: e.target.value })} autoComplete={name === "email" ? "email" : name === "full_name" ? "name" : "tel"} style={{ display: "block", width: "100%", boxSizing: "border-box", marginTop: 8, border: `1.5px solid ${errors[name] ? "#EF4444" : "#E5E7EB"}`, borderRadius: 14, padding: "12px 16px", outline: 0 }} />
+      {errors[name] && <span style={{ display: "block", color: "#EF4444", fontSize: 12, marginTop: 6 }}>{errors[name]}</span>}
+    </label>
+  );
 
   return (
-    <div style={{ minHeight: "100vh", backgroundColor: "#F5F5F5", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "20px" }}>
-      <div style={{ marginBottom: "32px", textAlign: "center" }}>
-      <img src="/logo.svg" alt="NeoBank Lebanon" style={{ width: "160px", height: "auto" }} />    </div>
-
-      <div style={{ width: "100%", maxWidth: "380px", backgroundColor: "#fff", borderRadius: "24px", padding: "28px", boxShadow: "0 2px 20px rgba(0,0,0,0.08)" }}>
-        <h2 style={{ fontSize: "22px", fontWeight: "700", color: "#000", marginBottom: "4px" }}>Create account</h2>
-        <p style={{ color: "#999", fontSize: "13px", marginBottom: "20px" }}>Join NeoBank Lebanon today</p>
-
-        {errors.general && (
-          <div style={{ backgroundColor: "#FEF2F2", border: "1px solid #FECACA", borderRadius: "12px", padding: "12px 16px", color: "#DC2626", fontSize: "13px", marginBottom: "16px" }}>
-            {errors.general}
-          </div>
-        )}
-
-        {/* Full name */}
-        <div style={{ marginBottom: "16px" }}>
-          <label style={{ display: "block", fontSize: "13px", fontWeight: "600", color: "#333", marginBottom: "8px" }}>Full name</label>
-          <input type="text" placeholder="Lana Nasserdine" value={form.full_name}
-            onChange={(e) => setForm({ ...form, full_name: e.target.value })}
-            style={{ width: "100%", border: `1.5px solid ${errors.full_name ? "#EF4444" : "#E5E7EB"}`, borderRadius: "14px", padding: "12px 16px", fontSize: "14px", color: "#000", outline: "none", boxSizing: "border-box" }} />
-          {errors.full_name && <p style={{ color: "#EF4444", fontSize: "12px", marginTop: "6px" }}>{errors.full_name}</p>}
-        </div>
-
-        {/* Email */}
-        <div style={{ marginBottom: "16px" }}>
-          <label style={{ display: "block", fontSize: "13px", fontWeight: "600", color: "#333", marginBottom: "8px" }}>Email</label>
-          <input type="email" placeholder="you@example.com" value={form.email}
-            onChange={(e) => setForm({ ...form, email: e.target.value })}
-            style={{ width: "100%", border: `1.5px solid ${errors.email ? "#EF4444" : "#E5E7EB"}`, borderRadius: "14px", padding: "12px 16px", fontSize: "14px", color: "#000", outline: "none", boxSizing: "border-box" }} />
-          {errors.email && <p style={{ color: "#EF4444", fontSize: "12px", marginTop: "6px" }}>{errors.email}</p>}
-        </div>
-
-        {/* Phone */}
-        <div style={{ marginBottom: "16px" }}>
-          <label style={{ display: "block", fontSize: "13px", fontWeight: "600", color: "#333", marginBottom: "8px" }}>Mobile number</label>
-          <div style={{ display: "flex", alignItems: "center", border: `1.5px solid ${errors.phone ? "#EF4444" : "#E5E7EB"}`, borderRadius: "14px", padding: "12px 16px", gap: "10px", backgroundColor: "#fff" }}>
-            <span style={{ fontSize: "13px", color: "#666", whiteSpace: "nowrap" }}>🇱🇧 +961</span>
-            <div style={{ width: "1px", height: "16px", backgroundColor: "#E5E7EB" }} />
-            <input type="tel" placeholder="70 123 456" value={form.phone}
-              onChange={(e) => setForm({ ...form, phone: e.target.value })}
-              style={{ flex: 1, border: "none", outline: "none", fontSize: "14px", color: "#000", backgroundColor: "transparent" }} />
-          </div>
-          {errors.phone && <p style={{ color: "#EF4444", fontSize: "12px", marginTop: "6px" }}>{errors.phone}</p>}
-        </div>
-
-        {/* Password */}
-        <div style={{ marginBottom: "24px" }}>
-          <label style={{ display: "block", fontSize: "13px", fontWeight: "600", color: "#333", marginBottom: "8px" }}>Password</label>
-          <input type="password" placeholder="••••••" value={form.password}
-            onChange={(e) => setForm({ ...form, password: e.target.value })}
-            onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
-            style={{ width: "100%", border: `1.5px solid ${errors.password ? "#EF4444" : "#E5E7EB"}`, borderRadius: "14px", padding: "12px 16px", fontSize: "14px", color: "#000", outline: "none", boxSizing: "border-box" }} />
-          {errors.password && <p style={{ color: "#EF4444", fontSize: "12px", marginTop: "6px" }}>{errors.password}</p>}
-        </div>
-
-        <button onClick={handleSubmit} disabled={loading}
-          style={{ width: "100%", backgroundColor: loading ? "#86EFAC" : "#00C853", color: "#fff", fontWeight: "700", fontSize: "15px", border: "none", borderRadius: "14px", padding: "14px", cursor: loading ? "not-allowed" : "pointer" }}>
-          {loading ? "Creating account..." : "Create account"}
-        </button>
-
-        <p style={{ textAlign: "center", color: "#999", fontSize: "13px", marginTop: "16px" }}>
-          Already have an account?{" "}
-          <Link href="/login" style={{ color: "#00C853", fontWeight: "600", textDecoration: "none" }}>Sign in</Link>
-        </p>
-      </div>
-    </div>
+    <AuthCard title="Create account" subtitle="Join NeoBank Lebanon today">
+      <form onSubmit={submit} noValidate>
+        {errors.general && <p role="alert" style={{ color: "#B91C1C", background: "#FEF2F2", padding: 12, borderRadius: 12 }}>{errors.general}</p>}
+        {field("full_name", "Full name")}
+        {field("email", "Email", "email")}
+        {field("phone", "Mobile number (+961)", "tel")}
+        <PasswordInput label="Password" value={form.password} onChange={(password) => setForm({ ...form, password })} autoComplete="new-password" error={errors.password} />
+        <ul style={{ margin: "-8px 0 16px", paddingLeft: 20, fontSize: 12, color: "#666" }}>
+          {passwordRules.map((rule) => <li key={rule.label} style={{ color: rule.test(form.password) ? "#00A844" : "#777" }}>{rule.label}</li>)}
+        </ul>
+        <PasswordInput label="Confirm password" value={form.confirm} onChange={(confirm) => setForm({ ...form, confirm })} autoComplete="new-password" error={errors.confirm} />
+        <label style={{ display: "flex", gap: 10, fontSize: 13, color: "#555", marginBottom: 18 }}>
+          <input type="checkbox" checked={form.accepted} onChange={(e) => setForm({ ...form, accepted: e.target.checked })} />
+          <span>I agree to the Terms and Privacy Policy.{errors.accepted && <span style={{ display: "block", color: "#EF4444" }}>{errors.accepted}</span>}</span>
+        </label>
+        <button type="submit" disabled={loading} style={{ width: "100%", background: loading ? "#86EFAC" : "#00C853", color: "#fff", border: 0, borderRadius: 14, padding: 14, fontWeight: 700, cursor: loading ? "not-allowed" : "pointer" }}>{loading ? "Creating account…" : "Create account"}</button>
+      </form>
+      <p style={{ textAlign: "center", fontSize: 13, color: "#777" }}>Already have an account? <Link href="/login" style={{ color: "#00A844" }}>Sign in</Link></p>
+    </AuthCard>
   );
 }
