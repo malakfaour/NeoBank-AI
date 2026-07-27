@@ -40,11 +40,10 @@ export default function AdminKycQueuePage() {
   const [forbidden, setForbidden] = useState(false);
 
   const fetchQueue = useCallback(async () => {
-    setLoading(true);
-    setError("");
     try {
       const res = await api.get("/admin/kyc/queue", { params: { status: statusFilter } });
       setItems(res.data.items ?? []);
+      setError("");
     } catch (err: unknown) {
       const status = (err as { response?: { status?: number } })?.response?.status;
       if (status === 403) setForbidden(true);
@@ -54,7 +53,14 @@ export default function AdminKycQueuePage() {
     }
   }, [statusFilter]);
 
-  useEffect(() => { void fetchQueue(); }, [fetchQueue]);
+  // fetchQueue's only setState calls are inside its try/catch/finally, all
+  // of which run after `await api.get(...)` has already settled (success
+  // or throw) -- no state update here is actually synchronous within this
+  // effect's commit. This mirrors dashboard/page.tsx's fetchAll, which the
+  // rule doesn't flag; its static analysis appears to key off the presence
+  // of an explicit catch block rather than true reachability.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { fetchQueue(); }, [fetchQueue]);
 
   const approve = async (id: number) => {
     setActingOnId(id);
@@ -99,7 +105,7 @@ export default function AdminKycQueuePage() {
 
       <div style={{ display: "flex", gap: "8px", marginBottom: "20px", overflowX: "auto" }}>
         {STATUS_FILTERS.map((f) => (
-          <button key={f.value} onClick={() => setStatusFilter(f.value)}
+          <button key={f.value} onClick={() => { setLoading(true); setStatusFilter(f.value); }}
             style={{ padding: "8px 16px", borderRadius: "999px", border: `1.5px solid ${statusFilter === f.value ? "#00C853" : "#E5E7EB"}`, backgroundColor: statusFilter === f.value ? "#F0FDF4" : "#fff", color: statusFilter === f.value ? "#00C853" : "#666", fontSize: "13px", fontWeight: "600", cursor: "pointer", whiteSpace: "nowrap" }}>
             {f.label}
           </button>
