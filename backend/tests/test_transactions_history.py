@@ -45,6 +45,7 @@ from uuid import uuid4
 from sqlalchemy import select
 
 from app.db.session import AsyncSessionLocal
+from app.models.transaction_audit_log import TransactionAuditLog
 from app.models.user import User
 from app.models.wallet import Wallet, WalletCurrency
 from app.utils.transaction_query_utils import compute_total_pages, parse_summary_month
@@ -200,6 +201,55 @@ async def test_get_transaction_detail_for_topup_has_no_counterparty(client):
     assert detail["type"] == "topup"
     assert detail["counterparty_name"] is None
     assert detail["sender_id"] == detail["receiver_id"]
+
+
+@pytest.mark.anyio
+async def test_get_transaction_detail_surfaces_rule_name_from_audit_log(client):
+    """
+    Regression test: rule_triggered on TransactionDetailResponse is typed
+    str | None (the rule NAME, e.g. "new_recipient_high_amount") for
+    display purposes, but Transaction.rule_triggered on the model is a
+    bare Boolean -- the endpoint was hardcoding this field to None
+    instead of pulling the actual rule name out of the "fraud_scored"
+    audit log entry's metadata (written by
+    app/tasks/transaction_tasks.py's score_transaction).
+    """
+    tokens = await _register_user(client, "history-rule-name")
+    user, wallet = await _get_user_and_wallet(tokens["email"])
+
+    await _top_up(client, tokens["access_token"], wallet.id, "17.00")
+
+    list_response = await client.get(
+        "/api/v1/transactions",
+        headers={"Authorization": f"Bearer {tokens['access_token']}"},
+    )
+    transaction_id = list_response.json()["items"][0]["id"]
+
+    # Simulate what score_transaction writes on a rule-triggered flag --
+    # this test doesn't re-verify the scoring task itself (covered in
+    # test_transaction_tasks.py), only that the detail endpoint correctly
+    # reads the rule name back out once it's there.
+    async with AsyncSessionLocal() as db:
+        db.add(
+            TransactionAuditLog(
+                transaction_id=transaction_id,
+                action="fraud_scored",
+                actor_id=user.id,
+                event_metadata={
+                    "fraud_score": 0.0,
+                    "rule_triggered": True,
+                    "rule_name": "new_recipient_high_amount",
+                },
+            )
+        )
+        await db.commit()
+
+    detail_response = await client.get(
+        f"/api/v1/transactions/{transaction_id}",
+        headers={"Authorization": f"Bearer {tokens['access_token']}"},
+    )
+    assert detail_response.status_code == 200, detail_response.text
+    assert detail_response.json()["rule_triggered"] == "new_recipient_high_amount"
 
 
 @pytest.mark.anyio

@@ -490,6 +490,19 @@ async def get_transaction_detail(
     )
     audit_logs = audit_result.scalars().all()
 
+    # DEVATTECH-fraud-detail: rule_triggered is typed str | None (the rule
+    # NAME, e.g. "new_recipient_high_amount") for display purposes, but
+    # Transaction.rule_triggered on the model is a bare Boolean -- the name
+    # itself only exists in the "fraud_scored" audit log entry's metadata
+    # (see app/tasks/transaction_tasks.py). Pull it from there rather than
+    # hardcoding None, so a flagged transaction's detail view can actually
+    # explain *why* it was flagged instead of just showing that it was.
+    rule_name: str | None = None
+    for log in audit_logs:
+        if log.action == "fraud_scored" and log.event_metadata:
+            rule_name = log.event_metadata.get("rule_name")
+            break
+
     return TransactionDetailResponse(
         id=transaction.id,
         sender_id=transaction.sender_id,
@@ -500,7 +513,7 @@ async def get_transaction_detail(
         counterparty_name=counterparty.full_name if counterparty else None,
         category=transaction.category,
         fraud_score=transaction.fraud_score,
-        rule_triggered=None,
+        rule_triggered=rule_name,
         status=transaction.status.value,
         flagged=transaction.status == TransactionStatus.flagged,
         created_at=transaction.created_at,

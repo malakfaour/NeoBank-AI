@@ -16,6 +16,31 @@ interface Transaction {
   receiver_id: number;
 }
 
+interface TransactionAuditLogItem {
+  id: number;
+  action: string;
+  actor_id: number | null;
+  timestamp: string;
+  metadata: Record<string, unknown> | null;
+}
+
+interface TransactionDetail {
+  id: number;
+  sender_id: number;
+  receiver_id: number;
+  type: string;
+  amount: number;
+  currency: string;
+  counterparty_name: string | null;
+  category: string | null;
+  fraud_score: number | null;
+  rule_triggered: string | null;
+  status: string;
+  flagged: boolean;
+  created_at: string;
+  audit_logs: TransactionAuditLogItem[];
+}
+
 function timeAgo(d: string) {
   const diff = Math.floor((Date.now() - new Date(d).getTime()) / 1000);
   if (diff < 60) return `${diff}s ago`;
@@ -29,6 +54,27 @@ const categoryColor: Record<string, string> = {
   TopUp: "#00C853", Reversal: "#EF4444", Default: "#6B7280",
 };
 
+// Human-readable explanations for each fraud_rules.py rule name, shown in
+// the flagged-transaction detail view (Section 13, item 89 -- a flagged
+// transaction previously showed only the bare word "flagged" with no
+// explanation and wasn't even clickable).
+const RULE_EXPLANATIONS: Record<string, string> = {
+  excessive_amount_vs_average:
+    "This amount is much larger than your typical transfers over the last 30 days.",
+  rapid_multi_recipient:
+    "Several transfers were sent to different recipients in a short window of time.",
+  new_recipient_high_amount:
+    "A relatively large amount was sent to a recipient you haven&apos;t sent to before.",
+};
+
+function ruleExplanation(ruleName: string | null): string {
+  if (ruleName && RULE_EXPLANATIONS[ruleName]) return RULE_EXPLANATIONS[ruleName];
+  // Flagged with no specific rule name -- e.g. an ML score crossed the
+  // threshold, or fraud scoring itself failed and the transaction was
+  // conservatively flagged for manual review as a safe default.
+  return "This transaction has been flagged for manual review by our fraud detection system.";
+}
+
 function TxIcon({ category }: { category: string }) {
   const color = categoryColor[category] ?? categoryColor.Default;
   if (category === "Transfer") return <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>;
@@ -38,6 +84,69 @@ function TxIcon({ category }: { category: string }) {
   return <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>;
 }
 
+function TransactionDetailModal({ transactionId, onClose }: { transactionId: number; onClose: () => void }) {
+  const [detail, setDetail] = useState<TransactionDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    api.get(`/transactions/${transactionId}`)
+      .then((res) => { if (!cancelled) setDetail(res.data); })
+      .catch(() => { if (!cancelled) setError("Could not load transaction details."); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [transactionId]);
+
+  return (
+    <div
+      onClick={onClose}
+      style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", padding: "20px", zIndex: 50 }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{ backgroundColor: "#fff", borderRadius: "20px", padding: "24px", width: "100%", maxWidth: "420px", maxHeight: "85vh", overflowY: "auto" }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+          <h3 style={{ fontSize: "16px", fontWeight: "700", color: "#000" }}>Transaction Details</h3>
+          <button onClick={onClose} style={{ border: "none", background: "none", cursor: "pointer", fontSize: "18px", color: "#999" }}>✕</button>
+        </div>
+
+        {loading && <p style={{ color: "#aaa", fontSize: "14px" }}>Loading...</p>}
+        {error && <p style={{ color: "#EF4444", fontSize: "14px" }}>{error}</p>}
+
+        {detail && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+            {detail.flagged && (
+              <div style={{ backgroundColor: "#FEF2F2", border: "1px solid #FECACA", borderRadius: "14px", padding: "14px" }}>
+                <p style={{ fontSize: "13px", fontWeight: "700", color: "#DC2626", marginBottom: "6px" }}>⚠️ Flagged for review</p>
+                <p style={{ fontSize: "13px", color: "#7F1D1D" }}>{ruleExplanation(detail.rule_triggered)}</p>
+                <p style={{ fontSize: "12px", color: "#991B1B", marginTop: "8px" }}>
+                  This transaction already completed -- funds were transferred normally. Flagging means it&apos;s
+                  been sent to our compliance team for review, not that it was blocked.
+                </p>
+              </div>
+            )}
+
+            {[
+              { label: "Amount", value: `${detail.amount.toLocaleString()} ${detail.currency}` },
+              { label: "Category", value: detail.category ?? "—" },
+              { label: "Counterparty", value: detail.counterparty_name ?? "—" },
+              { label: "Status", value: detail.status },
+              { label: "Date", value: new Date(detail.created_at).toLocaleString() },
+            ].map(({ label, value }) => (
+              <div key={label} style={{ display: "flex", justifyContent: "space-between" }}>
+                <p style={{ color: "#aaa", fontSize: "13px" }}>{label}</p>
+                <p style={{ color: "#000", fontSize: "13px", fontWeight: "600", textTransform: "capitalize" }}>{value}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function TransactionsPage() {
   const router = useRouter();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -45,6 +154,7 @@ export default function TransactionsPage() {
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [filter, setFilter] = useState("all");
+  const [selectedTxId, setSelectedTxId] = useState<number | null>(null);
   const pageSize = 20;
 
 
@@ -100,7 +210,8 @@ useEffect(() => {
             <p style={{ color: "#aaa", fontSize: "14px" }}>No transactions found</p>
           </div>
         ) : transactions.map((tx, i) => (
-          <div key={tx.id} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "14px 16px", borderBottom: i < transactions.length - 1 ? "1px solid #F5F5F5" : "none" }}>
+          <div key={tx.id} onClick={() => setSelectedTxId(tx.id)}
+            style={{ display: "flex", alignItems: "center", gap: "12px", padding: "14px 16px", borderBottom: i < transactions.length - 1 ? "1px solid #F5F5F5" : "none", cursor: "pointer" }}>
             <div style={{ width: "36px", height: "36px", borderRadius: "12px", backgroundColor: "#F5F5F5", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
               <TxIcon category={tx.category} />
             </div>
@@ -133,6 +244,10 @@ useEffect(() => {
             Next
           </button>
         </div>
+      )}
+
+      {selectedTxId !== null && (
+        <TransactionDetailModal transactionId={selectedTxId} onClose={() => setSelectedTxId(null)} />
       )}
     </div>
   );
