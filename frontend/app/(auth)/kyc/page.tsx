@@ -117,9 +117,11 @@ export default function KYCPage() {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
   const [cameraActive, setCameraActive] = useState(false);
+  const [faceDetected, setFaceDetected] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const pollRef = useRef<NodeJS.Timeout | null>(null);
+  const faceDetectRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     void getPostAuthDestination().then((destination) => {
@@ -138,6 +140,9 @@ export default function KYCPage() {
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     setCameraActive(false);
+    setFaceDetected(false);
+    if (faceDetectRef.current) clearInterval(faceDetectRef.current);
+    faceDetectRef.current = null;
   }, []);
 
   const startCamera = useCallback(async () => {
@@ -157,6 +162,27 @@ useEffect(() => {
 }, [step, startCamera, stopCamera]);
 
   useEffect(() => () => { clearInterval(pollRef.current!); }, []);
+
+  useEffect(() => {
+    if (!cameraActive) return;
+    type BrowserFaceDetector = { detect: (source: HTMLVideoElement) => Promise<unknown[]> };
+    const FaceDetectorCtor = (window as unknown as { FaceDetector?: new () => BrowserFaceDetector }).FaceDetector;
+    if (!FaceDetectorCtor) return;
+    const detector = new FaceDetectorCtor();
+    faceDetectRef.current = setInterval(async () => {
+      if (!videoRef.current) return;
+      try {
+        const faces = await detector.detect(videoRef.current);
+        setFaceDetected(faces.length > 0);
+      } catch {
+        /* ignore transient detection errors */
+      }
+    }, 400);
+    return () => {
+      if (faceDetectRef.current) clearInterval(faceDetectRef.current);
+      faceDetectRef.current = null;
+    };
+  }, [cameraActive]);
 
   const captureSelfie = () => {
     if (!videoRef.current) return;
@@ -207,8 +233,13 @@ useEffect(() => {
           {cameraActive && (
             <>
               <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
-                <div style={{ width: "180px", height: "240px", borderRadius: "50%", border: "2px dashed #00C853", opacity: 0.7 }} />
+                <div style={{ width: "180px", height: "240px", borderRadius: "50%", border: `2px dashed ${faceDetected ? "#00C853" : "#E5E7EB"}`, opacity: 0.9, transition: "border-color 0.2s" }} />
               </div>
+              {faceDetected && (
+                <div style={{ position: "absolute", top: "16px", left: "50%", transform: "translateX(-50%)", backgroundColor: "#00C853", color: "#fff", fontSize: "12px", fontWeight: "700", padding: "6px 14px", borderRadius: "999px", display: "flex", alignItems: "center", gap: "6px" }}>
+                  ✓ Face detected
+                </div>
+              )}
               <button onClick={captureSelfie} style={{ position: "absolute", bottom: "20px", left: "50%", transform: "translateX(-50%)", width: "64px", height: "64px", borderRadius: "50%", backgroundColor: "#00C853", border: "4px solid #fff", cursor: "pointer", boxShadow: "0 4px 12px rgba(0,0,0,0.2)" }} />
             </>
           )}
