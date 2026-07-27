@@ -12,11 +12,14 @@ logic, etc.) -- it only catches the specific regression class where a new
 route is added and someone forgets Depends(get_current_user) / require_role.
 """
 import re
+from datetime import datetime, timezone
 
 import pytest
 from fastapi.routing import APIRoute
 
 from app.main import app
+from app.models.user import User
+from sqlalchemy import select
 
 # Routes that are deliberately public -- must match exactly (method, path).
 # Path is the raw FastAPI path template, e.g. "/api/v1/auth/login".
@@ -26,6 +29,11 @@ _PUBLIC_ROUTES: set[tuple[str, str]] = {
     ("GET", "/health/ready"),
     ("POST", "/api/v1/auth/register"),
     ("POST", "/api/v1/auth/login"),
+    ("POST", "/api/v1/auth/registration/verify-otp"),
+    ("POST", "/api/v1/auth/registration/resend-otp"),
+    ("POST", "/api/v1/auth/password/forgot"),
+    ("POST", "/api/v1/auth/password/verify-otp"),
+    ("POST", "/api/v1/auth/password/reset"),
     ("POST", "/api/v1/auth/biometric/login"),
     ("POST", "/api/v1/auth/refresh"),
     ("POST", "/api/v1/auth/logout"),
@@ -48,7 +56,7 @@ _PATH_PARAM_RE = re.compile(r"\{[^}]+\}")
 
 
 @pytest.fixture
-async def auth_tokens(client):
+async def auth_tokens(client, db_session):
     """Register and login a plain customer test user, return tokens."""
     await client.post("/api/v1/auth/register", json={
         "full_name": "Security Matrix Test User",
@@ -56,6 +64,11 @@ async def auth_tokens(client):
         "phone": "+96170000098",
         "password": "TestPass123",
     })
+    user = await db_session.scalar(
+        select(User).where(User.email == "securitymatrixtest@neobank.com")
+    )
+    user.email_verified_at = datetime.now(timezone.utc)
+    await db_session.commit()
     response = await client.post("/api/v1/auth/login", json={
         "email": "securitymatrixtest@neobank.com",
         "password": "TestPass123",

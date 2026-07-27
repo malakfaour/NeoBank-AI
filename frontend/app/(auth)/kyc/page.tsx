@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import api from "@/lib/axios";
+import { getPostAuthDestination } from "@/lib/postAuthNavigation";
 
 type Step = "selfie" | "document_type" | "id_upload" | "status";
 type KYCStatus = "pending" | "approved" | "rejected" | "flagged";
@@ -112,12 +113,26 @@ export default function KYCPage() {
   const [idPreview, setIdPreview] = useState<string | null>(null);
   const [documentType, setDocumentType] = useState<KYCDocumentType | null>(null);
   const [status, setStatus] = useState<KYCStatus>("pending");
+  const [rejectionReason, setRejectionReason] = useState("");
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
   const [cameraActive, setCameraActive] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const pollRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    void getPostAuthDestination().then((destination) => {
+      if (destination !== "/kyc") router.replace(destination);
+    });
+    api.get("/auth/status").then((response) => {
+      if (response.data.kyc_onboarding_state === "rejected") {
+        setStatus("rejected");
+        setRejectionReason(response.data.kyc_rejection_reason ?? "");
+        setStep("status");
+      }
+    }).catch(() => {});
+  }, [router]);
 
   const stopCamera = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -297,7 +312,7 @@ useEffect(() => {
             <div style={{ width: "64px", height: "64px", borderRadius: "50%", backgroundColor: "#FEF2F2", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "28px" }}>❌</div>
             <div style={{ textAlign: "center" }}>
               <p style={{ fontWeight: "700", color: "#000" }}>Verification failed</p>
-              <p style={{ color: "#999", fontSize: "13px", marginTop: "4px" }}>{status === "flagged" ? "Under manual review." : "Please try again."}</p>
+              <p style={{ color: "#999", fontSize: "13px", marginTop: "4px" }}>{status === "flagged" ? "Under manual review." : rejectionReason || "Please try again."}</p>
             </div>
             {status === "rejected" && (
               <button onClick={() => { setStep("selfie"); setSelfieBlob(null); setSelfiePreview(null); setIdFile(null); setIdPreview(null); setDocumentType(null); setStatus("pending"); }}
