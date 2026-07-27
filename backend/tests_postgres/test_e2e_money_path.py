@@ -51,6 +51,7 @@ provide_isolation_forest_model fixture (conftest.py), since
 isolation_forest.pkl was moved to S3 by DEVATTECH-143 and is not
 available in CI (no real S3/MinIO configured there, by design).
 """
+from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import uuid4
 
@@ -72,7 +73,26 @@ async def _register_user(client, label: str, password: str = "TestPass123") -> d
         },
     )
     assert response.status_code == 200, response.text
-    return response.json()
+
+    # Registration now correctly stops before authentication until the email
+    # OTP is verified. OTP delivery is outside this money-path test's scope,
+    # so verify the fixture user directly and use the real login endpoint to
+    # establish the session consumed by the remainder of this E2E path.
+    from app.db.session import AsyncSessionLocal
+    from app.models.user import User
+
+    async with AsyncSessionLocal() as db:
+        user = await db.scalar(select(User).where(User.email == email))
+        assert user is not None
+        user.email_verified_at = datetime.now(timezone.utc)
+        await db.commit()
+
+    login_response = await client.post(
+        "/api/v1/auth/login",
+        json={"email": email, "password": password},
+    )
+    assert login_response.status_code == 200, login_response.text
+    return login_response.json()
 
 
 async def _register_reviewer(client, label: str) -> dict:
@@ -258,4 +278,3 @@ async def test_full_money_path_register_topup_send_score_audit_reversal(
         final_audit_actions = [row.action for row in result.scalars().all()]
 
     assert "reversed" in final_audit_actions
-    
