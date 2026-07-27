@@ -189,7 +189,7 @@ useEffect(() => {
           const s: KYCStatus = res.data.kyc_status;
           setStatus(s);
           if (s === "approved") { clearInterval(pollRef.current!); setTimeout(() => router.push("/dashboard"), 2000); }
-          else if (s === "rejected") clearInterval(pollRef.current!);
+          else if (s === "rejected" || s === "flagged") clearInterval(pollRef.current!);
         } catch { /* ignore poll errors */ }
       }, 5000);
     } catch (err: unknown) {
@@ -312,14 +312,12 @@ useEffect(() => {
             <div style={{ width: "64px", height: "64px", borderRadius: "50%", backgroundColor: "#FEF2F2", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "28px" }}>❌</div>
             <div style={{ textAlign: "center" }}>
               <p style={{ fontWeight: "700", color: "#000" }}>Verification failed</p>
-              <p style={{ color: "#999", fontSize: "13px", marginTop: "4px" }}>{status === "flagged" ? "Under manual review." : rejectionReason || "Please try again."}</p>
+              <p style={{ color: "#999", fontSize: "13px", marginTop: "4px" }}>{rejectionReason || "Please try again."}</p>
             </div>
-            {status === "rejected" && (
-              <button onClick={() => { setStep("selfie"); setSelfieBlob(null); setSelfiePreview(null); setIdFile(null); setIdPreview(null); setDocumentType(null); setStatus("pending"); }}
-                style={{ width: "100%", padding: "13px", borderRadius: "14px", border: "none", backgroundColor: "#00C853", color: "#fff", fontSize: "14px", fontWeight: "700", cursor: "pointer" }}>
-                Try again
-              </button>
-            )}
+            <button onClick={() => { setStep("selfie"); setSelfieBlob(null); setSelfiePreview(null); setIdFile(null); setIdPreview(null); setDocumentType(null); setStatus("pending"); setError(""); }}
+              style={{ width: "100%", padding: "13px", borderRadius: "14px", border: "none", backgroundColor: "#00C853", color: "#fff", fontSize: "14px", fontWeight: "700", cursor: "pointer" }}>
+              Try again
+            </button>
           </>
         )}
       </div>

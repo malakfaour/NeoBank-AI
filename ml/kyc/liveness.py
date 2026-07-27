@@ -9,12 +9,19 @@ def liveness_threshold() -> float:
 
 
 def _normalize_orientation(image_path: str) -> None:
-    """Apply EXIF rotation in-place so sideways/upside-down phone photos are upright."""
-    from PIL import Image, ImageOps
+    """Apply EXIF rotation in-place so sideways/upside-down phone photos are upright.
 
-    with Image.open(image_path) as image:
-        oriented = ImageOps.exif_transpose(image)
-        oriented.convert("RGB").save(image_path)
+    Best-effort: if the file can't be read as an image here, leave it untouched and
+    let DeepFace's own detection raise the real error.
+    """
+    from PIL import Image, ImageOps, UnidentifiedImageError
+
+    try:
+        with Image.open(image_path) as image:
+            oriented = ImageOps.exif_transpose(image)
+            oriented.convert("RGB").save(image_path)
+    except (UnidentifiedImageError, OSError):
+        pass
 
 
 def _extract_faces(image_path: str) -> list[dict]:
