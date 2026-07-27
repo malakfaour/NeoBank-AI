@@ -54,6 +54,7 @@ class AuthUserResponse(BaseModel):
     email: str
     phone: str
     kyc_status: KYCStatus
+    role: UserRole
     email_verified: bool = False
 
 

@@ -7,12 +7,15 @@ export type KycOnboardingState =
   | "rejected"
   | "approved";
 
+export type UserRole = "customer" | "compliance_officer" | "admin";
+
 export interface AuthRoutingState {
   authenticated: boolean;
   email_verified: boolean;
   passcode_is_set: boolean;
   app_unlocked: boolean;
   kyc_onboarding_state: KycOnboardingState;
+  role: UserRole;
 }
 
 export function resolvePostAuthDestination(state: AuthRoutingState): string {
@@ -20,6 +23,8 @@ export function resolvePostAuthDestination(state: AuthRoutingState): string {
   if (!state.email_verified) return "/verify-registration-otp";
   if (!state.passcode_is_set) return "/create-passcode";
   if (!state.app_unlocked) return "/unlock";
+  // Staff accounts review other users' KYC - they don't go through customer onboarding themselves.
+  if (state.role === "admin" || state.role === "compliance_officer") return "/dashboard";
   if (state.kyc_onboarding_state === "approved") return "/dashboard";
   if (state.kyc_onboarding_state === "pending") return "/kyc/status";
   return "/kyc";
@@ -38,6 +43,7 @@ export async function getPostAuthDestination(): Promise<string> {
         typeof window !== "undefined" &&
         sessionStorage.getItem("app_unlocked") === "true",
       kyc_onboarding_state: data.kyc_onboarding_state,
+      role: data.user?.role ?? "customer",
     });
   } catch {
     return "/login";

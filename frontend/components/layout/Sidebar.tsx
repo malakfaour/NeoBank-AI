@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { logoutSession } from "@/lib/logoutSession";
+import { useAuthStore } from "@/store/authStore";
 
 const links = [
   { href: "/dashboard", label: "Dashboard", svg: <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1H5a1 1 0 01-1-1V9.5z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg> },
@@ -12,9 +13,13 @@ const links = [
   { href: "/profile", label: "Profile", svg: <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2M12 11a4 4 0 100-8 4 4 0 000 8z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg> },
 ];
 
+const adminLink = { href: "/admin/kyc", label: "KYC Review", svg: <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg> };
+
 export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
+  const role = useAuthStore((s) => s.user?.role);
+  const visibleLinks = role === "admin" || role === "compliance_officer" ? [...links, adminLink] : links;
 
   return (
     <aside style={{ position: "fixed", left: 0, top: 0, height: "100%", width: "240px", backgroundColor: "#fff", borderRight: "1px solid #F0F0F0", padding: "24px 16px", flexDirection: "column", zIndex: 20 }}
@@ -24,7 +29,7 @@ export default function Sidebar() {
         <div style={{ color: "#aaa", fontSize: "12px", marginTop: "2px" }}>NeoBank Lebanon</div>
       </div>
       <nav style={{ display: "flex", flexDirection: "column", gap: "4px", flex: 1 }}>
-        {links.map(({ href, label, svg }) => {
+        {visibleLinks.map(({ href, label, svg }) => {
           const active = pathname === href;
           return (
             <Link key={href} href={href} style={{

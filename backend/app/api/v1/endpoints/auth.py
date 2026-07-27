@@ -107,6 +107,7 @@ def _auth_user(user: User) -> AuthUserResponse:
         email=user.email,
         phone=user.phone,
         kyc_status=user.kyc_status,
+        role=user.role,
         email_verified=user.email_verified_at is not None,
     )
 

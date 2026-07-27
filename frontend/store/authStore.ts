@@ -7,6 +7,7 @@ export interface User {
   email: string;
   phone: string;
   kyc_status: "pending" | "approved" | "flagged" | "rejected";
+  role?: "customer" | "compliance_officer" | "admin";
   email_verified?: boolean;
 }
 

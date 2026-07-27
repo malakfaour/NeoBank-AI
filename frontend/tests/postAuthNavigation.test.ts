@@ -7,6 +7,7 @@ const complete = {
   passcode_is_set: true,
   app_unlocked: true,
   kyc_onboarding_state: "approved" as const,
+  role: "customer" as const,
 };
 
 describe("post-authentication routing", () => {
@@ -22,5 +23,10 @@ describe("post-authentication routing", () => {
     expect(resolvePostAuthDestination({ ...complete, kyc_onboarding_state: "pending" })).toBe("/kyc/status");
     expect(resolvePostAuthDestination({ ...complete, kyc_onboarding_state: "rejected" })).toBe("/kyc");
     expect(resolvePostAuthDestination(complete)).toBe("/dashboard");
+  });
+
+  it("lets staff roles reach the dashboard without completing customer KYC", () => {
+    expect(resolvePostAuthDestination({ ...complete, kyc_onboarding_state: "not_submitted", role: "compliance_officer" })).toBe("/dashboard");
+    expect(resolvePostAuthDestination({ ...complete, kyc_onboarding_state: "rejected", role: "admin" })).toBe("/dashboard");
   });
 });
