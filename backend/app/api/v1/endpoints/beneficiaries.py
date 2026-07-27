@@ -21,7 +21,7 @@ from app.services.rate_limiter import check_rate_limit
 router = APIRouter(prefix="/beneficiaries", tags=["beneficiaries"])
 
 LEBANESE_MOBILE_PATTERN = re.compile(r"^\+961\d{7,8}$")
-LEBANESE_IBAN_PATTERN = re.compile(r"^LB\d{2}[A-Z0-9]{24}$")
+LEBANESE_IBAN_PATTERN = re.compile(r"^LB\d{2}[A-Z0-9]{20}$")
 
 # Write-endpoint rate-limiting gap flagged in the engineering gap analysis.
 # Lower money-risk than transfers/top-up/exchange, so a looser budget --

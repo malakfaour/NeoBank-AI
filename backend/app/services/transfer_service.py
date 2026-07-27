@@ -13,7 +13,7 @@ from app.schemas.transaction import SendMoneyRequest
 from app.schemas.transfer import TransferReceipt
 from app.schemas.auth import CurrentUser
 
-LEBANESE_IBAN_PATTERN = re.compile(r"^LB[A-Za-z0-9]{26}$")
+LEBANESE_IBAN_PATTERN = re.compile(r"^LB[A-Za-z0-9]{22}$")
 
 
 async def execute_transfer(
@@ -159,7 +159,7 @@ async def execute_transfer_by_iban(
     if not LEBANESE_IBAN_PATTERN.match(receiver_iban):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid Lebanese IBAN format (expected LB + 26 alphanumeric characters)",
+            detail="Invalid Lebanese IBAN format (expected LB + 22 alphanumeric characters)",
         )
 
     result = await db.execute(

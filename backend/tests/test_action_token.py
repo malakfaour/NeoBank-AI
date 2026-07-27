@@ -371,13 +371,10 @@ async def test_neo_transfer_iban_happy_path_succeeds(client):
     receiver_id = await _get_user_id(receiver["email"])
     sender_wallet_id = await _get_wallet_id(sender_id)
     # generate_iban() (account_utils.py) produces a 24-character IBAN
-    # ("LB" + 2 check digits + 20-char BBAN), but this endpoint's own
-    # LEBANESE_IBAN_PATTERN requires 28 ("LB" + 26) -- a separate,
-    # pre-existing format mismatch that makes every real generated IBAN
-    # fail this endpoint's validation. Not this test's concern (or this
-    # fix's scope) -- write a pattern-compliant IBAN directly so this
-    # test isolates the request-param regression it exists to catch.
-    receiver_iban = "LB" + ("02" + "1234567890" * 3)[:26]
+    # ("LB" + 2 check digits + 20-char BBAN), matching
+    # LEBANESE_IBAN_PATTERN. Write a pattern-compliant IBAN directly so
+    # this test isolates the request-param regression it exists to catch.
+    receiver_iban = "LB" + ("02" + "1234567890" * 3)[:22]
     await _set_iban(receiver_id, WalletCurrency.USD, receiver_iban)
 
     await _approve_kyc(receiver_id)

@@ -5,6 +5,7 @@ export type KycOnboardingState =
   | "not_submitted"
   | "pending"
   | "rejected"
+  | "flagged"
   | "approved";
 
 export type UserRole = "customer" | "compliance_officer" | "admin";

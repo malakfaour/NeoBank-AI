@@ -22,6 +22,7 @@ describe("post-authentication routing", () => {
     expect(resolvePostAuthDestination({ ...complete, kyc_onboarding_state: "not_submitted" })).toBe("/kyc");
     expect(resolvePostAuthDestination({ ...complete, kyc_onboarding_state: "pending" })).toBe("/kyc/status");
     expect(resolvePostAuthDestination({ ...complete, kyc_onboarding_state: "rejected" })).toBe("/kyc");
+    expect(resolvePostAuthDestination({ ...complete, kyc_onboarding_state: "flagged" })).toBe("/kyc");
     expect(resolvePostAuthDestination(complete)).toBe("/dashboard");
   });
 

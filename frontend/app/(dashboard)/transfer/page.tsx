@@ -278,10 +278,10 @@ export default function TransferPage() {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
                 <span style={{ backgroundColor: "#00C853", color: "#fff", fontSize: "10px", fontWeight: "700", padding: "2px 8px", borderRadius: "6px", marginRight: "8px" }}>{w.currency}</span>
-                <span style={{ fontSize: "14px", fontWeight: "600", color: "#000" }}>{w.currency === "USD" ? "Fresh USD" : "Cash LBP"}</span>
+                <span style={{ fontSize: "14px", fontWeight: "600", color: "#000" }}>{walletLabel(w.currency)}</span>
               </div>
               <span style={{ fontSize: "16px", fontWeight: "700", color: "#000" }}>
-                {w.currency === "USD" ? `$${w.balance.toFixed(2)}` : `${w.balance.toLocaleString()} ل.ل`}
+                {formatMoney(w.balance, w.currency)}
               </span>
             </div>
           </button>
@@ -483,7 +483,7 @@ export default function TransferPage() {
         </div>
       ) : (
         <div style={{ marginBottom: "16px" }}>
-          <input type="text" placeholder="LB00 0000 0000 0000 0000 0000 00" value={iban} onChange={(e) => { setIban(e.target.value); setRecipient(null); setError(""); }}
+          <input type="text" placeholder="LB00 0000 0000 0000 0000 00" value={iban} onChange={(e) => { setIban(e.target.value); setRecipient(null); setError(""); }}
             style={{ width: "100%", border: "1.5px solid #E5E7EB", borderRadius: "14px", padding: "12px 16px", fontSize: "14px", color: "#000", outline: "none", boxSizing: "border-box" }} />
         </div>
       )}
@@ -493,7 +493,7 @@ export default function TransferPage() {
           <p style={{ color: "#166534", fontSize: "13px", fontWeight: "600" }}>✓ Sending to: {recipient.display_name}</p>
         </div>
       )}
-      <button onClick={validateRecipient} disabled={validating || (tab === "mobile" ? phone.length < 7 : !/^LB[A-Za-z0-9]{26}$/.test(iban.replace(/\s/g, "")))}
+      <button onClick={validateRecipient} disabled={validating || (tab === "mobile" ? phone.length < 7 : !/^LB[A-Za-z0-9]{22}$/.test(iban.replace(/\s/g, "")))}
         style={{ width: "100%", backgroundColor: "#00C853", color: "#fff", fontWeight: "700", fontSize: "15px", border: "none", borderRadius: "14px", padding: "14px", cursor: "pointer", marginBottom: "20px" }}>
         {validating ? "Checking..." : "Validate"}
       </button>
@@ -537,7 +537,7 @@ export default function TransferPage() {
         <input type="number" placeholder="0.00" value={amount} onChange={(e) => { setAmount(e.target.value); setError(""); }}
           style={{ width: "100%", border: "none", outline: "none", fontSize: "32px", fontWeight: "800", color: insufficient ? "#EF4444" : "#000", backgroundColor: "transparent", boxSizing: "border-box" }} />
         <p style={{ color: insufficient ? "#EF4444" : "#aaa", fontSize: "13px", marginTop: "8px" }}>
-          Available: {selectedWallet?.currency === "USD" ? `$${balance.toFixed(2)}` : `${balance.toLocaleString()} ل.ل`}
+          Available: {formatMoney(balance, selectedWallet?.currency ?? "")}
         </p>
         {insufficient && <p style={{ color: "#EF4444", fontSize: "13px", marginTop: "4px", fontWeight: "600" }}>⚠️ Amount exceeds available balance</p>}
       </div>
@@ -555,7 +555,7 @@ export default function TransferPage() {
       <div style={{ backgroundColor: "#fff", borderRadius: "20px", padding: "24px", marginBottom: "16px", display: "flex", flexDirection: "column", gap: "12px" }}>
         {[
           { label: "To", value: destinationLabel },
-          { label: "Amount", value: `${selectedWallet?.currency === "USD" ? `$${amountNum.toFixed(2)}` : `${amountNum.toLocaleString()} ل.ل`}` },
+          { label: "Amount", value: formatMoney(amountNum, selectedWallet?.currency ?? "") },
         ].map(({ label, value }) => (
           <div key={label} style={{ display: "flex", justifyContent: "space-between" }}>
             <p style={{ color: "#aaa", fontSize: "14px" }}>{label}</p>
@@ -582,9 +582,9 @@ export default function TransferPage() {
       <Header title="Confirm Transfer" step={step} setStep={setStep} router={router} />
       <div style={{ backgroundColor: "#fff", borderRadius: "20px", padding: "24px", marginBottom: "16px", display: "flex", flexDirection: "column", gap: "16px" }}>
         {[
-          { label: "From", value: `${selectedWallet?.currency === "USD" ? "Fresh USD" : "Cash LBP"} — ${selectedWallet?.currency === "USD" ? `$${balance.toFixed(2)}` : `${balance.toLocaleString()} ل.ل`}` },
+          { label: "From", value: `${walletLabel(selectedWallet?.currency ?? "")} — ${formatMoney(balance, selectedWallet?.currency ?? "")}` },
           { label: "To", value: destinationLabel },
-          { label: "Amount", value: `${selectedWallet?.currency === "USD" ? `$${amountNum.toFixed(2)}` : `${amountNum.toLocaleString()} ل.ل`}` },
+          { label: "Amount", value: formatMoney(amountNum, selectedWallet?.currency ?? "") },
           {
              label: "Transfer type",
              value:
@@ -621,7 +621,7 @@ export default function TransferPage() {
         <div style={{ backgroundColor: "#fff", borderRadius: "20px", padding: "24px", width: "100%", display: "flex", flexDirection: "column", gap: "12px" }}>
           {[
             { label: "To", value: destinationLabel },
-            { label: "Amount", value: `${selectedWallet?.currency === "USD" ? `$${amountNum.toFixed(2)}` : `${amountNum.toLocaleString()} ل.ل`}` },
+            { label: "Amount", value: formatMoney(amountNum, selectedWallet?.currency ?? "") },
             {
               label:
                 transferType === "own"

@@ -34,6 +34,7 @@ from app.models.wallet import Wallet, WalletCurrency
 from app.schemas.transaction import SendMoneyRequest, SendMoneyResponse
 from app.schemas.auth import CurrentUser
 from app.services.audit_log import append_audit
+from app.services.currency_conversion import to_usd_equivalent
 from app.services.fraud_rules import CurrencyMismatchError, check_currency_match
 from app.services.rate_limiter import check_rate_limit
 from app.services.wallet_status import WalletClosedError, WalletFrozenError, assert_wallet_active
@@ -113,8 +114,10 @@ async def send_money(
     # idempotency replay check above so a retried idempotent request
     # never consumes rate-limit or daily-cap budget for a transfer
     # that already happened. ---
+    usd_equivalent = await to_usd_equivalent(payload.amount, wallet_currency.value, db)
+
     daily_total = await get_transfer_daily_total(sender_id)
-    if daily_total + payload.amount > settings.DAILY_TRANSFER_LIMIT_USD:
+    if daily_total + usd_equivalent > settings.DAILY_TRANSFER_LIMIT_USD:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={
@@ -189,6 +192,7 @@ async def send_money(
         receiver_id=receiver_id,
         amount=payload.amount,
         currency=TransactionCurrency(wallet_currency.value),
+        category="Transfer",
         status=TransactionStatus.pending,
         idempotency_key=hash_idempotency_key(sender_id, x_idempotency_key),
     )
@@ -217,7 +221,7 @@ async def send_money(
 
     # --- DEVATTECH-107: daily transfer total, incremented only after a
     # real (non-replayed) transfer actually commits ---
-    await increment_transfer_daily(sender_id, payload.amount)
+    await increment_transfer_daily(sender_id, usd_equivalent)
 
     # --- DEVATTECH-74: audit trail — "created" fires first, right after the
     # transaction row exists, before fraud scoring runs. fraud_score is
