@@ -19,6 +19,18 @@ interface PendingAction {
 interface HistoryMessage { role: "user" | "assistant" | "system"; content: string; }
 interface ChatHistoryResponse { session_id: string; messages: HistoryMessage[]; }
 
+function WalletIcon() {
+  return <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 7h15a2 2 0 012 2v9a2 2 0 01-2 2H4a2 2 0 01-2-2V6a2 2 0 012-2h13v3M16 13h5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+}
+
+function TransactionsIcon() {
+  return <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2" stroke="currentColor" strokeWidth="1.8" /><path d="M9 4V2h6v2M8 9h8M8 13h8M8 17h5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>;
+}
+
+function ExchangeIcon() {
+  return <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 7h13M16 3l4 4-4 4M17 17H4M8 13l-4 4 4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+}
+
 const CHAT_SESSION_STORAGE_KEY = "chatbot_session_id";
 
 export function getChatSessionStorageKey(userId: string | number): string {
@@ -306,7 +318,10 @@ export default function ChatWidget() {
               {/* Confirm card */}
               {pendingAction && !showPasscode && (
                 <div style={{ backgroundColor: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: "16px", padding: "16px", display: "flex", flexDirection: "column", gap: "10px" }}>
-                  <p style={{ fontSize: "14px", fontWeight: "700", color: "#000" }}>{"\u{1F3E6}"} Confirm Transfer</p>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 10h18M5 10v10h14V10M12 4L3 10h18L12 4Z" stroke="#00C853" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                    <p style={{ fontSize: "14px", fontWeight: "700", color: "#000" }}>Confirm Transfer</p>
+                  </div>
                   {pendingAction.recipient && <p style={{ fontSize: "13px", color: "#555" }}>To: {pendingAction.recipient}</p>}
                   {pendingAction.amount && pendingAction.currency && (
                     <p style={{ fontSize: "13px", color: "#555" }}>Amount: {pendingAction.amount} {pendingAction.currency}</p>
@@ -314,7 +329,10 @@ export default function ChatWidget() {
                   {pendingAction.source_account && <p style={{ fontSize: "13px", color: "#555" }}>From: {pendingAction.source_account}</p>}
                   {pendingAction.fee && pendingAction.currency && <p style={{ fontSize: "13px", color: "#555" }}>Fee: {pendingAction.fee} {pendingAction.currency}</p>}
                   {pendingAction.total_debit && pendingAction.currency && <p style={{ fontSize: "13px", fontWeight: "700", color: "#333" }}>Total debit: {pendingAction.total_debit} {pendingAction.currency}</p>}
-                  <p style={{ fontSize: "11px", color: "#aaa" }}>{"\u23F1"} Expires in 5 minutes</p>
+                  <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="#aaa" strokeWidth="1.8" /><path d="M12 7v5l3 2" stroke="#aaa" strokeWidth="1.8" strokeLinecap="round" /></svg>
+                    <p style={{ fontSize: "11px", color: "#aaa" }}>Expires in 5 minutes</p>
+                  </div>
                   <div style={{ display: "flex", gap: "8px" }}>
                     <button onClick={handleConfirmClick} disabled={chatLoading || passcodeLoading} style={{ flex: 1, backgroundColor: "#00C853", color: "#fff", border: "none", borderRadius: "10px", padding: "10px", fontWeight: "700", cursor: "pointer", fontSize: "13px" }}>
                       Confirm
@@ -329,7 +347,10 @@ export default function ChatWidget() {
               {/* Passcode sheet */}
               {showPasscode && (
                 <div style={{ backgroundColor: "#fff", border: "1.5px solid #E5E7EB", borderRadius: "16px", padding: "16px", display: "flex", flexDirection: "column", gap: "10px" }}>
-                  <p style={{ fontSize: "14px", fontWeight: "700", color: "#000" }}>{"\u{1F510}"} Enter Passcode</p>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2" stroke="#00C853" strokeWidth="1.8" /><path d="M8 11V8a4 4 0 018 0v3" stroke="#00C853" strokeWidth="1.8" strokeLinecap="round" /></svg>
+                    <p style={{ fontSize: "14px", fontWeight: "700", color: "#000" }}>Enter Passcode</p>
+                  </div>
                   <p style={{ fontSize: "12px", color: "#aaa" }}>Verify your identity to complete the transfer</p>
                   <input type="password" placeholder={"\u2022".repeat(6)} maxLength={6} value={passcode}
                     onChange={(e) => { setPasscode(e.target.value.replace(/\D/g, "")); setPasscodeError(""); }}
@@ -352,13 +373,13 @@ export default function ChatWidget() {
             {messages.length === 0 && (
               <div style={{ padding: "0 16px 12px", display: "flex", gap: "8px", flexWrap: "wrap" }}>
                 {[
-                  { label: "\u{1F4B0} My Balance", msg: "What is my current balance?" },
-                  { label: "\u{1F4CB} Last Transactions", msg: "Show me my last transactions" },
-                  { label: "\u{1F4B1} Exchange Rate", msg: "What is the current USD to LBP exchange rate?" },
-                ].map(({ label, msg }) => (
+                  { label: "My Balance", icon: <WalletIcon />, msg: "What is my current balance?" },
+                  { label: "Last Transactions", icon: <TransactionsIcon />, msg: "Show me my last transactions" },
+                  { label: "Exchange Rate", icon: <ExchangeIcon />, msg: "What is the current USD to LBP exchange rate?" },
+                ].map(({ label, icon, msg }) => (
                   <button key={label} onClick={() => sendMessage(msg)}
-                    style={{ padding: "8px 14px", borderRadius: "20px", border: "1.5px solid #00C853", backgroundColor: "#F0FDF4", color: "#00C853", fontSize: "12px", fontWeight: "600", cursor: "pointer", whiteSpace: "nowrap" }}>
-                    {label}
+                    style={{ padding: "8px 14px", borderRadius: "20px", border: "1.5px solid #00C853", backgroundColor: "#F0FDF4", color: "#00C853", fontSize: "12px", fontWeight: "600", cursor: "pointer", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: "6px" }}>
+                    {icon}{label}
                   </button>
                 ))}
               </div>
