@@ -32,6 +32,7 @@ def _run_liveness_check(selfie_path: str) -> float:
 
     faces = DeepFace.extract_faces(
         img_path=selfie_path,
+        detector_backend="retinaface",
         anti_spoofing=True,
         enforce_detection=True,
     )

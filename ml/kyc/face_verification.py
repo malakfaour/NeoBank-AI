@@ -54,10 +54,16 @@ def _write_face_region(face_region) -> str:
 def _deepface_verify(id_face_path: str, selfie_path: str) -> dict:
     from deepface import DeepFace
 
+    # id_face_path is already cropped by _detect_face_region above, but the
+    # selfie is raw - DeepFace re-detects it internally, and its default
+    # detector ("opencv", a Haar cascade) is the weakest option available.
+    # retinaface is a stronger pretrained detector, more robust to angle,
+    # partial occlusion, and low light in real selfie captures.
     return DeepFace.verify(
         img1_path=id_face_path,
         img2_path=selfie_path,
         model_name="ArcFace",
+        detector_backend="retinaface",
         enforce_detection=True,
     )
 
