@@ -3,8 +3,6 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from .liveness import check_liveness
-
 
 def _detect_face_region(image_path: str):
     import cv2
@@ -56,10 +54,16 @@ def _write_face_region(face_region) -> str:
 def _deepface_verify(id_face_path: str, selfie_path: str) -> dict:
     from deepface import DeepFace
 
+    # id_face_path is already cropped by _detect_face_region above, but the
+    # selfie is raw - DeepFace re-detects it internally, and its default
+    # detector ("opencv", a Haar cascade) is the weakest option available.
+    # retinaface is a stronger pretrained detector, more robust to angle,
+    # partial occlusion, and low light in real selfie captures.
     return DeepFace.verify(
         img1_path=id_face_path,
         img2_path=selfie_path,
         model_name="ArcFace",
+        detector_backend="retinaface",
         enforce_detection=True,
     )
 
@@ -74,9 +78,13 @@ def verify_face(selfie_path: str, id_photo_path: str) -> dict:
 
         raw_distance = float(result["distance"])
         threshold = float(result["threshold"])
-        # ArcFace distance is normalized against the threshold returned by DeepFace
-        # so the score stays in a stable 0-1 range where 1 is the best possible match.
-        match_score = max(0.0, 1 - (raw_distance / threshold))
+        # Genuine ArcFace matches typically sit well under the verification
+        # threshold (not near zero), so scale relative to a distance of
+        # 0 = perfect match and threshold = the boundary DeepFace itself
+        # already calibrated as "same person". This keeps match_score
+        # informational/diagnostic - the approve/reject decision uses
+        # DeepFace's own `verified` boolean, not a threshold on this score.
+        match_score = max(0.0, min(1.0, 1 - (raw_distance / threshold)))
 
         return {
             "match_score": match_score,
