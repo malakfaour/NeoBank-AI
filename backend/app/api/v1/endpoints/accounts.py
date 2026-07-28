@@ -48,6 +48,9 @@ from app.services.stripe_gateway import (
 )
 from app.services.wallet_status import WalletClosedError, WalletFrozenError, assert_wallet_active, record_status_change
 
+from app.models.notification import NotificationType
+from app.services.notifications import notify
+
 router = APIRouter(prefix="/accounts", tags=["accounts"])
 
 
@@ -172,6 +175,17 @@ async def _finalize_topup(
 
     await db.refresh(wallet)
     await db.refresh(transaction)
+
+    await notify(
+    user_id=wallet.user_id,
+    notification_type=NotificationType.TX_RECEIVED,
+    metadata={
+        "amount": str(transaction.amount),
+        "currency": transaction.currency.value,
+        "transaction_id": transaction.id,
+    },
+    db=db,
+    )
 
     await invalidate_balance_cache(wallet.user_id)
     await increment_topup_daily(wallet.user_id, usd_equivalent)
