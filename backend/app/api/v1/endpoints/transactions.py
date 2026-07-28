@@ -1,4 +1,5 @@
-import asyncio
+﻿import asyncio
+import logging
 from functools import partial
 from typing import Literal
 
@@ -36,6 +37,7 @@ from app.schemas.auth import CurrentUser
 from app.services.audit_log import append_audit
 from app.services.currency_conversion import to_usd_equivalent
 from app.services.fraud_rules import CurrencyMismatchError, check_currency_match
+from app.services.notifications import notify
 from app.services.rate_limiter import check_rate_limit
 from app.services.wallet_status import WalletClosedError, WalletFrozenError, assert_wallet_active
 from app.tasks.transaction_tasks import score_transaction
@@ -50,6 +52,7 @@ from app.schemas.transaction import (
     TransactionSummaryResponse,
 )
 from app.utils.transaction_query_utils import compute_total_pages, parse_summary_month
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
@@ -278,6 +281,52 @@ async def send_money(
 
     await db.commit()
     await db.refresh(transaction)
+
+     # --- notify both parties (email, plus whatever other channels the
+    # existing notify() service already supports -- SMS for high-value
+    # transfers, push, in-app) ---
+    # By this point the transfer has fully committed and the money has
+    # already moved -- a failure here must never surface as an error to
+    # the caller (that would make a successful transfer look failed to
+    # the frontend, and could prompt a confused retry/duplicate attempt).
+    # notify()'s own internals already treat individual channels
+    # (email/push/SMS) as best-effort, but the notification row + Redis
+    # publish are not themselves guarded -- wrap the whole call here so
+    # nothing about notifying can affect this endpoint's response.
+    try:
+        names_result = await db.execute(
+            select(User.id, User.full_name).where(User.id.in_([sender_id, receiver_id]))
+        )
+        full_name_by_user_id = {uid: name for uid, name in names_result.all()}
+
+        await notify(
+            sender_id,
+            "TX_SENT",
+            {
+                "amount": str(transaction.amount),
+                "currency": transaction.currency.value,
+                "transaction_id": transaction.id,
+                "full_name": full_name_by_user_id.get(sender_id, "there"),
+            },
+            db=db,
+        )
+        await notify(
+            receiver_id,
+            "TX_RECEIVED",
+            {
+                "amount": str(transaction.amount),
+                "currency": transaction.currency.value,
+                "transaction_id": transaction.id,
+                "full_name": full_name_by_user_id.get(receiver_id, "there"),
+            },
+            db=db,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to send transfer notifications for transaction_id=%s "
+            "(transfer itself already succeeded)",
+            transaction.id,
+        )
 
     response = SendMoneyResponse(
         transaction_id=transaction.id,
