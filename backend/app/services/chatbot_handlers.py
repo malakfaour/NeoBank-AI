@@ -1,5 +1,7 @@
 import re
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +14,7 @@ from app.services.exchange_cache import (
 from app.services.transaction_query_service import get_recent_transactions_for_user
 
 SUPPORTED_CURRENCIES = {"USD", "LBP", "USDT"}
+APPLICATION_TIMEZONE = ZoneInfo("Asia/Beirut")
 OUT_OF_SCOPE_REPLY = (
     "I can only assist with NeoBank services such as balances, "
     "transactions, transfers, and exchange rates."
@@ -56,11 +59,27 @@ def _transaction_line(item: dict) -> str:
         "fee": "Fee",
     }.get(str(item.get("type")), str(item.get("type", "Transaction")).title())
     counterparty = item.get("counterparty_name") or item.get("category") or "NeoBank"
-    timestamp = item.get("created_at") or "timestamp unavailable"
+    timestamp = _format_transaction_timestamp(item.get("created_at"))
     return (
         f"{kind}: {_money(item['amount'], item['currency'])} — "
         f"{counterparty} — {timestamp}"
     )
+
+
+def _format_transaction_timestamp(value: object) -> str:
+    if not value:
+        return "timestamp unavailable"
+    try:
+        parsed = value if isinstance(value, datetime) else datetime.fromisoformat(
+            str(value).replace("Z", "+00:00")
+        )
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        local = parsed.astimezone(APPLICATION_TIMEZONE)
+        hour = local.strftime("%I").lstrip("0")
+        return f"{local:%d %b %Y}, {hour}:{local:%M} {local:%p}"
+    except (TypeError, ValueError):
+        return "timestamp unavailable"
 
 
 async def transaction_reply(

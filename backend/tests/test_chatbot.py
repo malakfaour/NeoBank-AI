@@ -426,6 +426,87 @@ async def test_chatbot_accumulates_transfer_draft_across_messages(
     assert stored["receiver_phone"] == "+96170123456"
 
 
+async def test_chatbot_iban_continues_same_incomplete_transfer(
+    client,
+    auth_tokens,
+    mock_redis,
+):
+    session_id = "test-multi-turn-iban-session"
+    headers = {"Authorization": f"Bearer {auth_tokens['access_token']}"}
+
+    with patch("httpx.AsyncClient.post", new=_groq_success("TRANSFER_INTENT", 0.92)):
+        first = await client.post(
+            "/api/v1/chatbot/message",
+            json={
+                "session_id": session_id,
+                "message": "Transfer 10 USD to lamine yamal",
+            },
+            headers=headers,
+        )
+
+    assert first.status_code == 200, first.text
+    before = json.loads(
+        await mock_redis.get(f"chat_incomplete_action:{session_id}")
+    )
+
+    with patch("httpx.AsyncClient.post", new=_groq_success("OUT_OF_SCOPE", 1.0)):
+        second = await client.post(
+            "/api/v1/chatbot/message",
+            json={
+                "session_id": session_id,
+                "message": "LB1500000016036118400442",
+            },
+            headers=headers,
+        )
+
+    assert second.status_code == 200, second.text
+    data = second.json()
+    assert data["confirmation_required"] is True
+    assert data["pending_action"]["recipient"] == "LB1500000016036118400442"
+    assert {
+        "recipient",
+        "amount",
+        "currency",
+        "source_account",
+        "fee",
+        "total_debit",
+    } <= data["pending_action"].keys()
+    after = json.loads(await mock_redis.get(f"chat_action:{session_id}"))
+    assert after["action_id"] == before["action_id"]
+    assert after["idempotency_key"] == before["idempotency_key"]
+    assert after["receiver_iban"] == "LB1500000016036118400442"
+    assert data["transfer_receipt"] is None
+
+
+async def test_invalid_iban_keeps_incomplete_transfer_active(
+    client,
+    auth_tokens,
+    mock_redis,
+):
+    session_id = "test-invalid-follow-up-iban-session"
+    headers = {"Authorization": f"Bearer {auth_tokens['access_token']}"}
+
+    with patch("httpx.AsyncClient.post", new=_groq_success("TRANSFER_INTENT", 0.92)):
+        await client.post(
+            "/api/v1/chatbot/message",
+            json={"session_id": session_id, "message": "send 10 USD"},
+            headers=headers,
+        )
+    before = await mock_redis.get(f"chat_incomplete_action:{session_id}")
+
+    with patch("httpx.AsyncClient.post", new=_groq_success("OUT_OF_SCOPE", 1.0)):
+        response = await client.post(
+            "/api/v1/chatbot/message",
+            json={"session_id": session_id, "message": "LB123"},
+            headers=headers,
+        )
+
+    assert response.status_code == 200, response.text
+    assert "iban is invalid" in response.json()["reply"].lower()
+    assert await mock_redis.get(f"chat_incomplete_action:{session_id}") == before
+    assert await mock_redis.get(f"chat_action:{session_id}") is None
+
+
 async def test_chatbot_unrelated_reply_discards_incomplete_transfer(
     client,
     auth_tokens,
@@ -572,6 +653,73 @@ async def test_chatbot_confirm_with_valid_action_token_executes_transfer_service
     mock_execute.assert_awaited_once()
     assert await mock_redis.get(f"chat_action:{session_id}") is None
     assert await mock_redis.get(f"action_token:{user_id}") is None
+
+
+async def test_chatbot_confirm_executes_real_mobile_transfer_path(
+    client,
+    auth_tokens,
+    mock_redis,
+):
+    """Exercise the real service path; do not mock execute_transfer_by_mobile."""
+    from decimal import Decimal
+
+    from sqlalchemy import select
+
+    from app.db.session import AsyncSessionLocal
+    from app.models.user import KYCStatus, User
+    from app.models.wallet import Wallet, WalletCurrency
+
+    receiver_tokens = await _register_chatbot_user(client, "confirmreceiver")
+    sender_id = await _get_chatbot_test_user_id()
+
+    async with AsyncSessionLocal() as session:
+        sender = await session.get(User, sender_id)
+        receiver = await session.scalar(
+            select(User).where(User.id == int(receiver_tokens["user"]["id"]))
+        )
+        sender.kyc_status = KYCStatus.approved
+        receiver.kyc_status = KYCStatus.approved
+        sender_wallet = await session.scalar(
+            select(Wallet).where(
+                Wallet.user_id == sender_id,
+                Wallet.currency == WalletCurrency.USD,
+            )
+        )
+        sender_wallet.balance = Decimal("50")
+        await session.commit()
+
+    session_id = "test-real-confirm-transfer-session"
+    action_token = "real-confirm-action-token"
+    await _store_test_pending_transfer(mock_redis, session_id, sender_id)
+    pending = json.loads(await mock_redis.get(f"chat_action:{session_id}"))
+    pending["recipient"] = receiver.phone
+    pending["receiver_phone"] = receiver.phone
+    await mock_redis.set(
+        f"chat_action:{session_id}",
+        json.dumps(pending),
+        ex=300,
+    )
+    await mock_redis.set(f"action_token:{sender_id}", action_token, ex=300)
+
+    with (
+        patch("httpx.AsyncClient.post", new=_groq_success("GENERAL", 0.1)),
+        patch(
+            "app.api.v1.endpoints.transactions.score_transaction.delay",
+            side_effect=RuntimeError("Method Not Allowed"),
+        ),
+    ):
+        response = await client.post(
+            "/api/v1/chatbot/message",
+            json={"session_id": session_id, "message": "confirm"},
+            headers={
+                "Authorization": f"Bearer {auth_tokens['access_token']}",
+                "X-Action-Token": action_token,
+            },
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["transfer_receipt"]["amount"] == "10.0000"
+    assert await mock_redis.get(f"chat_action:{session_id}") is None
 
 
 async def test_chatbot_cancel_discards_pending_action(

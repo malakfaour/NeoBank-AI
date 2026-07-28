@@ -55,6 +55,7 @@ from app.services.chatbot_transfer import (
     extract_partial_transfer_draft,
     is_cancel_message,
     is_confirm_message,
+    recipient_validation_error,
 )
 from app.services.transfer_service import (
     execute_transfer_by_iban,
@@ -126,6 +127,17 @@ async def send_chatbot_message(
     )
     user_id = int(current_user.id)
     message = body.message.strip()
+
+    # Load conversational transfer state before intent classification. A bare
+    # recipient is meaningful when this user is already completing a transfer.
+    stored_partial = await get_chat_incomplete_action(body.session_id)
+    if (
+        stored_partial is not None
+        and int(stored_partial.get("user_id", -1)) != user_id
+    ):
+        # Never expose or continue another user's transfer, even if a session
+        # identifier is reused.
+        stored_partial = None
 
     start = time.monotonic()
     classification = await classify_intent(message)
@@ -272,17 +284,34 @@ async def send_chatbot_message(
             and classification.confidence > _TRANSFER_CONFIRMATION_THRESHOLD
         )
 
-        stored_partial = await get_chat_incomplete_action(body.session_id)
         partial = None
         if stored_partial is not None:
-            if int(stored_partial.get("user_id", -1)) == user_id:
-                partial = ChatbotPartialTransferDraft.from_storage_payload(
-                    stored_partial
-                )
-            else:
-                await delete_chat_incomplete_action(body.session_id)
+            partial = ChatbotPartialTransferDraft.from_storage_payload(
+                stored_partial
+            )
 
         contribution = extract_partial_transfer_draft(message)
+        validation_error = (
+            recipient_validation_error(message)
+            if partial is not None and "recipient" in partial.missing_fields()
+            else None
+        )
+        if validation_error is not None:
+            await save_chat_turn(
+                db=db,
+                user_id=user_id,
+                session_id=body.session_id,
+                message=body.message,
+                reply=validation_error,
+            )
+            return ChatbotMessageResponse(
+                reply=validation_error,
+                session_id=body.session_id,
+                intent=classification.intent,
+                confidence=classification.confidence,
+                confirmation_required=False,
+            )
+
         if partial is not None and not contribution.supplies_any(
             partial.missing_fields()
         ):
@@ -297,9 +326,23 @@ async def send_chatbot_message(
 
             if draft is None:
                 if accumulated.has_fields():
+                    action_id = (
+                        str(stored_partial["action_id"])
+                        if stored_partial and stored_partial.get("action_id")
+                        else uuid4().hex
+                    )
+                    idempotency_key = (
+                        str(stored_partial["idempotency_key"])
+                        if stored_partial and stored_partial.get("idempotency_key")
+                        else f"chatbot:{body.session_id}:{uuid4().hex}"
+                    )
                     await store_chat_incomplete_action(
                         body.session_id,
-                        accumulated.to_storage_payload(user_id=user_id),
+                        {
+                            **accumulated.to_storage_payload(user_id=user_id),
+                            "action_id": action_id,
+                            "idempotency_key": idempotency_key,
+                        },
                     )
                 reply = build_incomplete_transfer_reply(accumulated)
                 await save_chat_turn(
@@ -369,9 +412,18 @@ async def send_chatbot_message(
             pending_action = {
                 **draft.to_pending_action(
                 user_id=user_id,
-                idempotency_key=f"chatbot:{body.session_id}:{uuid4().hex}",
+                idempotency_key=(
+                    str(stored_partial["idempotency_key"])
+                    if stored_partial and stored_partial.get("idempotency_key")
+                    else f"chatbot:{body.session_id}:{uuid4().hex}"
+                ),
                 ),
                 **response_payload,
+                "action_id": (
+                    str(stored_partial["action_id"])
+                    if stored_partial and stored_partial.get("action_id")
+                    else uuid4().hex
+                ),
             }
             await store_chat_pending_action(
                 body.session_id,

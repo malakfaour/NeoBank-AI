@@ -112,4 +112,25 @@ async def test_transaction_modes_use_fresh_type_specific_data():
 
     assert "Received: $25.00" in last_reply
     assert "Sent: $10.00" in spending_reply
+    assert "27 Jul 2026, 1:00 PM" in last_reply
     assert query.await_count == 2
+
+
+async def test_transaction_timestamp_uses_beirut_timezone():
+    transactions = [
+        {
+            "type": "receive",
+            "amount": 25,
+            "currency": "USD",
+            "counterparty_name": "Rana",
+            "created_at": "2026-07-27T20:15:52.278720+00:00",
+        }
+    ]
+    with patch(
+        "app.services.chatbot_handlers.get_recent_transactions_for_user",
+        new=AsyncMock(return_value=transactions),
+    ):
+        reply = await transaction_reply(user_id=9, db=AsyncMock(), mode="last")
+
+    assert "27 Jul 2026, 11:15 PM" in reply
+    assert "2026-07-27T20:15" not in reply

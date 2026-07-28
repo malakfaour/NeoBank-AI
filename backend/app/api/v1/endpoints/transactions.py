@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from functools import partial
 from typing import Literal
 
@@ -52,6 +53,7 @@ from app.schemas.transaction import (
 from app.utils.transaction_query_utils import compute_total_pages, parse_summary_month
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
+logger = logging.getLogger(__name__)
 
 
 @router.post("/send", response_model=SendMoneyResponse)
@@ -247,7 +249,19 @@ async def send_money(
     await db.commit()
     await db.refresh(transaction)
 
-    score_transaction.delay(transaction.id)
+    try:
+        score_transaction.delay(transaction.id)
+    except Exception:
+        # Fraud scoring is deliberately asynchronous and the transfer has
+        # already committed. A broker transport failure must not turn a
+        # successful money movement into a failed HTTP response (or invite a
+        # duplicate retry). The transaction remains completed with
+        # fraud_score=None and can be picked up by operational reconciliation.
+        logger.exception(
+            "Fraud-scoring enqueue failed for transaction %s",
+            transaction.id,
+            extra={"transaction_id": transaction.id},
+        )
 
     await append_audit(
         db,
