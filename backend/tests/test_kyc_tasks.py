@@ -65,22 +65,27 @@ def _patch_local_files(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("match_score", "expected_status", "expected_user_status", "expected_reason"),
+    ("distance", "threshold", "verified", "expected_status", "expected_user_status", "expected_reason"),
     [
-        (0.85, KYCRecordStatus.approved, KYCStatus.approved, None),
-        (0.70, KYCRecordStatus.flagged, KYCStatus.flagged, None),
-        (0.50, KYCRecordStatus.rejected, KYCStatus.rejected, "face_mismatch"),
+        # Confident match: verified and well under the distance/threshold ratio cutoff.
+        (0.3, 1.0, True, KYCRecordStatus.approved, KYCStatus.approved, None),
+        # Borderline match: verified but close to DeepFace's own threshold.
+        (0.9, 1.0, True, KYCRecordStatus.flagged, KYCStatus.flagged, None),
+        # Not verified by DeepFace at all.
+        (1.2, 1.0, False, KYCRecordStatus.rejected, KYCStatus.rejected, "face_mismatch"),
     ],
 )
 def test_process_kyc_match_score_matrix(
     monkeypatch,
-    match_score,
+    distance,
+    threshold,
+    verified,
     expected_status,
     expected_user_status,
     expected_reason,
 ):
     session_factory = _build_sync_session()
-    user_id, record_id = _seed_record(session_factory, label=f"matrix-{int(match_score * 100)}")
+    user_id, record_id = _seed_record(session_factory, label=f"matrix-{int(distance * 100)}")
 
     monkeypatch.setattr(kyc_tasks, "SyncSessionLocal", session_factory)
     _patch_local_files(monkeypatch)
@@ -90,20 +95,21 @@ def test_process_kyc_match_score_matrix(
     monkeypatch.setattr(
         "ml.kyc.face_verification._deepface_verify",
         lambda id_face_path, selfie_path: {
-            "distance": 0.1,
-            "threshold": 0.1 / (1 - match_score),
-            "verified": match_score >= 0.8,
+            "distance": distance,
+            "threshold": threshold,
+            "verified": verified,
         },
     )
 
     result = kyc_tasks.process_kyc(record_id)
+    expected_match_score = max(0.0, min(1.0, 1 - (distance / threshold)))
 
     with session_factory() as db:
         record = db.get(KYCRecord, record_id)
         user = db.get(User, user_id)
         assert record.status == expected_status
         assert user.kyc_status == expected_user_status
-        assert record.match_score == pytest.approx(match_score)
+        assert record.match_score == pytest.approx(expected_match_score)
         assert record.liveness_score == pytest.approx(0.91)
         assert record.rejection_reason == expected_reason
         assert record.reviewed_at is not None

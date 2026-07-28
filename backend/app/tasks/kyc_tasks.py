@@ -20,8 +20,11 @@ from ml.kyc.face_verification import verify_face  # noqa: E402
 logger = logging.getLogger(__name__)
 
 LIVENESS_THRESHOLD = 0.7
-MATCH_APPROVED_THRESHOLD = 0.8
-MATCH_FLAGGED_THRESHOLD = 0.6
+# Fraction of DeepFace's own ArcFace verification threshold a match's
+# distance must stay under to count as a confident approval. Values are on
+# DeepFace's calibrated distance/threshold scale (0 = identical faces,
+# 1.0 = right at the verified/not-verified boundary), not on match_score.
+MATCH_CONFIDENT_RATIO = 0.85
 
 
 def _run_liveness_check(selfie_path: str) -> float:
@@ -159,8 +162,15 @@ def process_kyc(kyc_record_id: int):
 
             verification = verify_face(selfie_temp.name, id_temp.name)
             match_score = float(verification["match_score"])
+            verified = bool(verification["verified"])
+            distance_ratio = float(verification["raw_distance"]) / float(verification["threshold"])
 
-            if match_score >= MATCH_APPROVED_THRESHOLD:
+            # DeepFace's own `verified` boolean is the ArcFace-calibrated
+            # same-person decision. match_score is a diagnostic number only
+            # (see ml/kyc/face_verification.py) - approval tiers are decided
+            # from the distance/threshold ratio, which is on DeepFace's own
+            # calibrated scale.
+            if verified and distance_ratio <= MATCH_CONFIDENT_RATIO:
                 return _persist_decision(
                     db,
                     kyc_record=kyc_record,
@@ -173,7 +183,7 @@ def process_kyc(kyc_record_id: int):
                     notification_type="KYC_APPROVED",
                 )
 
-            if match_score >= MATCH_FLAGGED_THRESHOLD:
+            if verified:
                 return _persist_decision(
                     db,
                     kyc_record=kyc_record,
