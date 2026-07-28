@@ -52,9 +52,11 @@ export default function KYCPage() {
   const [error, setError] = useState("");
   const [cameraActive, setCameraActive] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
+  const [, setFaceDetected] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const pollRef = useRef<NodeJS.Timeout | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const faceDetectRafRef = useRef<number | null>(null);
 
   const stopCamera = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -261,12 +263,12 @@ useEffect(() => {
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "48px 20px", gap: "8px" }}>
               <div style={{ fontSize: "32px" }}>🪪</div>
               <p style={{ color: "#666", fontSize: "14px" }}>Tap to upload ID photo</p>
-              <p style={{ color: "#aaa", fontSize: "12px" }}>JPG, PNG â€” max 10 MB</p>
+              <p style={{ color: "#aaa", fontSize: "12px" }}>JPG, PNG — max 10 MB</p>
             </div>
           )
         }
       </label>
-      {idPreview && <p style={{ color: "#00C853", fontSize: "13px", textAlign: "center", marginTop: "8px" }}>âœ“ {idFile?.name}</p>}
+      {idPreview && <p style={{ color: "#00C853", fontSize: "13px", textAlign: "center", marginTop: "8px" }}>✓ {idFile?.name}</p>}
       <div style={{ display: "flex", gap: "12px", marginTop: "16px" }}>
         <button onClick={() => { setStep("selfie"); setIdFile(null); setIdPreview(null); }}
           style={{ flex: 1, padding: "13px", borderRadius: "14px", border: "1.5px solid #E5E7EB", backgroundColor: "#fff", fontSize: "14px", fontWeight: "600", cursor: "pointer" }}>
@@ -285,7 +287,7 @@ useEffect(() => {
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "16px", padding: "16px 0" }}>
         {status === "pending" && (
           <>
-            <div style={{ width: "64px", height: "64px", borderRadius: "50%", backgroundColor: "#FFFBEB", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "28px" }}>â³</div>
+            <div style={{ width: "64px", height: "64px", borderRadius: "50%", backgroundColor: "#FFFBEB", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "28px" }}>⏳</div>
             <div style={{ textAlign: "center" }}>
               <p style={{ fontWeight: "700", color: "#000" }}>Under review</p>
               <p style={{ color: "#999", fontSize: "13px", marginTop: "4px" }}>This usually takes under a minute.</p>
@@ -308,7 +310,7 @@ useEffect(() => {
         )}
         {(status === "rejected" || status === "flagged") && (
           <>
-            <div style={{ width: "64px", height: "64px", borderRadius: "50%", backgroundColor: "#FEF2F2", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "28px" }}>âŒ</div>
+            <div style={{ width: "64px", height: "64px", borderRadius: "50%", backgroundColor: "#FEF2F2", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "28px" }}>❌</div>
             <div style={{ textAlign: "center" }}>
               <p style={{ fontWeight: "700", color: "#000" }}>Verification failed</p>
               <p style={{ color: "#999", fontSize: "13px", marginTop: "4px" }}>{status === "flagged" ? "Under manual review." : "Please try again."}</p>

@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
@@ -51,7 +52,7 @@ def _groq_unreachable():
 
 
 @pytest.fixture
-async def auth_tokens(client):
+async def auth_tokens(client, db_session):
     """Register and login a test user, return tokens."""
     await client.post(
         "/api/v1/auth/register",
@@ -62,6 +63,14 @@ async def auth_tokens(client):
             "password": "TestPass123",
         },
     )
+    from app.models.user import User
+    from sqlalchemy import select
+
+    user = await db_session.scalar(
+        select(User).where(User.email == "chatbottest@neobank.com")
+    )
+    user.email_verified_at = datetime.now(timezone.utc)
+    await db_session.commit()
     response = await client.post(
         "/api/v1/auth/login",
         json={
@@ -100,10 +109,10 @@ async def test_chatbot_general_intent_happy_path(
 
     data = response.json()
 
-    assert data["reply"] == "Hello! How can I help you?"
+    assert data["reply"].startswith("Hello!")
     assert data["session_id"] == "test-general-session"
-    assert data["intent"] == "GENERAL"
-    assert data["confidence"] == 0.4
+    assert data["intent"] == "GREETING"
+    assert data["confidence"] == 1.0
     assert data["confirmation_required"] is False
 
 
@@ -145,12 +154,12 @@ async def test_chatbot_transfer_intent_requires_confirmation(
 
     assert data["session_id"] == "test-transfer-session"
     assert data["intent"] == "TRANSFER_INTENT"
-    assert data["confidence"] == 0.92
+    assert data["confidence"] == 1.0
     assert data["confirmation_required"] is True
     assert "confirm" in data["reply"].lower()
 
 
-async def test_chatbot_groq_failure_falls_back_to_general(
+async def test_chatbot_balance_is_deterministic_when_groq_is_unavailable(
     client,
     auth_tokens,
 ):
@@ -178,10 +187,10 @@ async def test_chatbot_groq_failure_falls_back_to_general(
 
     data = response.json()
 
-    assert data["reply"] == "I am still available to help."
+    assert "USD: $0.00" in data["reply"]
     assert data["session_id"] == "test-fallback-session"
-    assert data["intent"] == "GENERAL"
-    assert data["confidence"] == 0.0
+    assert data["intent"] == "BALANCE_QUERY"
+    assert data["confidence"] == 1.0
     assert data["confirmation_required"] is False
 
 
@@ -213,12 +222,15 @@ async def test_chatbot_logs_intent_classification(client, auth_tokens):
 
     async with AsyncSession(engine) as session:
         result = await session.execute(
-            select(ChatbotLog).where(ChatbotLog.intent == "BALANCE_QUERY")
+            select(ChatbotLog)
+            .where(ChatbotLog.intent == "BALANCE_QUERY")
+            .order_by(ChatbotLog.id.desc())
+            .limit(1)
         )
         log = result.scalar_one_or_none()
 
     assert log is not None
-    assert log.confidence == 0.87
+    assert log.confidence == 1.0
     assert log.latency_ms >= 0
 
 async def test_chatbot_banned_ip_returns_429(client, auth_tokens, mock_redis):
@@ -318,6 +330,9 @@ async def test_chatbot_transfer_intent_stores_pending_action(
         "recipient": "+96170123456",
         "amount": "10",
         "currency": "USD",
+        "source_account": data["pending_action"]["source_account"],
+        "fee": "0.00",
+        "total_debit": "10.00",
     }
     assert data["transfer_receipt"] is None
 
@@ -330,6 +345,19 @@ async def test_chatbot_transfer_intent_stores_pending_action(
     assert pending_action["receiver_phone"] == "+96170123456"
     assert pending_action["amount"] == "10"
     assert pending_action["currency"] == "USD"
+
+    repeated = await client.post(
+        "/api/v1/chatbot/message",
+        json={
+            "session_id": session_id,
+            "message": "send 10 USD to +96170123456",
+        },
+        headers={"Authorization": f"Bearer {auth_tokens['access_token']}"},
+    )
+    assert repeated.status_code == 200, repeated.text
+    repeated_pending = json.loads(await mock_redis.get(f"chat_action:{session_id}"))
+    assert repeated.json()["confirmation_required"] is True
+    assert repeated_pending["idempotency_key"] == pending_action["idempotency_key"]
 
 
 async def test_chatbot_accumulates_transfer_draft_across_messages(
@@ -387,6 +415,9 @@ async def test_chatbot_accumulates_transfer_draft_across_messages(
         "recipient": "+96170123456",
         "amount": "50",
         "currency": "USD",
+        "source_account": second_data["pending_action"]["source_account"],
+        "fee": "0.00",
+        "total_debit": "50.00",
     }
     assert await mock_redis.get(f"chat_incomplete_action:{session_id}") is None
     stored = json.loads(await mock_redis.get(f"chat_action:{session_id}"))
@@ -434,7 +465,10 @@ async def test_chatbot_unrelated_reply_discards_incomplete_transfer(
 
     assert unrelated.status_code == 200, unrelated.text
     assert unrelated.json()["confirmation_required"] is False
-    assert unrelated.json()["reply"] == "Hello! How can I help?"
+    assert unrelated.json()["reply"] == (
+        "I can only assist with NeoBank services such as balances, "
+        "transactions, transfers, and exchange rates."
+    )
     assert await mock_redis.get(f"chat_incomplete_action:{session_id}") is None
     assert await mock_redis.get(f"chat_action:{session_id}") is None
 
@@ -755,6 +789,7 @@ async def test_chatbot_confirm_another_users_action_token_returns_403(
 
 async def _register_chatbot_user(client, label: str) -> dict:
     suffix = uuid4().hex[:10]
+    numeric_suffix = f"{int(suffix, 16) % 1_000_000:06d}"
     email = f"{label.lower()}-{suffix}@example.com"
 
     response = await client.post(
@@ -762,11 +797,20 @@ async def _register_chatbot_user(client, label: str) -> dict:
         json={
             "full_name": f"{label} User",
             "email": email,
-            "phone": f"+96171{suffix[:6]}",
+            "phone": f"+96171{numeric_suffix}",
             "password": "TestPass123",
         },
     )
     assert response.status_code == 200, response.text
+
+    from app.db.session import AsyncSessionLocal
+    from app.models.user import User
+    from sqlalchemy import select
+
+    async with AsyncSessionLocal() as session:
+        user = await session.scalar(select(User).where(User.email == email))
+        user.email_verified_at = datetime.now(timezone.utc)
+        await session.commit()
 
     login_response = await client.post(
         "/api/v1/auth/login",

@@ -60,6 +60,21 @@ async def get_recent_transactions_for_user(
 
     for transaction in transactions:
         is_sender = transaction.sender_id == user_id
+        category = (transaction.category or "").strip().lower()
+
+        if category == "exchange":
+            transaction_type = (
+                "exchange"
+                if getattr(transaction.exchange_leg, "value", transaction.exchange_leg)
+                == "debit"
+                else "receive"
+            )
+        elif category in {"top-up", "top_up", "topup"}:
+            transaction_type = "top_up"
+        elif category == "fee":
+            transaction_type = "fee"
+        else:
+            transaction_type = "send" if is_sender else "receive"
 
         counterparty_id = (
             transaction.receiver_id
@@ -72,7 +87,7 @@ async def get_recent_transactions_for_user(
         items.append(
             {
                 "id": transaction.id,
-                "type": "send" if is_sender else "receive",
+                "type": transaction_type,
                 "amount": float(transaction.amount),
                 "currency": transaction.currency.value,
                 "counterparty_name": (

@@ -1,11 +1,20 @@
 "use client";
 
 import axios from "axios";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import api from "@/lib/axios";
 
 interface ChatMessage { role: "user" | "bot"; text: string; }
-interface PendingAction { type?: string; method?: string; recipient?: string; amount?: string; currency?: string; }
+interface PendingAction {
+  type?: string;
+  method?: string;
+  recipient?: string;
+  amount?: string;
+  currency?: string;
+  source_account?: string;
+  fee?: string;
+  total_debit?: string;
+}
 interface HistoryMessage { role: "user" | "assistant" | "system"; content: string; }
 interface ChatHistoryResponse { session_id: string; messages: HistoryMessage[]; }
 
@@ -89,6 +98,7 @@ export default function ChatWidget() {
   const [passcode, setPasscode] = useState("");
   const [passcodeLoading, setPasscodeLoading] = useState(false);
   const [passcodeError, setPasscodeError] = useState("");
+  const requestInFlight = useRef(false);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -124,7 +134,8 @@ export default function ChatWidget() {
   }, [sessionId]);
 
   const sendMessage = async (text: string, actionToken?: string) => {
-    if (!text.trim() || !sessionId) return;
+    if (!text.trim() || !sessionId || requestInFlight.current) return;
+    requestInFlight.current = true;
     if (!actionToken) {
       setMessages((prev) => [...prev, { role: "user", text }]);
     }
@@ -146,7 +157,10 @@ export default function ChatWidget() {
       if (errorMessage) {
         setMessages((prev) => [...prev, { role: "bot", text: errorMessage }]);
       }
-    } finally { setChatLoading(false); }
+    } finally {
+      requestInFlight.current = false;
+      setChatLoading(false);
+    }
   };
 
   const handleConfirmClick = () => {
@@ -156,7 +170,7 @@ export default function ChatWidget() {
   };
 
   const handlePasscodeSubmit = async () => {
-    if (passcode.length < 6) return;
+    if (passcode.length < 6 || passcodeLoading || chatLoading) return;
     setPasscodeLoading(true);
     setPasscodeError("");
     try {
@@ -174,7 +188,6 @@ export default function ChatWidget() {
   const handleCancel = async () => {
     setPendingAction(null);
     setShowPasscode(false);
-    setMessages((prev) => [...prev, { role: "user", text: "cancel" }]);
     await sendMessage("cancel");
   };
 
@@ -267,9 +280,12 @@ export default function ChatWidget() {
                   {pendingAction.amount && pendingAction.currency && (
                     <p style={{ fontSize: "13px", color: "#555" }}>Amount: {pendingAction.amount} {pendingAction.currency}</p>
                   )}
+                  {pendingAction.source_account && <p style={{ fontSize: "13px", color: "#555" }}>From: {pendingAction.source_account}</p>}
+                  {pendingAction.fee && pendingAction.currency && <p style={{ fontSize: "13px", color: "#555" }}>Fee: {pendingAction.fee} {pendingAction.currency}</p>}
+                  {pendingAction.total_debit && pendingAction.currency && <p style={{ fontSize: "13px", fontWeight: "700", color: "#333" }}>Total debit: {pendingAction.total_debit} {pendingAction.currency}</p>}
                   <p style={{ fontSize: "11px", color: "#aaa" }}>{"\u23F1"} Expires in 5 minutes</p>
                   <div style={{ display: "flex", gap: "8px" }}>
-                    <button onClick={handleConfirmClick} style={{ flex: 1, backgroundColor: "#00C853", color: "#fff", border: "none", borderRadius: "10px", padding: "10px", fontWeight: "700", cursor: "pointer", fontSize: "13px" }}>
+                    <button onClick={handleConfirmClick} disabled={chatLoading || passcodeLoading} style={{ flex: 1, backgroundColor: "#00C853", color: "#fff", border: "none", borderRadius: "10px", padding: "10px", fontWeight: "700", cursor: "pointer", fontSize: "13px" }}>
                       Confirm
                     </button>
                     <button onClick={handleCancel} style={{ flex: 1, backgroundColor: "#F5F5F5", color: "#333", border: "none", borderRadius: "10px", padding: "10px", fontWeight: "600", cursor: "pointer", fontSize: "13px" }}>

@@ -12,6 +12,7 @@ from fastapi import (
     status,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from app.api.dependencies import get_current_user
 from app.core.redis import (
@@ -25,6 +26,7 @@ from app.core.redis import (
 )
 from app.db.session import get_async_db
 from app.models.chatbot_log import ChatbotLog
+from app.models.wallet import Wallet, WalletCurrency
 from app.schemas.chatbot import (
     ChatbotMessageRequest,
     ChatbotHistoryResponse,
@@ -37,8 +39,14 @@ from app.services.chatbot_service import (
     ChatSessionOwnershipError,
     delete_chat_session,
     get_chat_history,
-    get_chatbot_response,
+    get_chatbot_response,  # noqa: F401 - retained as a compatibility patch target
     save_chat_turn,
+)
+from app.services.chatbot_handlers import (
+    OUT_OF_SCOPE_REPLY,
+    balance_reply,
+    exchange_reply,
+    transaction_reply,
 )
 from app.services.chatbot_transfer import (
     ChatbotPartialTransferDraft,
@@ -311,10 +319,60 @@ async def send_chatbot_message(
                 )
 
             await delete_chat_incomplete_action(body.session_id)
-            pending_action = draft.to_pending_action(
+            wallet = await db.scalar(
+                select(Wallet).where(
+                    Wallet.user_id == user_id,
+                    Wallet.currency == WalletCurrency(draft.currency),
+                )
+            )
+            if wallet is None:
+                reply = f"You do not have a {draft.currency} source wallet."
+                await save_chat_turn(
+                    db=db, user_id=user_id, session_id=body.session_id,
+                    message=body.message, reply=reply,
+                )
+                return ChatbotMessageResponse(
+                    reply=reply, session_id=body.session_id,
+                    intent=classification.intent,
+                    confidence=classification.confidence,
+                )
+
+            fee = Decimal("0.00")
+            response_payload = {
+                **draft.to_response_payload(),
+                "source_account": wallet.account_number or wallet.iban or draft.currency,
+                "fee": str(fee),
+                "total_debit": str(draft.amount + fee),
+            }
+            existing_pending = await get_chat_pending_action(body.session_id)
+            if (
+                existing_pending
+                and int(existing_pending.get("user_id", -1)) == user_id
+                and all(
+                    str(existing_pending.get(key)) == str(response_payload.get(key))
+                    for key in ("recipient", "amount", "currency", "source_account", "fee", "total_debit")
+                )
+            ):
+                reply = build_transfer_confirmation_reply(draft)
+                await save_chat_turn(
+                    db=db, user_id=user_id, session_id=body.session_id,
+                    message=body.message, reply=reply,
+                )
+                return ChatbotMessageResponse(
+                    reply=reply, session_id=body.session_id,
+                    intent=classification.intent,
+                    confidence=classification.confidence,
+                    confirmation_required=True,
+                    pending_action=response_payload,
+                )
+
+            pending_action = {
+                **draft.to_pending_action(
                 user_id=user_id,
                 idempotency_key=f"chatbot:{body.session_id}:{uuid4().hex}",
-            )
+                ),
+                **response_payload,
+            }
             await store_chat_pending_action(
                 body.session_id,
                 pending_action,
@@ -335,14 +393,30 @@ async def send_chatbot_message(
                 intent=classification.intent,
                 confidence=classification.confidence,
                 confirmation_required=True,
-                pending_action=draft.to_response_payload(),
+                pending_action=response_payload,
             )
 
-        reply = await get_chatbot_response(
-            message=body.message,
-            session_id=body.session_id,
-            user_id=user_id,
+        if classification.intent == "BALANCE_QUERY":
+            reply = await balance_reply(user_id=user_id, db=db)
+        elif classification.intent in {"LAST_TRANSACTION_QUERY"}:
+            reply = await transaction_reply(user_id=user_id, db=db, mode="last")
+        elif classification.intent in {"RECENT_TRANSACTIONS_QUERY", "TRANSACTION_QUERY"}:
+            reply = await transaction_reply(user_id=user_id, db=db, mode="recent")
+        elif classification.intent == "LAST_SPENDING_QUERY":
+            reply = await transaction_reply(user_id=user_id, db=db, mode="last_spending")
+        elif classification.intent in {"EXCHANGE_RATE_QUERY", "CURRENCY_CONVERSION", "EXCHANGE_QUERY"}:
+            reply = await exchange_reply(message)
+        elif classification.intent == "GREETING":
+            reply = "Hello! I can help with NeoBank balances, transactions, transfers, and exchange rates."
+        else:
+            reply = OUT_OF_SCOPE_REPLY
+
+        await save_chat_turn(
             db=db,
+            user_id=user_id,
+            session_id=body.session_id,
+            message=body.message,
+            reply=reply,
         )
 
     except ChatSessionOwnershipError as exc:
