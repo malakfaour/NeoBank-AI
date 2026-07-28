@@ -144,3 +144,44 @@ def test_process_kyc_rejects_when_liveness_fails(monkeypatch):
     assert verify_called is False
     assert result["status"] == KYCRecordStatus.rejected.value
     assert result["rejection_reason"] == "liveness_failed"
+
+
+def test_process_kyc_rejects_when_no_face_detected(monkeypatch):
+    session_factory = _build_sync_session()
+    user_id, record_id = _seed_record(session_factory, label="noface")
+
+    monkeypatch.setattr(kyc_tasks, "SyncSessionLocal", session_factory)
+    _patch_local_files(monkeypatch)
+
+    fake_module = SimpleNamespace(
+        DeepFace=SimpleNamespace(
+            extract_faces=lambda **kwargs: (_ for _ in ()).throw(
+                ValueError("Face could not be detected")
+            )
+        )
+    )
+    monkeypatch.setitem(sys.modules, "deepface", fake_module)
+
+    verify_called = False
+
+    def _never_called(*args, **kwargs):
+        nonlocal verify_called
+        verify_called = True
+        return {}
+
+    monkeypatch.setattr(kyc_tasks, "verify_face", _never_called)
+
+    result = kyc_tasks.process_kyc(record_id)
+
+    with session_factory() as db:
+        record = db.get(KYCRecord, record_id)
+        user = db.get(User, user_id)
+        assert record.status == KYCRecordStatus.rejected
+        assert user.kyc_status == KYCStatus.rejected
+        assert record.match_score is None
+        assert record.liveness_score == pytest.approx(0.0)
+        assert record.rejection_reason == "no_face_detected"
+
+    assert verify_called is False
+    assert result["status"] == KYCRecordStatus.rejected.value
+    assert result["rejection_reason"] == "no_face_detected"

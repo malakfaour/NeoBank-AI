@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from app.celery_app import celery_app
-from app.core.config import settings
 from app.core.storage import download_file
 from app.db.sync_session import SyncSessionLocal
 from app.models.kyc_record import KYCRecord, KYCRecordStatus
@@ -17,13 +16,31 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from ml.kyc.face_verification import verify_face  # noqa: E402
-from ml.kyc.liveness import require_liveness  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
+LIVENESS_THRESHOLD = 0.7
+MATCH_APPROVED_THRESHOLD = 0.8
+MATCH_FLAGGED_THRESHOLD = 0.6
+
 
 def _run_liveness_check(selfie_path: str) -> float:
-    return require_liveness(selfie_path)
+    from deepface import DeepFace
+
+    faces = DeepFace.extract_faces(
+        img_path=selfie_path,
+        anti_spoofing=True,
+        enforce_detection=True,
+    )
+    if not faces:
+        raise ValueError("No face detected in selfie")
+
+    face = faces[0]
+    is_real = bool(face.get("is_real", False))
+    antispoof_score = float(face.get("antispoof_score", 0.0))
+    if not is_real or antispoof_score < LIVENESS_THRESHOLD:
+        raise RuntimeError(f"liveness_failed:{antispoof_score}")
+    return antispoof_score
 
 
 def _persist_decision(
@@ -78,11 +95,7 @@ def process_kyc(kyc_record_id: int):
         with SyncSessionLocal() as db:
             kyc_record = db.get(KYCRecord, kyc_record_id)
             if kyc_record is None:
-                logger.warning(
-                    "KYC record %s not found",
-                    kyc_record_id,
-                    extra={"kyc_record_id": kyc_record_id},
-                )
+                logger.warning("KYC record %s not found", kyc_record_id)
                 return {"kyc_record_id": kyc_record_id, "status": "missing"}
 
             if kyc_record.status != KYCRecordStatus.pending:
@@ -96,12 +109,7 @@ def process_kyc(kyc_record_id: int):
 
             user = db.get(User, kyc_record.user_id)
             if user is None:
-                logger.warning(
-                    "User %s missing for KYC record %s",
-                    kyc_record.user_id,
-                    kyc_record_id,
-                    extra={"kyc_record_id": kyc_record_id, "user_id": kyc_record.user_id},
-                )
+                logger.warning("User %s missing for KYC record %s", kyc_record.user_id, kyc_record_id)
                 return {"kyc_record_id": kyc_record_id, "status": "missing_user"}
 
             if not kyc_record.selfie_url or not kyc_record.id_photo_url:
@@ -122,6 +130,18 @@ def process_kyc(kyc_record_id: int):
 
             try:
                 liveness_score = _run_liveness_check(selfie_temp.name)
+            except ValueError:
+                return _persist_decision(
+                    db,
+                    kyc_record=kyc_record,
+                    user=user,
+                    status=KYCRecordStatus.rejected,
+                    user_status=KYCStatus.rejected,
+                    match_score=None,
+                    liveness_score=0.0,
+                    rejection_reason="no_face_detected",
+                    notification_type="KYC_REJECTED",
+                )
             except RuntimeError as exc:
                 reason, _, score = str(exc).partition(":")
                 parsed_score = float(score) if score else 0.0
@@ -137,23 +157,10 @@ def process_kyc(kyc_record_id: int):
                     notification_type="KYC_REJECTED",
                 )
 
-            try:
-                verification = verify_face(selfie_temp.name, id_temp.name)
-            except ValueError as exc:
-                return _persist_decision(
-                    db,
-                    kyc_record=kyc_record,
-                    user=user,
-                    status=KYCRecordStatus.rejected,
-                    user_status=KYCStatus.rejected,
-                    match_score=None,
-                    liveness_score=liveness_score,
-                    rejection_reason=f"face_verification_failed:{exc}",
-                    notification_type="KYC_REJECTED",
-                )
+            verification = verify_face(selfie_temp.name, id_temp.name)
             match_score = float(verification["match_score"])
 
-            if match_score >= settings.KYC_MATCH_APPROVE_THRESHOLD:
+            if match_score >= MATCH_APPROVED_THRESHOLD:
                 return _persist_decision(
                     db,
                     kyc_record=kyc_record,
@@ -166,7 +173,7 @@ def process_kyc(kyc_record_id: int):
                     notification_type="KYC_APPROVED",
                 )
 
-            if match_score >= settings.KYC_MATCH_FLAG_THRESHOLD:
+            if match_score >= MATCH_FLAGGED_THRESHOLD:
                 return _persist_decision(
                     db,
                     kyc_record=kyc_record,
@@ -191,11 +198,7 @@ def process_kyc(kyc_record_id: int):
                 notification_type="KYC_REJECTED",
             )
     except Exception:
-        logger.exception(
-            "KYC processing failed for record %s",
-            kyc_record_id,
-            extra={"kyc_record_id": kyc_record_id},
-        )
+        logger.exception("KYC processing failed for record %s", kyc_record_id)
         with SyncSessionLocal() as db:
             kyc_record = db.get(KYCRecord, kyc_record_id)
             if kyc_record is not None:
