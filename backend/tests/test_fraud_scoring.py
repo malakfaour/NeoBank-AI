@@ -315,4 +315,76 @@ def test_load_isolation_forest_s3_failure_raises_file_not_found(monkeypatch, tmp
 
     with pytest.raises(FileNotFoundError):
         fraud_scoring._load_isolation_forest()
-        
+
+def test_compute_xgb_features_hour_and_day_use_beirut_local_time():
+    """
+    Regression test: hour_of_day and day_of_week are meant to represent
+    LOCAL time-of-day/day-of-week risk ("is this an unusual hour to be
+    transacting"), not an arbitrary UTC offset -- same Asia/Beirut
+    convention already used correctly elsewhere in this codebase (see
+    market_hours.py's MARKET_TIMEZONE). transaction.created_at is stored
+    as TIMESTAMPTZ (UTC); _compute_xgb_features() used to read
+    transaction.created_at.hour / .weekday() directly, which is the UTC
+    hour/weekday, not the Beirut one.
+
+    Uses a UTC timestamp deliberately chosen to cross both a day AND an
+    hour boundary once converted to Beirut time (UTC+3 in July, DST):
+    2026-07-25 23:30 UTC (a Saturday) is 2026-07-26 02:30 Beirut time (a
+    Sunday) -- so a bug here would show up as both a wrong hour (23 vs 2)
+    and a wrong weekday (Saturday=5 vs Sunday=6), not just an off-by-a-
+    few-hours hour value that could be mistaken for something else.
+    """
+    from datetime import datetime, timezone
+    from decimal import Decimal
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from app.models.transaction import Transaction, TransactionCurrency, TransactionStatus
+    from app.models.user import KYCStatus, User, UserRole
+    from app.services.fraud_scoring import _compute_xgb_features
+
+    engine = create_engine("sqlite:///:memory:")
+    User.__table__.create(bind=engine, checkfirst=True)
+    Transaction.__table__.create(bind=engine, checkfirst=True)
+    Session = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with Session() as db:
+        sender = User(
+            full_name="Sender", email="tzsender@example.com", phone="+96170000111",
+            password_hash="hashed", kyc_status=KYCStatus.approved, role=UserRole.customer,
+        )
+        receiver = User(
+            full_name="Receiver", email="tzreceiver@example.com", phone="+96170000112",
+            password_hash="hashed", kyc_status=KYCStatus.approved, role=UserRole.customer,
+        )
+        db.add_all([sender, receiver])
+        db.commit()
+
+        utc_created_at = datetime(2026, 7, 25, 23, 30, 0, tzinfo=timezone.utc)
+        transaction = Transaction(
+            sender_id=sender.id,
+            receiver_id=receiver.id,
+            amount=Decimal("50.00"),
+            currency=TransactionCurrency.USD,
+            status=TransactionStatus.completed,
+            idempotency_key="tz-test-key",
+            created_at=utc_created_at,
+        )
+        db.add(transaction)
+        db.commit()
+
+        features = _compute_xgb_features(db, transaction)
+
+    # [amount, amount_to_user_avg_ratio, is_new_recipient, hour_of_day, day_of_week, sender_tx_count_30d, currency_match]
+    hour_of_day = features[3]
+    day_of_week = features[4]
+
+    assert hour_of_day == 2, (
+        f"Expected Beirut local hour 2 (02:30), got {hour_of_day} "
+        f"(23 would mean this is still reading the raw UTC hour)"
+    )
+    assert day_of_week == 6, (
+        f"Expected Sunday (weekday=6) in Beirut local time, got {day_of_week} "
+        f"(5 would mean this is still reading the UTC weekday, Saturday)"
+    )
