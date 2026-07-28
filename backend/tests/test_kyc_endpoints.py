@@ -110,6 +110,47 @@ async def test_upload_kyc_requires_authentication(client):
 
 
 @pytest.mark.anyio
+async def test_selfie_draft_can_be_saved_before_identification_documents(
+    client, monkeypatch
+):
+    tokens = await _register_user(client, "kyc-split-documents")
+    headers = {"Authorization": f"Bearer {tokens['access_token']}"}
+    uploaded_keys = []
+
+    def fake_upload_file(file_source, destination_key, bucket_name=None, extra_args=None):
+        uploaded_keys.append(destination_key)
+        return destination_key
+
+    monkeypatch.setattr("app.api.v1.endpoints.kyc.upload_file", fake_upload_file)
+
+    selfie = await client.post(
+        "/api/v1/kyc/selfie",
+        headers=headers,
+        files={"selfie": ("selfie.jpg", b"fake-selfie", "image/jpeg")},
+    )
+    assert selfie.status_code == 202, selfie.text
+
+    documents = await client.post(
+        "/api/v1/kyc/upload",
+        headers=headers,
+        data={"document_type": "national_id", "submit_for_review": "false"},
+        files={
+            "id_photo": ("front.jpg", b"fake-front", "image/jpeg"),
+            "back_id_photo": ("back.jpg", b"fake-back", "image/jpeg"),
+        },
+    )
+    assert documents.status_code == 202, documents.text
+    assert documents.json()["selfie_url"] == selfie.json()["selfie_url"]
+    assert len(uploaded_keys) == 3
+
+    profile = await client.get("/api/v1/kyc/profile", headers=headers)
+    assert profile.status_code == 200
+    assert profile.json()["has_selfie"] is True
+    assert profile.json()["has_front_id"] is True
+    assert profile.json()["has_back_id"] is True
+
+
+@pytest.mark.anyio
 async def test_kyc_profile_progress_can_be_saved_and_resumed(client):
     tokens = await _register_user(client, "kyc-progress")
     headers = {"Authorization": f"Bearer {tokens['access_token']}"}

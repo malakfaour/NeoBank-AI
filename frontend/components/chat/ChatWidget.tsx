@@ -1,8 +1,9 @@
 "use client";
 
 import axios from "axios";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import api from "@/lib/axios";
+import { useAuthStore } from "@/store/authStore";
 
 interface ChatMessage { role: "user" | "bot"; text: string; }
 interface PendingAction {
@@ -20,12 +21,17 @@ interface ChatHistoryResponse { session_id: string; messages: HistoryMessage[]; 
 
 const CHAT_SESSION_STORAGE_KEY = "chatbot_session_id";
 
-function getOrCreateSessionId(): string {
-  const storedSessionId = localStorage.getItem(CHAT_SESSION_STORAGE_KEY);
+export function getChatSessionStorageKey(userId: string | number): string {
+  return `${CHAT_SESSION_STORAGE_KEY}:${userId}`;
+}
+
+function getOrCreateSessionId(userId: string | number): string {
+  const storageKey = getChatSessionStorageKey(userId);
+  const storedSessionId = localStorage.getItem(storageKey);
   if (storedSessionId) return storedSessionId;
 
   const sessionId = crypto.randomUUID();
-  localStorage.setItem(CHAT_SESSION_STORAGE_KEY, sessionId);
+  localStorage.setItem(storageKey, sessionId);
   return sessionId;
 }
 
@@ -86,12 +92,22 @@ function getChatErrorMessage(error: unknown, isTransferAttempt: boolean): string
 }
 
 export default function ChatWidget() {
+  const userId = useAuthStore((state) => state.user?.id);
   const [chatOpen, setChatOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
-  const [sessionId, setSessionId] = useState(() => (
-    typeof window === "undefined" ? "" : getOrCreateSessionId()
-  ));
+  const defaultSessionId = useMemo(() => (
+    typeof window !== "undefined" && userId ? getOrCreateSessionId(userId) : ""
+  ), [userId]);
+  const [sessionOverride, setSessionOverride] = useState<{
+    userId: string;
+    sessionId: string;
+  } | null>(null);
+  const sessionId = (
+    sessionOverride?.userId === String(userId)
+      ? sessionOverride.sessionId
+      : defaultSessionId
+  );
   const [chatLoading, setChatLoading] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [showPasscode, setShowPasscode] = useState(false);
@@ -101,7 +117,7 @@ export default function ChatWidget() {
   const requestInFlight = useRef(false);
 
   useEffect(() => {
-    if (!sessionId) return;
+    if (!sessionId || !userId) return;
 
     let active = true;
 
@@ -123,7 +139,17 @@ export default function ChatWidget() {
       setMessages(restoredMessages);
     }).catch((error: unknown) => {
       // A newly generated session has no history yet.
-      if (!axios.isAxiosError(error) || error.response?.status !== 404) {
+      if (axios.isAxiosError(error) && error.response?.status === 403) {
+        if (!active) return;
+        const freshSessionId = crypto.randomUUID();
+        localStorage.setItem(getChatSessionStorageKey(userId), freshSessionId);
+        setMessages([]);
+        setPendingAction(null);
+        setSessionOverride({
+          userId: String(userId),
+          sessionId: freshSessionId,
+        });
+      } else if (!axios.isAxiosError(error) || error.response?.status !== 404) {
         console.error("Unable to restore chatbot history", error);
       }
     });
@@ -131,7 +157,7 @@ export default function ChatWidget() {
     return () => {
       active = false;
     };
-  }, [sessionId]);
+  }, [sessionId, userId]);
 
   const sendMessage = async (text: string, actionToken?: string) => {
     if (!text.trim() || !sessionId || requestInFlight.current) return;
@@ -208,8 +234,13 @@ export default function ChatWidget() {
     }
 
     const freshSessionId = crypto.randomUUID();
-    localStorage.setItem(CHAT_SESSION_STORAGE_KEY, freshSessionId);
-    setSessionId(freshSessionId);
+    if (userId) {
+      localStorage.setItem(getChatSessionStorageKey(userId), freshSessionId);
+    }
+    setSessionOverride({
+      userId: String(userId),
+      sessionId: freshSessionId,
+    });
     setMessages([]);
     setInput("");
     setPendingAction(null);

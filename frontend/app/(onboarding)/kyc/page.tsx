@@ -4,10 +4,29 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import api from "@/lib/axios";
 import { useAuthStore } from "@/store/authStore";
+import SelfieCapture from "@/components/kyc/SelfieCapture";
 
 type Profile = Record<string, string>;
 type Workflow = "not_started" | "in_progress" | "pending" | "approved" | "rejected";
 export type KYCDocumentType = "national_id" | "passport";
+
+export function buildKycUploadForm(
+  files: { front: File; back: File },
+  documentType: KYCDocumentType,
+) {
+  const form = new FormData();
+  form.append("id_photo", files.front);
+  form.append("back_id_photo", files.back);
+  form.append("document_type", documentType);
+  form.append("submit_for_review", "false");
+  return form;
+}
+
+export function buildKycSelfieForm(selfie: File) {
+  const form = new FormData();
+  form.append("selfie", selfie);
+  return form;
+}
 
 export function DocumentTypeSelection({
   selected, onSelect, onBack, onContinue,
@@ -69,17 +88,6 @@ const steps: { title: string; subtitle: string; fields: Field[] }[] = [
     ],
   },
   {
-    title: "Identification",
-    subtitle: "Provide current identification and clear images.",
-    fields: [
-      { key: "identification_type", label: "Identification type", options: ["national_id", "passport"], required: true },
-      { key: "identification_number", label: "Identification number", required: true },
-      { key: "record_number", label: "Record number" },
-      { key: "register_place", label: "Register place" },
-      { key: "id_expiry_date", label: "ID expiry date", type: "date", required: true },
-    ],
-  },
-  {
     title: "Residential address",
     subtitle: "Enter your primary place of residence.",
     fields: [
@@ -96,7 +104,7 @@ const steps: { title: string; subtitle: string; fields: Field[] }[] = [
     ],
   },
   {
-    title: "Employment",
+    title: "Employment information",
     subtitle: "Employment details help us meet regulatory requirements.",
     fields: [
       { key: "occupation", label: "Employment status", options: ["employee", "business_owner", "student", "unemployed"], required: true },
@@ -116,12 +124,51 @@ const steps: { title: string; subtitle: string; fields: Field[] }[] = [
       { key: "other_source_of_income", label: "Other source of income" },
     ],
   },
-  { title: "Review and consent", subtitle: "Review your information before submitting.", fields: [] },
+  {
+    title: "Selfie verification",
+    subtitle: "Capture a live selfie so we can verify that it is really you.",
+    fields: [],
+  },
+  {
+    title: "Identification and document upload",
+    subtitle: "Provide current identification, review your details, and submit.",
+    fields: [
+      { key: "identification_type", label: "Identification type", options: ["national_id", "passport"], required: true },
+      { key: "identification_number", label: "Identification number", required: true },
+      { key: "record_number", label: "Record number" },
+      { key: "register_place", label: "Register place" },
+      { key: "id_expiry_date", label: "ID expiry date", type: "date", required: true },
+    ],
+  },
 ];
+
+export function getKycResumeStep(data: KYCResponse) {
+  const hasAll = (keys: string[]) => keys.every(
+    (key) => String(data.profile_data[key] ?? "").trim(),
+  );
+  if (!hasAll(steps[0].fields.filter((field) => field.required).map((field) => field.key))) return 1;
+  if (!hasAll(steps[1].fields.filter((field) => field.required).map((field) => field.key))) return 2;
+  if (!hasAll(["occupation"])) return 3;
+  if (
+    data.profile_data.occupation === "employee"
+    && !hasAll(["employer_name", "position", "employment_address", "employer_phone"])
+  ) return 3;
+  if (!hasAll(steps[3].fields.filter((field) => field.required).map((field) => field.key))) return 4;
+  if (!data.has_selfie) return 5;
+  const identificationComplete = steps[5].fields
+    .filter((field) => field.required)
+    .every((field) => String(data.profile_data[field.key] ?? "").trim());
+  if (!identificationComplete || !data.has_front_id || !data.has_back_id) return 6;
+  return Math.min(Math.max(data.current_step || 6, 1), 6);
+}
 
 const inputStyle: React.CSSProperties = {
   width: "100%", padding: "12px 14px", borderRadius: "12px",
   border: "1px solid #E5E7EB", background: "#fff", color: "#111",
+};
+
+const multipartRequestConfig = {
+  headers: { "Content-Type": "multipart/form-data" },
 };
 
 export default function KYCPage() {
@@ -143,7 +190,7 @@ export default function KYCPage() {
   useEffect(() => {
     api.get<KYCResponse>("/kyc/profile").then(({ data }) => {
       setProfile(data.profile_data ?? {});
-      setStep(Math.min(Math.max(data.current_step || 1, 1), 6));
+      setStep(getKycResumeStep(data));
       setWorkflow(data.workflow_status);
       setDocuments({ front: data.has_front_id, back: data.has_back_id, selfie: data.has_selfie });
       setRejectionReason(data.rejection_reason ?? null);
@@ -153,7 +200,7 @@ export default function KYCPage() {
 
   const visibleFields = useMemo(() => {
     const fields = steps[step - 1].fields;
-    if (step !== 4) return fields;
+    if (step !== 3) return fields;
     return fields.filter((field) => {
       if (["employer_name", "employment_address"].includes(field.key)) {
         return ["employee", "business_owner"].includes(profile.occupation);
@@ -169,27 +216,42 @@ export default function KYCPage() {
     visibleFields.forEach((field) => {
       if (field.required && !String(profile[field.key] ?? "").trim()) nextErrors[field.key] = `${field.label} is required.`;
     });
-    if (step === 2) {
+    if (step === 3 && profile.occupation === "employee") {
+      visibleFields
+        .filter((field) => ["employer_name", "position", "employment_address", "employer_phone"].includes(field.key))
+        .forEach((field) => {
+          if (!String(profile[field.key] ?? "").trim()) nextErrors[field.key] = `${field.label} is required.`;
+        });
+    }
+    if (step === 5) {
+      if (!documents.selfie && !files.selfie) nextErrors.selfie = "Selfie is required.";
+    }
+    if (step === 6) {
       if (!documents.front && !files.front) nextErrors.front = "Front ID image is required.";
       if (!documents.back && !files.back) nextErrors.back = "Back ID image is required.";
-      if (!documents.selfie && !files.selfie) nextErrors.selfie = "Selfie is required.";
     }
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
   };
 
   const saveDraft = async (targetStep = step) => {
-    await api.put("/kyc/profile", { current_step: targetStep, profile_data: profile });
-    if (step === 2 && files.front && files.back && files.selfie) {
-      const form = new FormData();
-      form.append("id_photo", files.front);
-      form.append("back_id_photo", files.back);
-      form.append("selfie", files.selfie);
-      form.append("document_type", profile.identification_type || "national_id");
-      form.append("submit_for_review", "false");
-      await api.post("/kyc/upload", form);
-      setDocuments({ front: true, back: true, selfie: true });
+    if (step === 5 && files.selfie) {
+      await api.post(
+        "/kyc/selfie",
+        buildKycSelfieForm(files.selfie),
+        multipartRequestConfig,
+      );
+      setDocuments((current) => ({ ...current, selfie: true }));
     }
+    if (step === 6 && files.front && files.back) {
+      const form = buildKycUploadForm(
+        { front: files.front, back: files.back },
+        (profile.identification_type as KYCDocumentType) || "national_id",
+      );
+      await api.post("/kyc/upload", form, multipartRequestConfig);
+      setDocuments((current) => ({ ...current, front: true, back: true }));
+    }
+    await api.put("/kyc/profile", { current_step: targetStep, profile_data: profile });
   };
 
   const next = async () => {
@@ -208,6 +270,7 @@ export default function KYCPage() {
   };
 
   const submit = async () => {
+    if (!validateStep()) return;
     if (!consents.terms || !consents.correct || !consents.privacy) {
       setMessage("Accept all confirmations before submitting.");
       return;
@@ -255,7 +318,7 @@ export default function KYCPage() {
         <p style={{ color: "#777", marginBottom: 24 }}>{steps[step - 1].subtitle}</p>
         {message && <div role="alert" style={{ color: "#B91C1C", background: "#FEF2F2", padding: 12, borderRadius: 10, marginBottom: 16 }}>{message}</div>}
 
-        {step < 6 && <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 16 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 16 }}>
           {visibleFields.map((field) => <label key={field.key} style={{ display: "grid", gap: 6, fontSize: 13, fontWeight: 600 }}>
             {field.label}{field.required ? " *" : ""}
             {field.options ? <select value={profile[field.key] ?? ""} onChange={(e) => setProfile({ ...profile, [field.key]: e.target.value })} style={inputStyle}>
@@ -263,17 +326,34 @@ export default function KYCPage() {
             </select> : <input type={field.type || "text"} value={profile[field.key] ?? ""} onChange={(e) => setProfile({ ...profile, [field.key]: e.target.value })} style={inputStyle} />}
             {errors[field.key] && <span style={{ color: "#B91C1C", fontWeight: 400 }}>{errors[field.key]}</span>}
           </label>)}
-          {step === 2 && (["front", "back", "selfie"] as const).map((key) => <label key={key} style={{ display: "grid", gap: 6, fontSize: 13, fontWeight: 600 }}>
-            {key === "front" ? "Front ID image" : key === "back" ? "Back ID image" : "Selfie"} *
+          {step === 6 && (["front", "back"] as const).map((key) => <label key={key} style={{ display: "grid", gap: 6, fontSize: 13, fontWeight: 600 }}>
+            {key === "front" ? "Front ID image" : "Back ID image"} *
             <input type="file" accept="image/jpeg,image/png" onChange={(e) => setFiles({ ...files, [key]: e.target.files?.[0] })} style={inputStyle} />
             {documents[key] && !files[key] && <span style={{ color: "#00A844" }}>Already uploaded</span>}
             {errors[key] && <span style={{ color: "#B91C1C", fontWeight: 400 }}>{errors[key]}</span>}
           </label>)}
-        </div>}
+          {step === 5 && <div style={{ display: "grid", gap: 6, fontSize: 13, fontWeight: 600, gridColumn: "1 / -1" }}>
+            Selfie *
+            <SelfieCapture
+              capturedSelfie={files.selfie}
+              hasSavedSelfie={documents.selfie}
+              onCapture={(selfie) => {
+                setFiles((current) => ({ ...current, selfie }));
+                setErrors((current) => ({ ...current, selfie: "" }));
+              }}
+              onRetake={() => setFiles((current) => {
+                const remaining = { ...current };
+                delete remaining.selfie;
+                return remaining;
+              })}
+            />
+            {errors.selfie && <span style={{ color: "#B91C1C", fontWeight: 400 }}>{errors.selfie}</span>}
+          </div>}
+        </div>
 
         {step === 6 && <>
           <div style={{ display: "grid", gap: 12, marginBottom: 20 }}>
-            {steps.slice(0, 5).map((section) => <details key={section.title} style={{ border: "1px solid #E5E7EB", borderRadius: 12, padding: 14 }}>
+            {[...steps.slice(0, 4), steps[5]].map((section) => <details key={section.title} style={{ border: "1px solid #E5E7EB", borderRadius: 12, padding: 14 }}>
               <summary style={{ fontWeight: 700, cursor: "pointer" }}>{section.title}</summary>
               {section.fields.filter((field) => profile[field.key]).map((field) => <p key={field.key} style={{ color: "#666", fontSize: 13 }}><strong>{field.label}:</strong> {field.key === "identification_number" ? `••••${profile[field.key].slice(-4)}` : profile[field.key]}</p>)}
             </details>)}

@@ -95,17 +95,49 @@ async def test_non_approved_chatbot_transfer_is_blocked_without_pending_action(
     await db_session.commit()
 
     session_id = "kyc-locked-chatbot-transfer"
-    response = await client.post(
-        "/api/v1/chatbot/message",
-        json={"session_id": session_id, "message": "send 10 USD to +96170123456"},
-        headers={"Authorization": f"Bearer {auth_tokens['access_token']}"},
-    )
+    with patch(
+        "app.api.v1.endpoints.chatbot.consume_action_token",
+        new_callable=AsyncMock,
+    ) as consume_token:
+        response = await client.post(
+            "/api/v1/chatbot/message",
+            json={"session_id": session_id, "message": "send 10 USD to +96170123456"},
+            headers={
+                "Authorization": f"Bearer {auth_tokens['access_token']}",
+                "X-Action-Token": "must-not-be-consumed",
+            },
+        )
 
     assert response.status_code == 200
     assert response.json()["confirmation_required"] is False
     assert "complete your profile" in response.json()["reply"].lower()
     assert await mock_redis.get(f"chat_action:{session_id}") is None
     assert await mock_redis.get(f"chat_incomplete_action:{session_id}") is None
+    consume_token.assert_not_awaited()
+
+
+async def test_non_approved_user_can_send_informational_messages(
+    client, auth_tokens, db_session
+):
+    from app.models.user import KYCStatus, User
+    from sqlalchemy import select
+
+    user = await db_session.scalar(
+        select(User).where(User.email == "chatbottest@neobank.com")
+    )
+    user.kyc_status = KYCStatus.rejected
+    await db_session.commit()
+
+    with patch("httpx.AsyncClient.post", new=_groq_success("GREETING", 0.99)):
+        response = await client.post(
+            "/api/v1/chatbot/message",
+            json={"session_id": "limited-user-info", "message": "hello"},
+            headers={"Authorization": f"Bearer {auth_tokens['access_token']}"},
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["intent"] == "GREETING"
+    assert response.json()["reply"].startswith("Hello!")
 
 
 async def test_chatbot_general_intent_happy_path(
@@ -1049,6 +1081,31 @@ async def test_chatbot_history_returns_owned_session_messages(client, auth_token
 
     assert data["session_id"] == session_id
     assert data["messages"] == messages
+
+
+async def test_non_approved_user_can_read_owned_chatbot_history(
+    client, auth_tokens, db_session
+):
+    from app.models.user import KYCStatus, User
+    from sqlalchemy import select
+
+    user = await db_session.scalar(
+        select(User).where(User.email == "chatbottest@neobank.com")
+    )
+    user.kyc_status = KYCStatus.pending
+    await db_session.commit()
+    session_id = "limited-user-owned-history"
+    messages = [{"role": "assistant", "content": "Welcome back."}]
+    await _create_test_chat_session(session_id, user.id, messages)
+
+    response = await client.get(
+        "/api/v1/chatbot/history",
+        params={"session_id": session_id},
+        headers={"Authorization": f"Bearer {auth_tokens['access_token']}"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["messages"] == messages
 
 
 async def test_chatbot_history_requires_auth(client):
