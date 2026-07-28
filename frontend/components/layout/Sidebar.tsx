@@ -14,12 +14,13 @@ const links = [
 ];
 
 const adminLink = { href: "/admin/kyc", label: "KYC Review", svg: <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg> };
+const fraudAdminLink = { href: "/admin/flagged-transactions", label: "Flagged Transactions", svg: <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 9v4m0 4h.01M10.29 3.86l-8.18 14.18A2 2 0 004 21h16a2 2 0 001.89-2.96L13.71 3.86a2 2 0 00-3.42 0z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg> };
 
 export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const role = useAuthStore((s) => s.user?.role);
-  const visibleLinks = role === "admin" || role === "compliance_officer" ? [...links, adminLink] : links;
+  const visibleLinks = role === "admin" || role === "compliance_officer" ? [...links, adminLink, fraudAdminLink] : links;
 
   return (
     <aside style={{ position: "fixed", left: 0, top: 0, height: "100%", width: "240px", backgroundColor: "#fff", borderRight: "1px solid #F0F0F0", padding: "24px 16px", flexDirection: "column", zIndex: 20 }}
