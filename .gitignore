@@ -468,3 +468,7 @@ backend/app/ml_models/isolation_forest.pkl
 frontend/audit.json
 ml/kyc/eval_data/genuine_pairs/
 backend/app/ml_models/*.tmp
+
+# KYC face-verification accuracy dataset (LFW) - too large for git, see
+# backend/scripts/README.md for where to download it and how to place it.
+Data-kyc/
