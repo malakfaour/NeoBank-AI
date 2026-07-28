@@ -20,28 +20,35 @@ from ml.kyc.face_verification import verify_face  # noqa: E402
 logger = logging.getLogger(__name__)
 
 LIVENESS_THRESHOLD = 0.7
-# Fraction of DeepFace's own ArcFace verification threshold a match's
-# distance must stay under to count as a confident approval. Values are on
-# DeepFace's calibrated distance/threshold scale (0 = identical faces,
-# 1.0 = right at the verified/not-verified boundary), not on match_score.
-MATCH_CONFIDENT_RATIO = 0.85
+MATCH_APPROVED_THRESHOLD = 0.8
+MATCH_FLAGGED_THRESHOLD = 0.6
 
 
 def _run_liveness_check(selfie_path: str) -> float:
     from deepface import DeepFace
 
-    faces = DeepFace.extract_faces(
-        img_path=selfie_path,
-        detector_backend="retinaface",
-        anti_spoofing=True,
-        enforce_detection=True,
-    )
+    try:
+        faces = DeepFace.extract_faces(
+            img_path=selfie_path,
+            detector_backend="mtcnn",
+            anti_spoofing=True,
+            enforce_detection=True,
+        )
+    except ValueError as exc:
+        logger.warning("Face detection failed for %s: %s", selfie_path, exc)
+        raise RuntimeError("no_face_detected:0.0") from exc
+
     if not faces:
-        raise ValueError("No face detected in selfie")
+        logger.warning("Face detection returned no faces for %s", selfie_path)
+        raise RuntimeError("no_face_detected:0.0")
 
     face = faces[0]
     is_real = bool(face.get("is_real", False))
     antispoof_score = float(face.get("antispoof_score", 0.0))
+    logger.info(
+        "Liveness check for %s: is_real=%s antispoof_score=%.4f confidence=%s",
+        selfie_path, is_real, antispoof_score, face.get("confidence"),
+    )
     if not is_real or antispoof_score < LIVENESS_THRESHOLD:
         raise RuntimeError(f"liveness_failed:{antispoof_score}")
     return antispoof_score
@@ -134,18 +141,6 @@ def process_kyc(kyc_record_id: int):
 
             try:
                 liveness_score = _run_liveness_check(selfie_temp.name)
-            except ValueError:
-                return _persist_decision(
-                    db,
-                    kyc_record=kyc_record,
-                    user=user,
-                    status=KYCRecordStatus.rejected,
-                    user_status=KYCStatus.rejected,
-                    match_score=None,
-                    liveness_score=0.0,
-                    rejection_reason="no_face_detected",
-                    notification_type="KYC_REJECTED",
-                )
             except RuntimeError as exc:
                 reason, _, score = str(exc).partition(":")
                 parsed_score = float(score) if score else 0.0
@@ -163,15 +158,8 @@ def process_kyc(kyc_record_id: int):
 
             verification = verify_face(selfie_temp.name, id_temp.name)
             match_score = float(verification["match_score"])
-            verified = bool(verification["verified"])
-            distance_ratio = float(verification["raw_distance"]) / float(verification["threshold"])
 
-            # DeepFace's own `verified` boolean is the ArcFace-calibrated
-            # same-person decision. match_score is a diagnostic number only
-            # (see ml/kyc/face_verification.py) - approval tiers are decided
-            # from the distance/threshold ratio, which is on DeepFace's own
-            # calibrated scale.
-            if verified and distance_ratio <= MATCH_CONFIDENT_RATIO:
+            if match_score >= MATCH_APPROVED_THRESHOLD:
                 return _persist_decision(
                     db,
                     kyc_record=kyc_record,
@@ -184,7 +172,7 @@ def process_kyc(kyc_record_id: int):
                     notification_type="KYC_APPROVED",
                 )
 
-            if verified:
+            if match_score >= MATCH_FLAGGED_THRESHOLD:
                 return _persist_decision(
                     db,
                     kyc_record=kyc_record,
