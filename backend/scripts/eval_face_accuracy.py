@@ -52,7 +52,7 @@ def load_match_pairs(csv_path: Path) -> list[tuple[str, str, str]]:
     pairs = []
     with open(csv_path, newline="", encoding="utf-8") as f:
         reader = csv.reader(f)
-        header = next(reader)
+        next(reader)
         for row in reader:
             if not row or not row[0]:
                 continue
@@ -65,7 +65,7 @@ def load_mismatch_pairs(csv_path: Path) -> list[tuple[str, str, str, str]]:
     pairs = []
     with open(csv_path, newline="", encoding="utf-8") as f:
         reader = csv.reader(f)
-        header = next(reader)
+        next(reader)
         for row in reader:
             if not row or not row[0]:
                 continue

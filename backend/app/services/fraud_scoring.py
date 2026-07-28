@@ -1,4 +1,4 @@
-"""
+﻿"""
 DEVATTECH-84: fraud scoring for score_transaction.
 
 Two entry points, both with the same (db, transaction) -> float signature
@@ -18,6 +18,7 @@ import json
 import logging
 import os
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import joblib
 from sqlalchemy import func, select
@@ -102,14 +103,53 @@ def _ensure_model_file_available(local_path: str, s3_key: str) -> None:
 # results: ml/fraud/threshold_tuning.json.
 FRAUD_FLAG_THRESHOLD = 0.45
 
+# The hour_of_day feature is meant to represent local time-of-day risk
+# ("is this a normal hour to be transacting"), not an arbitrary UTC
+# offset. transaction.created_at is stored as TIMESTAMPTZ (UTC) --
+# same Asia/Beirut convention already used correctly elsewhere in this
+# codebase (see market_hours.py's MARKET_TIMEZONE).
+FRAUD_TIMEZONE = "Asia/Beirut"
+
 
 def _load_isolation_forest():
+    """
+    DEVATTECH-92: lazy-load + module-level cache for the Isolation Forest
+    cold-start model.
+
+    Safe fallback: if the artifact doesn't exist yet (e.g. this code has
+    shipped but train_isolation_forest.py hasn't been run, or the S3
+    upload step was missed), log a warning and return (None, None)
+    instead of raising -- mirrors _load_xgb_model()'s pattern exactly.
+    Previously this had no such guard: a missing file (after a failed S3
+    fetch) raised FileNotFoundError uncaught, which propagated out of
+    score_with_isolation_forest() and out of score_transaction()'s
+    scoring step BEFORE check_fraud_rules_sync() ever ran -- meaning an
+    ML outage didn't just skip ML scoring, it also skipped the
+    rule-based check entirely and blanket-flagged the transaction
+    regardless of what the rules would have said (caught only by
+    score_transaction's outer try/except). Fixing this here means the
+    task's existing flow (score, then rules, then flagged = score >=
+    threshold or rule_triggered) does the right thing automatically:
+    score stays 0.0 (never crosses the flag threshold on its own) and
+    the rules still run and determine the outcome on their own merits.
+    """
     global _isolation_forest_model, _isolation_forest_stats
     if _isolation_forest_model is None:
         _ensure_model_file_available(ISOLATION_FOREST_PATH, "ml-models/fraud/isolation_forest.pkl")
-        _isolation_forest_model = joblib.load(ISOLATION_FOREST_PATH)
-        with open(ISOLATION_FOREST_STATS_PATH) as f:
-            _isolation_forest_stats = json.load(f)
+        try:
+            _isolation_forest_model = joblib.load(ISOLATION_FOREST_PATH)
+            with open(ISOLATION_FOREST_STATS_PATH) as f:
+                _isolation_forest_stats = json.load(f)
+        except FileNotFoundError:
+            logger.warning(
+                "isolation_forest.pkl not found at %s -- cold-start fraud "
+                "scoring is unavailable until train_isolation_forest.py has "
+                "been run (and its output uploaded to S3). Falling back to "
+                "a safe non-flagged score; rule-based checks still run "
+                "independently.",
+                ISOLATION_FOREST_PATH,
+            )
+            return None, None
     return _isolation_forest_model, _isolation_forest_stats
 
 
@@ -193,7 +233,8 @@ def _compute_features(db: Session, transaction: Transaction) -> list[float]:
     amount = float(transaction.amount)
     amount_zscore = (amount - stats["amount_mean"]) / stats["amount_std"]
 
-    hour_of_day = transaction.created_at.hour
+    local_created_at = transaction.created_at.astimezone(ZoneInfo(FRAUD_TIMEZONE))
+    hour_of_day = local_created_at.hour
 
     result = db.execute(
         select(func.count())
@@ -227,9 +268,15 @@ def _compute_features(db: Session, transaction: Transaction) -> list[float]:
 
     return [amount_zscore, hour_of_day, is_new_recipient, currency_flag]
 
-
 def score_with_isolation_forest(db: Session, transaction: Transaction) -> float:
-    model, _ = _load_isolation_forest()
+    model, stats = _load_isolation_forest()
+    if model is None:
+        # Mirrors score_with_xgboost()'s fallback exactly. Must check and
+        # return here, before _compute_features() -- that function also
+        # calls _load_isolation_forest() internally for `stats`, which
+        # would be None too and crash on stats["amount_mean"].
+        return 0.0
+
     features = _compute_features(db, transaction)
 
     # decision_function: higher = more normal, lower/negative = more
@@ -284,8 +331,8 @@ def _compute_xgb_features(db: Session, transaction: Transaction) -> list[float]:
     prior_to_this_receiver = result.scalar_one()
     is_new_recipient = 1 if prior_to_this_receiver == 0 else 0
 
-    hour_of_day = transaction.created_at.hour
-    day_of_week = transaction.created_at.weekday()  # Monday=0 .. Sunday=6
+    hour_of_day = transaction.created_at.astimezone(ZoneInfo(FRAUD_TIMEZONE)).hour
+    day_of_week = transaction.created_at.astimezone(ZoneInfo(FRAUD_TIMEZONE)).weekday()  # Monday=0 .. Sunday=6
 
     sender_tx_count_30d = get_sender_tx_count_30d(db, transaction.sender_id, transaction.id)
 
