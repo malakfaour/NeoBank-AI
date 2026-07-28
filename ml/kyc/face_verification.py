@@ -16,8 +16,9 @@ def _deepface_verify(id_photo_path: str, selfie_path: str) -> dict:
         model_name="ArcFace",
         detector_backend="retinaface",
         enforce_detection=True,
+        align=True,  # normalize pose/rotation before embedding — targets
+                     # off-angle/action-shot photos like the Mauresmo pairs
     )
-
 
 def verify_face(selfie_path: str, id_photo_path: str) -> dict:
     result = _deepface_verify(id_photo_path, selfie_path)
