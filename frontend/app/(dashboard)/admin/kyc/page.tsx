@@ -22,6 +22,13 @@ interface QueueItem {
   document_type: string | null;
 }
 
+const STATUS_BADGE_COLORS: Record<KYCRecordStatus, { bg: string; fg: string }> = {
+  pending: { bg: "#FFFBEB", fg: "#B45309" },
+  flagged: { bg: "#FFFBEB", fg: "#B45309" },
+  approved: { bg: "#F0FDF4", fg: "#00C853" },
+  rejected: { bg: "#FEF2F2", fg: "#DC2626" },
+};
+
 const STATUS_FILTERS: { value: string; label: string }[] = [
   { value: "needs_review", label: "Needs review" },
   { value: "flagged", label: "Flagged" },
@@ -133,7 +140,7 @@ export default function AdminKycQueuePage() {
                   <p style={{ fontWeight: "700", color: "#000" }}>{item.full_name}</p>
                   <p style={{ fontSize: "12px", color: "#999" }}>User #{item.user_id} &middot; {item.document_type ?? "unknown document"}</p>
                 </div>
-                <span style={{ fontSize: "12px", fontWeight: "700", padding: "4px 10px", borderRadius: "999px", backgroundColor: item.status === "flagged" ? "#FFFBEB" : "#FEF2F2", color: item.status === "flagged" ? "#B45309" : "#DC2626" }}>
+                <span style={{ fontSize: "12px", fontWeight: "700", padding: "4px 10px", borderRadius: "999px", backgroundColor: STATUS_BADGE_COLORS[item.status].bg, color: STATUS_BADGE_COLORS[item.status].fg }}>
                   {item.status}
                 </span>
               </div>
@@ -150,8 +157,7 @@ export default function AdminKycQueuePage() {
               </div>
 
               <div style={{ fontSize: "13px", color: "#666", marginBottom: "16px", lineHeight: 1.7 }}>
-                <div>Match score: {item.match_score !== null ? item.match_score.toFixed(2) : "—"}</div>
-                <div>Liveness score: {item.liveness_score !== null ? item.liveness_score.toFixed(2) : "—"}</div>
+                <div>Submitted: {new Date(item.created_at).toLocaleString()}</div>
                 {item.rejection_reason && <div>Reason: {item.rejection_reason}</div>}
               </div>
 

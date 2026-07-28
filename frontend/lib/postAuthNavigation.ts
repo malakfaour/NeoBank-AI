@@ -27,7 +27,12 @@ export function resolvePostAuthDestination(state: AuthRoutingState): string {
   // Staff accounts review other users' KYC - they don't go through customer onboarding themselves.
   if (state.role === "admin" || state.role === "compliance_officer") return "/dashboard";
   if (state.kyc_onboarding_state === "approved") return "/dashboard";
-  if (state.kyc_onboarding_state === "pending") return "/kyc/status";
+  // "flagged" is the normal outcome once documents are submitted for
+  // manual review (there's no automated decisioning), so it belongs on
+  // the same wait screen as "pending", not back at document capture.
+  if (state.kyc_onboarding_state === "pending" || state.kyc_onboarding_state === "flagged") {
+    return "/kyc/status";
+  }
   return "/kyc";
 }
 

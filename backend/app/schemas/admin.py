@@ -132,3 +132,24 @@ class AdminWalletAdjustResponse(BaseModel):
     amount: Decimal
     new_balance: Decimal
     reason: str
+
+
+class AdminTransactionItem(BaseModel):
+    id: int
+    sender_id: int
+    sender_name: str
+    receiver_id: int
+    receiver_name: str
+    amount: Decimal
+    currency: str
+    category: str | None
+    status: str
+    created_at: datetime
+
+
+class AdminTransactionsResponse(BaseModel):
+    items: list[AdminTransactionItem]
+    page: int
+    page_size: int
+    total: int
+    total_pages: int

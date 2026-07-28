@@ -126,7 +126,7 @@ useEffect(() => {
           const s: KYCStatus = res.data.kyc_status;
           setStatus(s);
           if (s === "approved") { clearInterval(pollRef.current!); setTimeout(() => router.push("/dashboard"), 2000); }
-          else if (s === "rejected") clearInterval(pollRef.current!);
+          else if (s === "rejected" || s === "flagged") clearInterval(pollRef.current!);
         } catch { /* ignore poll errors */ }
       }, 5000);
     } catch (err: unknown) {
@@ -230,14 +230,14 @@ useEffect(() => {
   );
 
   return (
-    <KYCLayout stepNum={3} title="Verification status" subtitle="We&apos;re reviewing your documents.">
+    <KYCLayout stepNum={3} title="Documents submitted" subtitle="Your KYC will be reviewed shortly.">
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "16px", padding: "16px 0" }}>
         {status === "pending" && (
           <>
             <div style={{ width: "64px", height: "64px", borderRadius: "50%", backgroundColor: "#FFFBEB", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "28px" }}>⏳</div>
             <div style={{ textAlign: "center" }}>
-              <p style={{ fontWeight: "700", color: "#000" }}>Under review</p>
-              <p style={{ color: "#999", fontSize: "13px", marginTop: "4px" }}>This usually takes under a minute.</p>
+              <p style={{ fontWeight: "700", color: "#000" }}>Uploading your documents...</p>
+              <p style={{ color: "#999", fontSize: "13px", marginTop: "4px" }}>One moment.</p>
             </div>
             <div style={{ display: "flex", gap: "6px" }}>
               {[0, 1, 2].map((i) => (
@@ -255,19 +255,29 @@ useEffect(() => {
             </div>
           </>
         )}
-        {(status === "rejected" || status === "flagged") && (
+        {status === "flagged" && (
+          <>
+            <div style={{ width: "64px", height: "64px", borderRadius: "50%", backgroundColor: "#FFFBEB", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "28px" }}>🕒</div>
+            <div style={{ textAlign: "center" }}>
+              <p style={{ fontWeight: "700", color: "#000" }}>We&apos;re reviewing your documents</p>
+              <p style={{ color: "#999", fontSize: "13px", marginTop: "4px" }}>
+                Your selfie and ID have been submitted for manual review. This usually takes 2–4 business days.
+                We&apos;ll notify you as soon as it&apos;s done.
+              </p>
+            </div>
+          </>
+        )}
+        {status === "rejected" && (
           <>
             <div style={{ width: "64px", height: "64px", borderRadius: "50%", backgroundColor: "#FEF2F2", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "28px" }}>❌</div>
             <div style={{ textAlign: "center" }}>
               <p style={{ fontWeight: "700", color: "#000" }}>Verification failed</p>
-              <p style={{ color: "#999", fontSize: "13px", marginTop: "4px" }}>{status === "flagged" ? "Under manual review." : "Please try again."}</p>
+              <p style={{ color: "#999", fontSize: "13px", marginTop: "4px" }}>Please try again.</p>
             </div>
-            {status === "rejected" && (
-              <button onClick={() => { setStep("selfie"); setSelfieBlob(null); setSelfiePreview(null); setIdFile(null); setIdPreview(null); setDocumentType("national_id"); setStatus("pending"); }}
-                style={{ width: "100%", padding: "13px", borderRadius: "14px", border: "none", backgroundColor: "#00C853", color: "#fff", fontSize: "14px", fontWeight: "700", cursor: "pointer" }}>
-                Try again
-              </button>
-            )}
+            <button onClick={() => { setStep("selfie"); setSelfieBlob(null); setSelfiePreview(null); setIdFile(null); setIdPreview(null); setDocumentType("national_id"); setStatus("pending"); }}
+              style={{ width: "100%", padding: "13px", borderRadius: "14px", border: "none", backgroundColor: "#00C853", color: "#fff", fontSize: "14px", fontWeight: "700", cursor: "pointer" }}>
+              Try again
+            </button>
           </>
         )}
       </div>
