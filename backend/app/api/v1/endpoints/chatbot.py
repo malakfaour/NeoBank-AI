@@ -26,6 +26,8 @@ from app.core.redis import (
 )
 from app.db.session import get_async_db
 from app.models.chatbot_log import ChatbotLog
+from app.models.user import KYCStatus, User
+from app.models.kyc_record import KYCRecord
 from app.models.wallet import Wallet, WalletCurrency
 from app.schemas.chatbot import (
     ChatbotMessageRequest,
@@ -61,6 +63,7 @@ from app.services.transfer_service import (
     execute_transfer_by_iban,
     execute_transfer_by_mobile,
 )
+from app.services.kyc_access import kyc_restriction_detail
 
 router = APIRouter()
 
@@ -127,6 +130,16 @@ async def send_chatbot_message(
     )
     user_id = int(current_user.id)
     message = body.message.strip()
+    user = await db.scalar(select(User).where(User.id == user_id))
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    kyc_submitted = bool(
+        await db.scalar(
+            select(KYCRecord.is_submitted)
+            .where(KYCRecord.user_id == user_id)
+            .order_by(KYCRecord.id.desc())
+        )
+    )
 
     # Load conversational transfer state before intent classification. A bare
     # recipient is meaningful when this user is already completing a transfer.
@@ -234,6 +247,22 @@ async def send_chatbot_message(
                     detail="Pending action does not belong to this user",
                 )
 
+            if user.kyc_status != KYCStatus.approved:
+                await delete_chat_incomplete_action(body.session_id)
+                await delete_chat_pending_action(body.session_id)
+                detail = kyc_restriction_detail(user.kyc_status, submitted=kyc_submitted)
+                reply = detail["message"] + " Open Complete Profile at /kyc."
+                await save_chat_turn(
+                    db=db, user_id=user_id, session_id=body.session_id,
+                    message=body.message, reply=reply,
+                )
+                return ChatbotMessageResponse(
+                    reply=reply, session_id=body.session_id,
+                    intent=classification.intent,
+                    confidence=classification.confidence,
+                    confirmation_required=False,
+                )
+
             if not x_action_token:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
@@ -319,6 +348,22 @@ async def send_chatbot_message(
             partial = None
 
         if confirmation_required or partial is not None:
+            if user.kyc_status != KYCStatus.approved:
+                await delete_chat_incomplete_action(body.session_id)
+                await delete_chat_pending_action(body.session_id)
+                detail = kyc_restriction_detail(user.kyc_status, submitted=kyc_submitted)
+                reply = detail["message"] + " Open Complete Profile at /kyc."
+                await save_chat_turn(
+                    db=db, user_id=user_id, session_id=body.session_id,
+                    message=body.message, reply=reply,
+                )
+                return ChatbotMessageResponse(
+                    reply=reply, session_id=body.session_id,
+                    intent=classification.intent,
+                    confidence=classification.confidence,
+                    confirmation_required=False,
+                )
+
             accumulated = (
                 partial.merge(contribution) if partial is not None else contribution
             )

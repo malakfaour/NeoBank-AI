@@ -4,6 +4,8 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import api from "@/lib/axios";
+import KYCActionLock from "@/components/kyc/KYCActionLock";
+import { useAuthStore } from "@/store/authStore";
 
 interface MarketStatus {
   market_open: boolean;
@@ -39,6 +41,7 @@ const Header = ({ title, onBack }: { title: string; onBack: () => void }) => (
 
 export default function ExchangePage() {
   const router = useRouter();
+  const user = useAuthStore((state) => state.user);
   const [step, setStep] = useState<Step>("form");
   const [fromCurrency, setFromCurrency] = useState("USD");
   const [toCurrency, setToCurrency] = useState("LBP");
@@ -180,6 +183,8 @@ export default function ExchangePage() {
   const marketClosed =
     marketStatus !== null &&
     !marketStatus.market_open;
+
+  if (user?.kyc_status !== "approved") return <KYCActionLock action="Currency Exchange" />;
 
   if (step === "form") return (
     <Wrap>

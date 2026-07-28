@@ -3,6 +3,8 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import api from "@/lib/axios";
+import KYCActionLock from "@/components/kyc/KYCActionLock";
+import { useAuthStore } from "@/store/authStore";
 
 interface Wallet { currency: string; balance: number; account_number: string | null; iban: string | null; }
 interface Beneficiary { id: number; nickname: string; type: string; value: string; }
@@ -58,6 +60,7 @@ function Wrap({ children }: { children: React.ReactNode }) {
 
 export default function TransferPage() {
   const router = useRouter();
+  const user = useAuthStore((state) => state.user);
   const [step, setStep] = useState<Step>("account");
   const [wallets, setWallets] = useState<Wallet[]>([]);
   const [selectedWallet, setSelectedWallet] = useState<Wallet | null>(null);
@@ -257,6 +260,8 @@ export default function TransferPage() {
     (tab === "mobile" ? b.type === "mobile" : b.type === "iban") &&
     (b.nickname.toLowerCase().includes(search.toLowerCase()) || b.value.includes(search))
   );
+
+  if (user?.kyc_status !== "approved") return <KYCActionLock action="Transfers" />;
 
   if (step === "account") return (
     <Wrap>

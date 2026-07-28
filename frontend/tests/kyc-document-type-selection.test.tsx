@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   DocumentTypeSelection,
   type KYCDocumentType,
-} from "@/app/(auth)/kyc/page";
+} from "@/app/(onboarding)/kyc/page";
 
 
 describe("KYC document type selection", () => {
@@ -23,12 +23,11 @@ describe("KYC document type selection", () => {
     );
 
     expect(screen.getByRole("button", { name: "Passport" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Driver's License" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "National ID" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
 
-    fireEvent.click(screen.getByRole("button", { name: "Driver's License" }));
-    expect(onSelect).toHaveBeenCalledWith("drivers_license");
+    fireEvent.click(screen.getByRole("button", { name: "Passport" }));
+    expect(onSelect).toHaveBeenCalledWith("passport");
 
     rerender(
       <DocumentTypeSelection
@@ -38,7 +37,7 @@ describe("KYC document type selection", () => {
         onContinue={vi.fn()}
       />,
     );
-    expect(screen.getByRole("button", { name: "Driver's License" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "Passport" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );

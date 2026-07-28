@@ -63,13 +63,14 @@ async def auth_tokens(client, db_session):
             "password": "TestPass123",
         },
     )
-    from app.models.user import User
+    from app.models.user import KYCStatus, User
     from sqlalchemy import select
 
     user = await db_session.scalar(
         select(User).where(User.email == "chatbottest@neobank.com")
     )
     user.email_verified_at = datetime.now(timezone.utc)
+    user.kyc_status = KYCStatus.approved
     await db_session.commit()
     response = await client.post(
         "/api/v1/auth/login",
@@ -79,6 +80,32 @@ async def auth_tokens(client, db_session):
         },
     )
     return response.json()
+
+
+async def test_non_approved_chatbot_transfer_is_blocked_without_pending_action(
+    client, auth_tokens, mock_redis, db_session
+):
+    from app.models.user import KYCStatus, User
+    from sqlalchemy import select
+
+    user = await db_session.scalar(
+        select(User).where(User.email == "chatbottest@neobank.com")
+    )
+    user.kyc_status = KYCStatus.pending
+    await db_session.commit()
+
+    session_id = "kyc-locked-chatbot-transfer"
+    response = await client.post(
+        "/api/v1/chatbot/message",
+        json={"session_id": session_id, "message": "send 10 USD to +96170123456"},
+        headers={"Authorization": f"Bearer {auth_tokens['access_token']}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["confirmation_required"] is False
+    assert "complete your profile" in response.json()["reply"].lower()
+    assert await mock_redis.get(f"chat_action:{session_id}") is None
+    assert await mock_redis.get(f"chat_incomplete_action:{session_id}") is None
 
 
 async def test_chatbot_general_intent_happy_path(
