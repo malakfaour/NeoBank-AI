@@ -1,4 +1,4 @@
-"""
+﻿"""
 DEVATTECH-84: fraud scoring for score_transaction.
 
 Two entry points, both with the same (db, transaction) -> float signature
@@ -18,6 +18,7 @@ import json
 import logging
 import os
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import joblib
 from sqlalchemy import func, select
@@ -101,6 +102,13 @@ def _ensure_model_file_available(local_path: str, s3_key: str) -> None:
 # threshold (max-F1 among 14 candidates swept 0.30-0.95). Full sweep
 # results: ml/fraud/threshold_tuning.json.
 FRAUD_FLAG_THRESHOLD = 0.45
+
+# The hour_of_day feature is meant to represent local time-of-day risk
+# ("is this a normal hour to be transacting"), not an arbitrary UTC
+# offset. transaction.created_at is stored as TIMESTAMPTZ (UTC) --
+# same Asia/Beirut convention already used correctly elsewhere in this
+# codebase (see market_hours.py's MARKET_TIMEZONE).
+FRAUD_TIMEZONE = "Asia/Beirut"
 
 
 def _load_isolation_forest():
@@ -193,7 +201,8 @@ def _compute_features(db: Session, transaction: Transaction) -> list[float]:
     amount = float(transaction.amount)
     amount_zscore = (amount - stats["amount_mean"]) / stats["amount_std"]
 
-    hour_of_day = transaction.created_at.hour
+    local_created_at = transaction.created_at.astimezone(ZoneInfo(FRAUD_TIMEZONE))
+    hour_of_day = local_created_at.hour
 
     result = db.execute(
         select(func.count())
@@ -284,8 +293,8 @@ def _compute_xgb_features(db: Session, transaction: Transaction) -> list[float]:
     prior_to_this_receiver = result.scalar_one()
     is_new_recipient = 1 if prior_to_this_receiver == 0 else 0
 
-    hour_of_day = transaction.created_at.hour
-    day_of_week = transaction.created_at.weekday()  # Monday=0 .. Sunday=6
+    hour_of_day = transaction.created_at.astimezone(ZoneInfo(FRAUD_TIMEZONE)).hour
+    day_of_week = transaction.created_at.astimezone(ZoneInfo(FRAUD_TIMEZONE)).weekday()  # Monday=0 .. Sunday=6
 
     sender_tx_count_30d = get_sender_tx_count_30d(db, transaction.sender_id, transaction.id)
 
