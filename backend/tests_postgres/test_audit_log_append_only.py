@@ -76,12 +76,15 @@ async def _register_user(client, label: str, password: str = "TestPass123") -> d
 
 
 @pytest.mark.postgres
-async def test_transaction_audit_log_update_is_rejected_by_db_trigger(client, stub_fraud_scoring):
+async def test_transaction_audit_log_update_is_rejected_by_db_trigger(
+    client, stub_fraud_scoring, approve_kyc_users
+):
     # --- setup: real register -> top-up -> send, via the actual API ---
     sender = await _register_user(client, "audit-trigger-sender")
     receiver = await _register_user(client, "audit-trigger-receiver")
     sender_id = sender["user"]["id"]
     receiver_id = receiver["user"]["id"]
+    await approve_kyc_users(sender_id, receiver_id)
 
     # Lazy import, matching conftest.py's own discipline -- only imported
     # inside a test function, never at module level. AsyncSessionLocal

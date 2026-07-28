@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timezone
 from functools import partial
 from time import time
 
@@ -13,6 +14,11 @@ from app.models.kyc_record import KYCDocumentType, KYCRecord, KYCRecordStatus
 from app.models.user import KYCStatus, User, UserRole
 from app.schemas.kyc import (
     KYCDocumentAccessResponse,
+    KYCConsentRequest,
+    KYCDraftUpdateRequest,
+    KYCProfileData,
+    KYCProfileResponse,
+    KYCSelfieUploadResponse,
     KYCStatusResponse,
     KYCStatusUpdateRequest,
     KYCUploadResponse,
@@ -26,6 +32,148 @@ router = APIRouter()
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/jpg"}
 
 
+async def _latest_kyc_record(db: AsyncSession, user_id: int) -> KYCRecord | None:
+    return await db.scalar(
+        select(KYCRecord)
+        .where(KYCRecord.user_id == user_id)
+        .order_by(KYCRecord.id.desc())
+    )
+
+
+def _workflow_status(record: KYCRecord) -> str:
+    if record.status == KYCRecordStatus.approved:
+        return "approved"
+    if record.status == KYCRecordStatus.rejected:
+        return "rejected"
+    if record.is_submitted:
+        return "pending"
+    return "in_progress"
+
+
+def _profile_response(user: User, record: KYCRecord) -> KYCProfileResponse:
+    profile_data = dict(record.profile_data or {})
+    if record.is_submitted and profile_data.get("identification_number"):
+        value = str(profile_data["identification_number"])
+        profile_data["identification_number"] = (
+            f"{'*' * max(len(value) - 4, 0)}{value[-4:]}"
+        )
+    return KYCProfileResponse(
+        kyc_record_id=record.id,
+        kyc_status=user.kyc_status,
+        workflow_status=_workflow_status(record),
+        current_step=record.current_step,
+        profile_data=KYCProfileData(**profile_data),
+        has_front_id=bool(record.id_photo_url),
+        has_back_id=bool(record.back_id_photo_url),
+        has_selfie=bool(record.selfie_url),
+        rejection_reason=record.rejection_reason,
+        submitted_at=record.submitted_at,
+    )
+
+
+@router.get("/profile", response_model=KYCProfileResponse)
+async def get_kyc_profile(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+):
+    user = await db.scalar(select(User).where(User.id == int(current_user.id)))
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    record = await _latest_kyc_record(db, user.id)
+    if record is None:
+        name_parts = user.full_name.split()
+        record = KYCRecord(
+            user_id=user.id,
+            profile_data={
+                "first_name": name_parts[0] if name_parts else user.full_name,
+                "last_name": name_parts[-1] if len(name_parts) > 1 else None,
+            },
+            current_step=1,
+            is_submitted=False,
+        )
+        db.add(record)
+        await db.commit()
+        await db.refresh(record)
+    return _profile_response(user, record)
+
+
+@router.put("/profile", response_model=KYCProfileResponse)
+async def save_kyc_profile(
+    body: KYCDraftUpdateRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+):
+    user = await db.scalar(select(User).where(User.id == int(current_user.id)))
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    record = await _latest_kyc_record(db, user.id)
+    if record is None:
+        record = KYCRecord(user_id=user.id)
+        db.add(record)
+    if record.is_submitted and record.status != KYCRecordStatus.rejected:
+        raise HTTPException(status_code=409, detail="Submitted KYC cannot be edited")
+    record.profile_data = body.profile_data.model_dump(mode="json", exclude_none=True)
+    record.current_step = body.current_step
+    record.is_submitted = False
+    await db.commit()
+    await db.refresh(record)
+    return _profile_response(user, record)
+
+
+@router.post("/submit", response_model=KYCProfileResponse)
+async def submit_kyc_profile(
+    body: KYCConsentRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+):
+    user = await db.scalar(select(User).where(User.id == int(current_user.id)))
+    record = await _latest_kyc_record(db, int(current_user.id))
+    if user is None or record is None:
+        raise HTTPException(status_code=400, detail="Complete your KYC profile first")
+    data = record.profile_data or {}
+    required = (
+        "first_name", "last_name", "date_of_birth", "place_of_birth",
+        "gender", "marital_status", "nationality", "identification_type",
+        "identification_number", "id_expiry_date", "country_of_residence",
+        "city", "residential_address", "occupation", "source_of_funds",
+        "annual_income_usd",
+    )
+    missing = [field for field in required if data.get(field) in (None, "")]
+    if data.get("occupation") == "employee":
+        missing.extend(
+            field for field in (
+                "employer_name", "position", "employment_address", "employer_phone"
+            ) if not data.get(field)
+        )
+    if not (record.id_photo_url and record.back_id_photo_url and record.selfie_url):
+        missing.append("identity_documents")
+    if missing:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"error": "kyc_required_fields_missing", "fields": sorted(set(missing))},
+        )
+    if not all(
+        (body.terms_accepted, body.information_confirmed, body.privacy_consent)
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "kyc_consent_required"},
+        )
+    record.terms_accepted = body.terms_accepted
+    record.information_confirmed = body.information_confirmed
+    record.privacy_consent = body.privacy_consent
+    record.is_submitted = True
+    record.submitted_at = datetime.now(timezone.utc)
+    record.status = KYCRecordStatus.pending
+    record.rejection_reason = None
+    record.reviewed_at = None
+    record.reviewed_by = None
+    user.kyc_status = KYCStatus.pending
+    await db.commit()
+    await db.refresh(record)
+    return _profile_response(user, record)
+
+
 def _validate_image_upload(upload: UploadFile, field_name: str) -> None:
     if upload.content_type not in ALLOWED_IMAGE_TYPES:
         raise HTTPException(
@@ -36,6 +184,60 @@ def _validate_image_upload(upload: UploadFile, field_name: str) -> None:
 
 def _build_kyc_key(user_id: int, prefix: str, timestamp: int) -> str:
     return f"{user_id}/{prefix}_{timestamp}.jpg"
+
+
+@router.post(
+    "/selfie",
+    response_model=KYCSelfieUploadResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Capture a KYC selfie for a resumable draft",
+)
+async def upload_kyc_selfie(
+    selfie: UploadFile = File(...),
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+):
+    _validate_image_upload(selfie, "selfie")
+    user = await db.scalar(select(User).where(User.id == int(current_user.id)))
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    record = await _latest_kyc_record(db, user.id)
+    if record and record.is_submitted and record.status != KYCRecordStatus.rejected:
+        raise HTTPException(status_code=409, detail="Submitted KYC cannot be edited")
+
+    selfie_key = _build_kyc_key(user.id, "selfie", int(time()))
+    selfie_bytes = await selfie.read()
+    await selfie.close()
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(
+        None,
+        partial(
+            upload_file,
+            selfie_bytes,
+            selfie_key,
+            extra_args={"ContentType": selfie.content_type},
+        ),
+    )
+    if record is None:
+        record = KYCRecord(user_id=user.id, is_submitted=False)
+        db.add(record)
+    record.selfie_url = selfie_key
+    record.match_score = None
+    record.liveness_score = None
+    record.status = KYCRecordStatus.pending
+    record.is_submitted = False
+    record.submitted_at = None
+    record.rejection_reason = None
+    record.reviewed_at = None
+    record.reviewed_by = None
+    user.kyc_status = KYCStatus.pending
+    await db.commit()
+    await db.refresh(record)
+    return KYCSelfieUploadResponse(
+        kyc_record_id=record.id,
+        selfie_url=record.selfie_url,
+        status=record.status,
+    )
 
 
 @router.get("/status", response_model=KYCStatusResponse, summary="Get the current user's KYC status")
@@ -102,14 +304,19 @@ async def request_manual_review(
     summary="Upload KYC verification documents",
 )
 async def upload_kyc_documents(
-    selfie: UploadFile = File(...),
+    selfie: UploadFile | None = File(default=None),
     id_photo: UploadFile = File(...),
+    back_id_photo: UploadFile | None = File(default=None),
     document_type: KYCDocumentType = Form(...),
+    submit_for_review: bool = Form(default=True),
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db),
 ):
-    _validate_image_upload(selfie, "selfie")
+    if selfie is not None:
+        _validate_image_upload(selfie, "selfie")
     _validate_image_upload(id_photo, "id_photo")
+    if back_id_photo is not None:
+        _validate_image_upload(back_id_photo, "back_id_photo")
 
     user = await db.scalar(select(User).where(User.id == int(current_user.id)))
     if not user:
@@ -122,6 +329,7 @@ async def upload_kyc_documents(
     if (
         kyc_record
         and kyc_record.status == KYCRecordStatus.pending
+        and kyc_record.is_submitted
         and kyc_record.selfie_url
         and kyc_record.id_photo_url
     ):
@@ -131,23 +339,52 @@ async def upload_kyc_documents(
         )
 
     timestamp = int(time())
-    selfie_key = _build_kyc_key(user.id, "selfie", timestamp)
+    if selfie is None and (not kyc_record or not kyc_record.selfie_url):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Capture a selfie before uploading identification documents",
+        )
+    selfie_key = (
+        _build_kyc_key(user.id, "selfie", timestamp)
+        if selfie is not None
+        else kyc_record.selfie_url
+    )
     id_photo_key = _build_kyc_key(user.id, "id", timestamp)
-    selfie_bytes = await selfie.read()
+    back_id_photo_key = (
+        _build_kyc_key(user.id, "id_back", timestamp)
+        if back_id_photo is not None else None
+    )
+    selfie_bytes = await selfie.read() if selfie is not None else None
     id_photo_bytes = await id_photo.read()
-    await selfie.close()
+    if selfie is not None:
+        await selfie.close()
     await id_photo.close()
+    back_id_photo_bytes = None
+    if back_id_photo is not None:
+        back_id_photo_bytes = await back_id_photo.read()
+        await back_id_photo.close()
 
     loop = asyncio.get_running_loop()
-    await loop.run_in_executor(
-        None,
-        partial(
-            upload_file,
-            selfie_bytes,
-            selfie_key,
-            extra_args={"ContentType": selfie.content_type},
-        ),
-    )
+    if selfie is not None and selfie_bytes is not None:
+        await loop.run_in_executor(
+            None,
+            partial(
+                upload_file,
+                selfie_bytes,
+                selfie_key,
+                extra_args={"ContentType": selfie.content_type},
+            ),
+        )
+    if back_id_photo_key and back_id_photo_bytes is not None:
+        await loop.run_in_executor(
+            None,
+            partial(
+                upload_file,
+                back_id_photo_bytes,
+                back_id_photo_key,
+                extra_args={"ContentType": back_id_photo.content_type},
+            ),
+        )
     await loop.run_in_executor(
         None,
         partial(
@@ -164,17 +401,22 @@ async def upload_kyc_documents(
 
     kyc_record.selfie_url = selfie_key
     kyc_record.id_photo_url = id_photo_key
+    if back_id_photo_key:
+        kyc_record.back_id_photo_url = back_id_photo_key
     kyc_record.document_type = document_type
     kyc_record.match_score = None
     kyc_record.liveness_score = None
     kyc_record.status = KYCRecordStatus.pending
+    kyc_record.is_submitted = submit_for_review
+    kyc_record.submitted_at = datetime.now(timezone.utc) if submit_for_review else None
     kyc_record.rejection_reason = None
     kyc_record.reviewed_at = None
     kyc_record.reviewed_by = None
     user.kyc_status = KYCStatus.pending
     await db.commit()
     await db.refresh(kyc_record)
-    process_kyc.delay(kyc_record.id)
+    if submit_for_review:
+        process_kyc.delay(kyc_record.id)
 
     return KYCUploadResponse(
         kyc_record_id=kyc_record.id,
@@ -212,6 +454,7 @@ async def get_kyc_document_urls(
     loop = asyncio.get_running_loop()
     selfie_presigned_url = None
     id_photo_presigned_url = None
+    back_id_photo_presigned_url = None
     if kyc_record.selfie_url:
         selfie_presigned_url = await loop.run_in_executor(
             None,
@@ -222,13 +465,20 @@ async def get_kyc_document_urls(
             None,
             partial(get_presigned_url, kyc_record.id_photo_url),
         )
+    if kyc_record.back_id_photo_url:
+        back_id_photo_presigned_url = await loop.run_in_executor(
+            None,
+            partial(get_presigned_url, kyc_record.back_id_photo_url),
+        )
 
     return KYCDocumentAccessResponse(
         kyc_record_id=kyc_record.id,
         selfie_key=kyc_record.selfie_url,
         id_photo_key=kyc_record.id_photo_url,
+        back_id_photo_key=kyc_record.back_id_photo_url,
         selfie_presigned_url=selfie_presigned_url,
         id_photo_presigned_url=id_photo_presigned_url,
+        back_id_photo_presigned_url=back_id_photo_presigned_url,
     )
 
 

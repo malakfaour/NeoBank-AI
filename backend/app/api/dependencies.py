@@ -5,7 +5,13 @@ from jwt import ExpiredSignatureError, InvalidTokenError
 from app.core.config import settings
 from app.core.redis import consume_action_token, is_blacklisted
 from app.core.security import decode_token
+from app.db.session import get_db
+from app.models.user import User
+from app.models.kyc_record import KYCRecord
 from app.schemas.auth import CurrentUser, UserRole
+from app.services.kyc_access import assert_approved_kyc
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -89,6 +95,7 @@ def require_role(*roles: UserRole):
 async def require_action_token(
     x_action_token: str | None = Header(default=None, alias="X-Action-Token"),
     current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> CurrentUser:
     """
     FastAPI dependency -- gates money-movement endpoints behind a
@@ -98,6 +105,18 @@ async def require_action_token(
     False in tests via conftest.py) so this can be soft-launched.
     Missing, invalid, replayed, or another user's token all return 403.
     """
+    user = await db.scalar(select(User).where(User.id == int(current_user.id)))
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    submitted = bool(
+        await db.scalar(
+            select(KYCRecord.is_submitted)
+            .where(KYCRecord.user_id == user.id)
+            .order_by(KYCRecord.id.desc())
+        )
+    )
+    assert_approved_kyc(user, submitted=submitted)
+
     if not settings.REQUIRE_ACTION_TOKEN:
         return current_user
 
@@ -114,4 +133,22 @@ async def require_action_token(
             detail="Invalid or expired action token",
         )
 
+    return current_user
+
+
+async def require_approved_kyc(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CurrentUser:
+    user = await db.scalar(select(User).where(User.id == int(current_user.id)))
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    submitted = bool(
+        await db.scalar(
+            select(KYCRecord.is_submitted)
+            .where(KYCRecord.user_id == user.id)
+            .order_by(KYCRecord.id.desc())
+        )
+    )
+    assert_approved_kyc(user, submitted=submitted)
     return current_user

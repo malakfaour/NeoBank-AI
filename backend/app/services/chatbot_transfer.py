@@ -17,7 +17,7 @@ _AMOUNT_CURRENCY_PATTERNS = [
     ),
 ]
 
-_IBAN_PATTERN = re.compile(r"LB[A-Za-z0-9]{26}", re.IGNORECASE)
+_IBAN_PATTERN = re.compile(r"(?<![A-Za-z0-9])LB[A-Za-z0-9]{22}(?![A-Za-z0-9])", re.IGNORECASE)
 _PHONE_PATTERN = re.compile(r"\+?\d[\d\s\-]{6,}\d")
 _CURRENCY_PATTERN = re.compile(
     r"(?<![A-Za-z])(?P<currency>USD|LBP|USDT|\$|LL|L\.L\.|lira|dollar|dollars)(?![A-Za-z])",
@@ -206,14 +206,46 @@ def _extract_recipient(message: str) -> tuple[str, str] | None:
 
     for match in _PHONE_PATTERN.finditer(message):
         raw_phone = match.group(0)
-        digits = re.sub(r"\D", "", raw_phone)
+        normalized = normalize_lebanese_phone(raw_phone)
+        if normalized is not None:
+            return "mobile", normalized
 
-        if len(digits) < 7:
-            continue
+    return None
 
-        normalized = "+" + digits if raw_phone.strip().startswith("+") else digits
-        return "mobile", normalized
 
+def normalize_lebanese_phone(value: str) -> str | None:
+    """Apply the same Lebanese mobile normalization rules as registration."""
+    digits = re.sub(r"\D", "", value)
+    if digits.startswith("00961"):
+        digits = digits[5:]
+    elif digits.startswith("961"):
+        digits = digits[3:]
+    if digits.startswith("0"):
+        digits = digits[1:]
+    if re.fullmatch(r"(?:3\d{6}|(?:70|71|76|78|79|81)\d{6})", digits):
+        return f"+961{digits}"
+    return None
+
+
+def recipient_validation_error(message: str) -> str | None:
+    """Return feedback only for input that clearly looks like a recipient."""
+    value = message.strip()
+    compact = re.sub(r"[\s-]", "", value)
+    if compact.upper().startswith("LB"):
+        if not _IBAN_PATTERN.fullmatch(compact):
+            return (
+                "That IBAN is invalid. A Lebanese IBAN must start with LB "
+                "and contain 24 characters. Please check it and try again."
+            )
+        return None
+    if re.fullmatch(r"[+\d][\d\s-]+", value) and (
+        value.startswith("+") or compact.startswith(("00961", "961", "0"))
+    ):
+        if normalize_lebanese_phone(value) is None:
+            return (
+                "That phone number is invalid. Please use a valid Lebanese "
+                "mobile number, for example +96170111222."
+            )
     return None
 
 

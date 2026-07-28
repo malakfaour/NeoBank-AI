@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import get_current_user
+from app.api.dependencies import get_current_user, require_approved_kyc
 from app.core.cache_utils import invalidate_balance_cache
 from app.core.redis import (
     TOPUP_DAILY_LIMIT,
@@ -226,7 +226,7 @@ async def card_top_up(
     request: Request,
     payload: CardTopUpRequest,
     x_idempotency_key: str = Header(..., alias="X-Idempotency-Key"),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_approved_kyc),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -366,7 +366,7 @@ async def confirm_top_up(
     request: Request,
     payload: ConfirmTopUpRequest,
     x_idempotency_key: str = Header(..., alias="X-Idempotency-Key"),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_approved_kyc),
     db: AsyncSession = Depends(get_db),
 ):
     """
