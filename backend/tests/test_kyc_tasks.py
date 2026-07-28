@@ -90,8 +90,7 @@ def test_process_kyc_match_score_matrix(
     monkeypatch.setattr(kyc_tasks, "SyncSessionLocal", session_factory)
     _patch_local_files(monkeypatch)
     _install_fake_deepface(monkeypatch, is_real=True, antispoof_score=0.91)
-    monkeypatch.setattr("ml.kyc.face_verification._detect_face_region", lambda path: object())
-    monkeypatch.setattr("ml.kyc.face_verification._write_face_region", lambda face: "face.jpg")
+   
     monkeypatch.setattr(
         "ml.kyc.face_verification._deepface_verify",
         lambda id_face_path, selfie_path: {
