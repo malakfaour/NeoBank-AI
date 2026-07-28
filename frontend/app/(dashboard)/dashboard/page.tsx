@@ -22,9 +22,15 @@ interface Wallet {
   account_number: string | null; iban: string | null;
 }
 interface Transaction {
-  id: number; type: "send" | "receive"; amount: number;
-  currency: string; counterparty_name: string | null;
-  category: string | null; status: string; created_at: string;
+  id: number;
+  type: string;
+  exchange_leg?: "debit" | "credit" | null;
+  amount: number;
+  currency: string;
+  counterparty_name: string | null;
+  category: string | null;
+  status: string;
+  created_at: string;
 }
 interface ExchangeRateApiItem {
   base_currency: string; target_currency: string;
@@ -40,11 +46,50 @@ interface SummaryItem {
 }
 
 function timeAgo(dateStr: string): string {
-  const diff = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
-  if (diff < 60) return `${diff}s ago`;
+  const timestamp = new Date(dateStr).getTime();
+
+  if (Number.isNaN(timestamp)) return "";
+
+  // Prevent future or timezone-shifted timestamps from displaying negative time.
+  const diff = Math.max(
+    0,
+    Math.floor((Date.now() - timestamp) / 1000)
+  );
+
+  if (diff < 60) return "just now";
   if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
   if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
   return `${Math.floor(diff / 86400)}d ago`;
+}
+
+type TransactionDirection = "credit" | "debit" | "neutral";
+
+function getTransactionDirection(
+  transaction: Transaction
+): TransactionDirection {
+  if (transaction.type === "exchange") {
+    if (transaction.exchange_leg === "credit") return "credit";
+    if (transaction.exchange_leg === "debit") return "debit";
+
+    // Historical exchange rows may not contain exchange_leg.
+    return "neutral";
+  }
+
+  return transaction.type === "receive" ? "credit" : "debit";
+}
+
+function getTransactionTitle(transaction: Transaction): string {
+  if (transaction.counterparty_name) {
+    return transaction.counterparty_name;
+  }
+
+  if (transaction.type === "exchange") {
+    if (transaction.exchange_leg === "credit") return "Exchange credit";
+    if (transaction.exchange_leg === "debit") return "Exchange debit";
+    return "Exchange";
+  }
+
+  return transaction.type === "send" ? "Sent" : "Received";
 }
 
 const categoryIcons: Record<string, React.ReactNode> = {
@@ -76,6 +121,8 @@ export default function DashboardPage() {
   const user = useAuthStore((s) => s.user);
   const [wallets, setWallets] = useState<Wallet[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [transactionPage, setTransactionPage] = useState(1);
+  const [transactionTotalPages, setTransactionTotalPages] = useState(1);
   const [exchangeRate, setExchangeRate] = useState<ExchangeRate | null>(null);
   const [rateAge, setRateAge] = useState<string>("");
   const [summary, setSummary] = useState<SummaryItem[]>([]);
@@ -89,7 +136,7 @@ export default function DashboardPage() {
     try {
       const [balanceRes, txRes, rateRes, summaryRes] = await Promise.allSettled([
         api.get("/accounts/balance"),
-        api.get("/transactions?page_size=5"),
+        api.get(`/transactions?page=${transactionPage}&page_size=5`),
         api.get("/exchange/rates"),
         api.get(`/transactions/summary?month=${currentMonth}`),
       ]);
@@ -99,7 +146,14 @@ export default function DashboardPage() {
       );
 
       if (balanceRes.status === "fulfilled") setWallets(balanceRes.value.data.balances ?? []);
-      if (txRes.status === "fulfilled") setTransactions(txRes.value.data.items ?? []);
+      if (txRes.status === "fulfilled") {
+        const transactionData = txRes.value.data;
+
+        setTransactions(transactionData.items ?? []);
+        setTransactionTotalPages(
+          Math.max(1, Number(transactionData.total_pages) || 1)
+        );
+      }
       if (rateRes.status === "fulfilled") {
         const rates: ExchangeRateApiItem[] = Array.isArray(
           rateRes.value.data
@@ -145,7 +199,7 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentMonth]);
+  }, [currentMonth, transactionPage]);
 
   useEffect(() => {
     fetchAll();
@@ -325,6 +379,14 @@ export default function DashboardPage() {
             </div>
           ) : transactions.map((tx, i) => {
             const cat = tx.category ?? "Uncategorized";
+            const direction = getTransactionDirection(tx);
+            const amountPrefix =
+              direction === "credit"
+                ? "+"
+                : direction === "debit"
+                  ? "-"
+                  : "";
+
             return (
               <div key={tx.id} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "14px 16px", borderBottom: i < transactions.length - 1 ? "1px solid #F5F5F5" : "none" }}>
                 <div style={{ width: "36px", height: "36px", borderRadius: "12px", backgroundColor: "#F0FDF4", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "16px", flexShrink: 0 }}>
@@ -332,7 +394,7 @@ export default function DashboardPage() {
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <p style={{ color: "#000", fontSize: "14px", fontWeight: "500", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {tx.counterparty_name ?? (tx.type === "send" ? "Sent" : "Received")}
+                    {getTransactionTitle(tx)}
                   </p>
                   <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "2px" }}>
                     <p style={{ color: "#aaa", fontSize: "12px" }}>{timeAgo(tx.created_at)}</p>
@@ -341,12 +403,94 @@ export default function DashboardPage() {
                     </span>
                   </div>
                 </div>
-                <p style={{ fontSize: "14px", fontWeight: "700", color: tx.type === "receive" ? "#00C853" : "#000", flexShrink: 0 }}>
-                  {tx.type === "receive" ? "+" : "-"}{tx.amount} {tx.currency}
+                <p
+                  style={{
+                    fontSize: "14px",
+                    fontWeight: "700",
+                    color: direction === "credit" ? "#00C853" : "#000",
+                    flexShrink: 0,
+                  }}
+                >
+                  {amountPrefix}{tx.amount} {tx.currency}
                 </p>
               </div>
             );
           })}
+
+          {transactionTotalPages > 1 && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "12px",
+                padding: "14px 16px",
+                borderTop: "1px solid #F0F0F0",
+              }}
+            >
+              <button
+                type="button"
+                aria-label="Previous transaction page"
+                disabled={transactionPage === 1}
+                onClick={() =>
+                  setTransactionPage((page) => Math.max(1, page - 1))
+                }
+                style={{
+                  border: "none",
+                  borderRadius: "10px",
+                  padding: "8px 14px",
+                  fontWeight: "600",
+                  cursor: transactionPage === 1 ? "not-allowed" : "pointer",
+                  backgroundColor:
+                    transactionPage === 1 ? "#F3F3F3" : "#E8F5E9",
+                  color: transactionPage === 1 ? "#AAAAAA" : "#007A3D",
+                }}
+              >
+                Previous
+              </button>
+
+              <span
+                style={{
+                  color: "#666666",
+                  fontSize: "12px",
+                  fontWeight: "600",
+                }}
+              >
+                Page {transactionPage} of {transactionTotalPages}
+              </span>
+
+              <button
+                type="button"
+                aria-label="Next transaction page"
+                disabled={transactionPage >= transactionTotalPages}
+                onClick={() =>
+                  setTransactionPage((page) =>
+                    Math.min(transactionTotalPages, page + 1)
+                  )
+                }
+                style={{
+                  border: "none",
+                  borderRadius: "10px",
+                  padding: "8px 14px",
+                  fontWeight: "600",
+                  cursor:
+                    transactionPage >= transactionTotalPages
+                      ? "not-allowed"
+                      : "pointer",
+                  backgroundColor:
+                    transactionPage >= transactionTotalPages
+                      ? "#F3F3F3"
+                      : "#E8F5E9",
+                  color:
+                    transactionPage >= transactionTotalPages
+                      ? "#AAAAAA"
+                      : "#007A3D",
+                }}
+              >
+                Next
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

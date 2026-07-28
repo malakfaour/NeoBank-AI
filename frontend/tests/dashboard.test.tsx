@@ -1,5 +1,5 @@
 ﻿import type { ReactNode } from "react";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { apiGetMock, routerPushMock } = vi.hoisted(() => ({
@@ -44,9 +44,11 @@ interface DashboardMockData {
     account_number: string | null;
     iban: string | null;
   }>;
+  transactionTotalPages?: number;
   transactions?: Array<{
     id: number;
-    type: "send" | "receive";
+    type: string;
+    exchange_leg?: "debit" | "credit" | null;
     amount: number;
     currency: string;
     counterparty_name: string | null;
@@ -71,6 +73,7 @@ interface DashboardMockData {
 
 function mockSuccessfulDashboardRequests({
   balances = [],
+  transactionTotalPages = 1,
   transactions = [],
   exchangeRates = [
     {
@@ -90,9 +93,18 @@ function mockSuccessfulDashboardRequests({
       });
     }
 
-    if (url === "/transactions?page_size=5") {
+    if (url.startsWith("/transactions?page=")) {
+      const query = new URLSearchParams(url.split("?")[1]);
+      const page = Number(query.get("page") ?? "1");
+
       return Promise.resolve({
-        data: { items: transactions },
+        data: {
+          items: transactions,
+          page,
+          page_size: 5,
+          total: transactions.length,
+          total_pages: transactionTotalPages,
+        },
       });
     }
 
@@ -200,12 +212,97 @@ describe("DashboardPage", () => {
     expect(screen.getByText("-25 USD")).toBeInTheDocument();
 
     expect(apiGetMock).toHaveBeenCalledWith("/accounts/balance");
-    expect(apiGetMock).toHaveBeenCalledWith("/transactions?page_size=5");
+    expect(apiGetMock).toHaveBeenCalledWith(
+      "/transactions?page=1&page_size=5"
+    );
     expect(apiGetMock).toHaveBeenCalledWith("/exchange/rates");
     expect(apiGetMock).not.toHaveBeenCalledWith("/exchange/rates/live");
     expect(apiGetMock).toHaveBeenCalledWith(
       expect.stringMatching(/^\/transactions\/summary\?month=\d{4}-\d{2}$/)
     );
+  });
+
+
+  it("loads the next page of recent transactions", async () => {
+    mockSuccessfulDashboardRequests({
+      transactionTotalPages: 3,
+      transactions: [
+        {
+          id: 1,
+          type: "receive",
+          amount: 10,
+          currency: "USD",
+          counterparty_name: "Test User",
+          category: "Other",
+          status: "completed",
+          created_at: new Date().toISOString(),
+        },
+      ],
+    });
+
+    render(<DashboardPage />);
+
+    expect(
+      await screen.findByText("Page 1 of 3")
+    ).toBeInTheDocument();
+
+    const previousButton = screen.getByRole("button", {
+      name: "Previous transaction page",
+    });
+    const nextButton = screen.getByRole("button", {
+      name: "Next transaction page",
+    });
+
+    expect(previousButton).toBeDisabled();
+    expect(nextButton).toBeEnabled();
+
+    fireEvent.click(nextButton);
+
+    await waitFor(() => {
+      expect(apiGetMock).toHaveBeenCalledWith(
+        "/transactions?page=2&page_size=5"
+      );
+    });
+
+    expect(screen.getByText("Page 2 of 3")).toBeInTheDocument();
+    expect(previousButton).toBeEnabled();
+  });
+
+  it("shows exchange debit and credit legs with correct signs", async () => {
+    mockSuccessfulDashboardRequests({
+      transactions: [
+        {
+          id: 11,
+          type: "exchange",
+          exchange_leg: "debit",
+          amount: 25,
+          currency: "USD",
+          counterparty_name: null,
+          category: "Exchange",
+          status: "completed",
+          created_at: new Date().toISOString(),
+        },
+        {
+          id: 12,
+          type: "exchange",
+          exchange_leg: "credit",
+          amount: 2237500,
+          currency: "LBP",
+          counterparty_name: null,
+          category: "Exchange",
+          status: "completed",
+          created_at: new Date().toISOString(),
+        },
+      ],
+    });
+
+    render(<DashboardPage />);
+
+    expect(await screen.findByText("Exchange debit")).toBeInTheDocument();
+    expect(screen.getByText("-25 USD")).toBeInTheDocument();
+
+    expect(screen.getByText("Exchange credit")).toBeInTheDocument();
+    expect(screen.getByText("+2237500 LBP")).toBeInTheDocument();
   });
 
   it("renders empty states when the API returns no dashboard data", async () => {

@@ -634,6 +634,7 @@ async def list_transactions(
             TransactionListItem(
                 id=tx.id,
                 type=transaction_type,
+                exchange_leg=tx.exchange_leg.value if tx.exchange_leg else None,
                 amount=tx.amount,
                 currency=tx.currency.value,
                 counterparty_name=counterparty.full_name if counterparty else None,
