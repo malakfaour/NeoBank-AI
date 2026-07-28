@@ -1,8 +1,19 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from "recharts";
+import {
+  Utensils,
+  Car,
+  FileText,
+  Film,
+  Send,
+  Plus,
+  ArrowLeftRight,
+  Package,
+  CircleHelp,
+} from "lucide-react";
 import api from "@/lib/axios";
 import { useAuthStore } from "@/store/authStore";
 
@@ -36,9 +47,16 @@ function timeAgo(dateStr: string): string {
   return `${Math.floor(diff / 86400)}d ago`;
 }
 
-const categoryIcons: Record<string, string> = {
-  Food: "🍽️", Transport: "🚗", Bills: "🧾", Entertainment: "🎬",
-  Transfer: "💸", TopUp: "➕", Exchange: "💱", Other: "📦", Uncategorized: "❓",
+const categoryIcons: Record<string, React.ReactNode> = {
+  Food: <Utensils size={14} />,
+  Transport: <Car size={14} />,
+  Bills: <FileText size={14} />,
+  Entertainment: <Film size={14} />,
+  Transfer: <Send size={14} />,
+  TopUp: <Plus size={14} />,
+  Exchange: <ArrowLeftRight size={14} />,
+  Other: <Package size={14} />,
+  Uncategorized: <CircleHelp size={14} />,
 };
 
 const categoryColors: Record<string, string> = {
@@ -259,7 +277,15 @@ export default function DashboardPage() {
         </p>
         {chartData.length === 0 ? (
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "24px 0", gap: "8px" }}>
-            <span style={{ fontSize: "32px" }}>📊</span>
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none">
+  <path
+    d="M4 19V5M4 19H20M8 16V10M12 16V7M16 16V12"
+    stroke="#00C853"
+    strokeWidth="1.8"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  />
+</svg>
             <p style={{ color: "#aaa", fontSize: "13px" }}>No spending data yet this month</p>
             <p style={{ color: "#ccc", fontSize: "12px" }}>Make a transaction to see your breakdown</p>
           </div>
@@ -279,7 +305,7 @@ export default function DashboardPage() {
             <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "8px" }}>
               {chartData.map((entry) => (
                 <div key={entry.name} style={{ display: "flex", alignItems: "center", gap: "6px", backgroundColor: "#F5F5F5", borderRadius: "20px", padding: "4px 10px" }}>
-                  <span style={{ fontSize: "12px" }}>{categoryIcons[entry.name] ?? "📦"}</span>
+                  <span style={{ fontSize: "12px" }}>{categoryIcons[entry.name] ?? <Package size={14} />}</span>
                   <span style={{ fontSize: "12px", fontWeight: "600", color: "#333" }}>{entry.name}</span>
                   <span style={{ fontSize: "11px", color: "#aaa" }}>({entry.count})</span>
                 </div>
@@ -302,7 +328,7 @@ export default function DashboardPage() {
             return (
               <div key={tx.id} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "14px 16px", borderBottom: i < transactions.length - 1 ? "1px solid #F5F5F5" : "none" }}>
                 <div style={{ width: "36px", height: "36px", borderRadius: "12px", backgroundColor: "#F0FDF4", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "16px", flexShrink: 0 }}>
-                  {categoryIcons[cat] ?? "📦"}
+                {categoryIcons[cat] ?? <Package size={14} />}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <p style={{ color: "#000", fontSize: "14px", fontWeight: "500", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
