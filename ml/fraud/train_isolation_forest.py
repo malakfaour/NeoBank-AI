@@ -26,8 +26,9 @@ CONTAMINATION = 0.05
 N_OUTLIERS = int(N_ROWS * CONTAMINATION)
 N_NORMAL = N_ROWS - N_OUTLIERS
 
-OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "artifacts")
-
+OUTPUT_DIR = os.path.join(
+    os.path.dirname(__file__), "..", "..", "backend", "app", "ml_models"
+)
 
 def generate_dataset(rng: np.random.Generator):
     """
