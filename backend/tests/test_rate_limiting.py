@@ -4,9 +4,13 @@ from unittest.mock import patch
 from uuid import uuid4
 
 
-async def _register_user(client, label: str) -> dict:
-    suffix = uuid4().hex[:10]
+async def _register_user(client, label: str, monkeypatch) -> dict:
+    suffix = str(uuid4().int)[:10]
     email = f"{label.lower()}-{suffix}@example.com"
+
+    monkeypatch.setattr("app.services.otp.random.randint", lambda *_: 246810)
+    monkeypatch.setattr("app.services.otp.send_email", lambda **_: None)
+
     response = await client.post(
         "/api/v1/auth/register",
         json={
@@ -17,12 +21,18 @@ async def _register_user(client, label: str) -> dict:
         },
     )
     assert response.status_code == 200, response.text
-    return {**response.json(), "email": email}
+    verified = await client.post(
+        "/api/v1/auth/registration/verify-otp",
+        json={"email": email, "code": "246810"},
+    )
+
+    assert verified.status_code == 200, verified.text
+    return {**verified.json(), "email": email}
 
 @pytest.mark.anyio
-async def test_transfer_mobile_rate_limit(client):
+async def test_transfer_mobile_rate_limit(client, monkeypatch):
     fake = fakeredis.aioredis.FakeRedis()
-    tokens = await _register_user(client, "ratelimit-transfer-mobile")
+    tokens = await _register_user(client, "ratelimit-transfer-mobile", monkeypatch)
     with patch("app.services.rate_limiter.redis_client", fake), \
          patch("app.core.redis.redis_client", fake):
         for i in range(5):
@@ -58,9 +68,9 @@ async def test_transfer_mobile_rate_limit(client):
 
 
 @pytest.mark.anyio
-async def test_exchange_execute_rate_limit(client):
+async def test_exchange_execute_rate_limit(client, monkeypatch):
     fake = fakeredis.aioredis.FakeRedis()
-    tokens = await _register_user(client, "ratelimit-exchange-execute")
+    tokens = await _register_user(client, "ratelimit-exchange-execute", monkeypatch)
     headers = {"Authorization": f"Bearer {tokens['access_token']}"}
     body = {
         "from_currency": "USD",
@@ -86,9 +96,9 @@ async def test_exchange_execute_rate_limit(client):
 
 
 @pytest.mark.anyio
-async def test_topup_rate_limit(client):
+async def test_topup_rate_limit(client, monkeypatch):
     fake = fakeredis.aioredis.FakeRedis()
-    tokens = await _register_user(client, "ratelimit-topup")
+    tokens = await _register_user(client, "ratelimit-topup", monkeypatch)
     body = {
         "wallet_id": 1,
         "amount": "10.00",
@@ -119,9 +129,9 @@ async def test_topup_rate_limit(client):
 
 
 @pytest.mark.anyio
-async def test_beneficiary_create_rate_limit(client):
+async def test_beneficiary_create_rate_limit(client, monkeypatch):
     fake = fakeredis.aioredis.FakeRedis()
-    tokens = await _register_user(client, "ratelimit-beneficiary-create")
+    tokens = await _register_user(client, "ratelimit-beneficiary-create", monkeypatch)
     headers = {"Authorization": f"Bearer {tokens['access_token']}"}
     body = {
         "nickname": "Test",
@@ -147,9 +157,9 @@ async def test_beneficiary_create_rate_limit(client):
 
 
 @pytest.mark.anyio
-async def test_beneficiary_update_rate_limit(client):
+async def test_beneficiary_update_rate_limit(client, monkeypatch):
     fake = fakeredis.aioredis.FakeRedis()
-    tokens = await _register_user(client, "ratelimit-beneficiary-update")
+    tokens = await _register_user(client, "ratelimit-beneficiary-update", monkeypatch)
     headers = {"Authorization": f"Bearer {tokens['access_token']}"}
     body = {"nickname": "Renamed"}
     with patch("app.services.rate_limiter.redis_client", fake), \
@@ -171,9 +181,9 @@ async def test_beneficiary_update_rate_limit(client):
 
 
 @pytest.mark.anyio
-async def test_beneficiary_delete_rate_limit(client):
+async def test_beneficiary_delete_rate_limit(client, monkeypatch):
     fake = fakeredis.aioredis.FakeRedis()
-    tokens = await _register_user(client, "ratelimit-beneficiary-delete")
+    tokens = await _register_user(client, "ratelimit-beneficiary-delete", monkeypatch)
     headers = {"Authorization": f"Bearer {tokens['access_token']}"}
     with patch("app.services.rate_limiter.redis_client", fake), \
          patch("app.core.redis.redis_client", fake):
@@ -190,9 +200,9 @@ async def test_beneficiary_delete_rate_limit(client):
         assert response.status_code == 429
         assert "Retry-After" in response.headers
 @pytest.mark.anyio
-async def test_transfer_iban_rate_limit(client):
+async def test_transfer_iban_rate_limit(client, monkeypatch):
     fake = fakeredis.aioredis.FakeRedis()
-    tokens = await _register_user(client, "ratelimit-transfer-iban")
+    tokens = await _register_user(client, "ratelimit-transfer-iban", monkeypatch)
     with patch("app.services.rate_limiter.redis_client", fake), \
          patch("app.core.redis.redis_client", fake):
         for i in range(5):
