@@ -294,13 +294,12 @@ def test_load_xgb_model_s3_failure_falls_back_to_missing_model_behavior(monkeypa
     assert stats is None
     assert any("fraud_xgb.pkl not found" in record.message for record in caplog.records)
 
-
-def test_load_isolation_forest_s3_failure_raises_file_not_found(monkeypatch, tmp_path):
+def test_load_isolation_forest_s3_failure_falls_back_to_missing_model_behavior(monkeypatch, tmp_path, caplog):
     """
-    _load_isolation_forest() has no try/except today (unlike
-    _load_xgb_model()) -- a still-missing file after a failed S3 fetch
-    raises FileNotFoundError uncaught, exactly as it does today when the
-    file is simply absent. Proves the fallback doesn't change that.
+    DEVATTECH-92: _load_isolation_forest() now mirrors _load_xgb_model()'s
+    graceful fallback exactly, instead of raising FileNotFoundError
+    uncaught. Local file missing AND S3 fails -> (None, None) + warning,
+    same as _load_xgb_model()'s equivalent case.
     """
     monkeypatch.setattr(fraud_scoring, "_isolation_forest_model", None)
     monkeypatch.setattr(fraud_scoring, "_isolation_forest_stats", None)
@@ -313,9 +312,39 @@ def test_load_isolation_forest_s3_failure_raises_file_not_found(monkeypatch, tmp
         ),
     )
 
-    with pytest.raises(FileNotFoundError):
-        fraud_scoring._load_isolation_forest()
+    with caplog.at_level("WARNING"):
+        model, stats = fraud_scoring._load_isolation_forest()
 
+    assert model is None
+    assert stats is None
+    assert any("isolation_forest.pkl not found" in record.message for record in caplog.records)
+
+
+def test_score_with_isolation_forest_missing_model_returns_safe_default(monkeypatch, tmp_path):
+    """
+    DEVATTECH-92: the actual bug this whole fix addresses. Before this
+    fix, a missing isolation_forest.pkl crashed score_with_isolation_forest
+    (via _load_isolation_forest raising uncaught), which propagated out of
+    score_transaction's scoring step BEFORE check_fraud_rules_sync() ever
+    ran -- an ML outage didn't just skip ML scoring, it skipped the
+    rule-based check entirely and blanket-flagged every transaction
+    regardless of what the rules said. score=None/db=None here for the
+    same reason as the equivalent xgboost test: this fallback path
+    returns before ever touching its arguments.
+    """
+    monkeypatch.setattr(fraud_scoring, "_isolation_forest_model", None)
+    monkeypatch.setattr(fraud_scoring, "_isolation_forest_stats", None)
+    monkeypatch.setattr(fraud_scoring, "ISOLATION_FOREST_PATH", str(tmp_path / "does_not_exist.pkl"))
+    monkeypatch.setattr(
+        fraud_scoring,
+        "download_file",
+        lambda source_key, destination_path: (_ for _ in ()).throw(
+            FileNotFoundError("mocked: S3 object not found")
+        ),
+    )
+
+    score = fraud_scoring.score_with_isolation_forest(db=None, transaction=None)
+    assert score == 0.0
 def test_compute_xgb_features_hour_and_day_use_beirut_local_time():
     """
     Regression test: hour_of_day and day_of_week are meant to represent
