@@ -3,12 +3,8 @@
 import axios from "axios";
 import { useEffect, useMemo, useRef, useState } from "react";
 import api from "@/lib/axios";
-<<<<<<< HEAD
 import { useAuthStore } from "@/store/authStore";
 
-=======
-import { Wallet, ClipboardList, ArrowLeftRight } from "lucide-react";
->>>>>>> origin/develop
 interface ChatMessage { role: "user" | "bot"; text: string; }
 interface PendingAction {
   type?: string;
@@ -322,32 +318,14 @@ export default function ChatWidget() {
               {/* Confirm card */}
               {pendingAction && !showPasscode && (
                 <div style={{ backgroundColor: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: "16px", padding: "16px", display: "flex", flexDirection: "column", gap: "10px" }}>
-<<<<<<< HEAD
                   <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 10h18M5 10v10h14V10M12 4L3 10h18L12 4Z" stroke="#00C853" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
                     <p style={{ fontSize: "14px", fontWeight: "700", color: "#000" }}>Confirm Transfer</p>
                   </div>
-=======
-<div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-    <path
-      d="M3 10h18M5 10V20H19V10M12 4L3 10H21L12 4Z"
-      stroke="#00C853"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    />
-  </svg>
-  <p style={{ fontSize: "14px", fontWeight: "700", color: "#000" }}>
-    Confirm Transfer
-  </p>
-</div>
->>>>>>> origin/develop
                   {pendingAction.recipient && <p style={{ fontSize: "13px", color: "#555" }}>To: {pendingAction.recipient}</p>}
                   {pendingAction.amount && pendingAction.currency && (
                     <p style={{ fontSize: "13px", color: "#555" }}>Amount: {pendingAction.amount} {pendingAction.currency}</p>
                   )}
-<<<<<<< HEAD
                   {pendingAction.source_account && <p style={{ fontSize: "13px", color: "#555" }}>From: {pendingAction.source_account}</p>}
                   {pendingAction.fee && pendingAction.currency && <p style={{ fontSize: "13px", color: "#555" }}>Fee: {pendingAction.fee} {pendingAction.currency}</p>}
                   {pendingAction.total_debit && pendingAction.currency && <p style={{ fontSize: "13px", fontWeight: "700", color: "#333" }}>Total debit: {pendingAction.total_debit} {pendingAction.currency}</p>}
@@ -357,29 +335,6 @@ export default function ChatWidget() {
                   </div>
                   <div style={{ display: "flex", gap: "8px" }}>
                     <button onClick={handleConfirmClick} disabled={chatLoading || passcodeLoading} style={{ flex: 1, backgroundColor: "#00C853", color: "#fff", border: "none", borderRadius: "10px", padding: "10px", fontWeight: "700", cursor: "pointer", fontSize: "13px" }}>
-=======
-                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-    <circle
-      cx="12"
-      cy="12"
-      r="9"
-      stroke="#aaa"
-      strokeWidth="1.8"
-    />
-    <path
-      d="M12 7V12L15 14"
-      stroke="#aaa"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-    />
-  </svg>
-  <p style={{ fontSize: "11px", color: "#aaa" }}>
-    Expires in 5 minutes
-  </p>
-</div>     <div style={{ display: "flex", gap: "8px" }}>
-                    <button onClick={handleConfirmClick} style={{ flex: 1, backgroundColor: "#00C853", color: "#fff", border: "none", borderRadius: "10px", padding: "10px", fontWeight: "700", cursor: "pointer", fontSize: "13px" }}>
->>>>>>> origin/develop
                       Confirm
                     </button>
                     <button onClick={handleCancel} style={{ flex: 1, backgroundColor: "#F5F5F5", color: "#333", border: "none", borderRadius: "10px", padding: "10px", fontWeight: "600", cursor: "pointer", fontSize: "13px" }}>
@@ -392,37 +347,11 @@ export default function ChatWidget() {
               {/* Passcode sheet */}
               {showPasscode && (
                 <div style={{ backgroundColor: "#fff", border: "1.5px solid #E5E7EB", borderRadius: "16px", padding: "16px", display: "flex", flexDirection: "column", gap: "10px" }}>
-<<<<<<< HEAD
                   <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2" stroke="#00C853" strokeWidth="1.8" /><path d="M8 11V8a4 4 0 018 0v3" stroke="#00C853" strokeWidth="1.8" strokeLinecap="round" /></svg>
                     <p style={{ fontSize: "14px", fontWeight: "700", color: "#000" }}>Enter Passcode</p>
                   </div>
                   <p style={{ fontSize: "12px", color: "#aaa" }}>Verify your identity to complete the transfer</p>
-=======
-               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-    <rect
-      x="5"
-      y="11"
-      width="14"
-      height="10"
-      rx="2"
-      stroke="#00C853"
-      strokeWidth="1.8"
-    />
-    <path
-      d="M8 11V8C8 5.8 9.8 4 12 4C14.2 4 16 5.8 16 8V11"
-      stroke="#00C853"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-    />
-  </svg>
-
-  <p style={{ fontSize: "14px", fontWeight: "700", color: "#000" }}>
-    Enter Passcode
-  </p>
-</div>   <p style={{ fontSize: "12px", color: "#aaa" }}>Verify your identity to complete the transfer</p>
->>>>>>> origin/develop
                   <input type="password" placeholder={"\u2022".repeat(6)} maxLength={6} value={passcode}
                     onChange={(e) => { setPasscode(e.target.value.replace(/\D/g, "")); setPasscodeError(""); }}
                     style={{ width: "100%", border: "1.5px solid #E5E7EB", borderRadius: "12px", padding: "10px 14px", fontSize: "20px", letterSpacing: "8px", outline: "none", boxSizing: "border-box", textAlign: "center" }} />
@@ -443,7 +372,6 @@ export default function ChatWidget() {
             {/* Quick action chips */}
             {messages.length === 0 && (
               <div style={{ padding: "0 16px 12px", display: "flex", gap: "8px", flexWrap: "wrap" }}>
-<<<<<<< HEAD
                 {[
                   { label: "My Balance", icon: <WalletIcon />, msg: "What is my current balance?" },
                   { label: "Last Transactions", icon: <TransactionsIcon />, msg: "Show me my last transactions" },
@@ -454,47 +382,6 @@ export default function ChatWidget() {
                     {icon}{label}
                   </button>
                 ))}
-=======
-               {[
-  {
-    label: "My Balance",
-    icon: <Wallet size={15} />,
-    msg: "What is my current balance?",
-  },
-  {
-    label: "Last Transactions",
-    icon: <ClipboardList size={15} />,
-    msg: "Show me my last transactions",
-  },
-  {
-    label: "Exchange Rate",
-    icon: <ArrowLeftRight size={15} />,
-    msg: "What is the current USD to LBP exchange rate?",
-  },
-].map(({ label, icon, msg }) => (
-  <button
-    key={label}
-    onClick={() => sendMessage(msg)}
-    style={{
-      padding: "8px 14px",
-      borderRadius: "20px",
-      border: "1.5px solid #00C853",
-      backgroundColor: "#F0FDF4",
-      color: "#00C853",
-      fontSize: "12px",
-      fontWeight: "600",
-      cursor: "pointer",
-      whiteSpace: "nowrap",
-      display: "flex",
-      alignItems: "center",
-      gap: "6px",
-    }}
-  >
-    {icon}
-    {label}
-  </button>
-))}
->>>>>>> origin/develop
               </div>
             )}
 

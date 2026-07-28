@@ -125,13 +125,14 @@ async def _register_reviewer(client, label: str) -> dict:
 
 @pytest.mark.postgres
 async def test_full_money_path_register_topup_send_score_audit_reversal(
-    client, stub_fraud_scoring, provide_isolation_forest_model
+    client, stub_fraud_scoring, provide_isolation_forest_model, approve_kyc_users
 ):
     # --- register ---
     sender = await _register_user(client, "e2e-sender")
     receiver = await _register_user(client, "e2e-receiver")
     sender_id = sender["user"]["id"]
     receiver_id = receiver["user"]["id"]
+    await approve_kyc_users(sender_id, receiver_id)
 
     from app.db.session import AsyncSessionLocal
     from app.models.wallet import Wallet, WalletCurrency

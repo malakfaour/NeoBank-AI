@@ -119,6 +119,41 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(skip_marker)
 
 
+@pytest.fixture
+def approve_kyc_users():
+    """Put registered E2E users in the same approved state as compliance review."""
+
+    async def approve(*user_ids: int) -> None:
+        from datetime import datetime, timezone
+
+        from sqlalchemy import select
+
+        from app.db.session import AsyncSessionLocal
+        from app.models.kyc_record import KYCRecord, KYCRecordStatus
+        from app.models.user import KYCStatus, User
+
+        async with AsyncSessionLocal() as db:
+            for user_id in user_ids:
+                user = await db.scalar(select(User).where(User.id == user_id))
+                assert user is not None
+                record = await db.scalar(
+                    select(KYCRecord)
+                    .where(KYCRecord.user_id == user_id)
+                    .order_by(KYCRecord.id.desc())
+                )
+                if record is None:
+                    record = KYCRecord(user_id=user_id)
+                    db.add(record)
+                record.status = KYCRecordStatus.approved
+                record.is_submitted = True
+                record.submitted_at = record.submitted_at or datetime.now(timezone.utc)
+                record.reviewed_at = datetime.now(timezone.utc)
+                user.kyc_status = KYCStatus.approved
+            await db.commit()
+
+    return approve
+
+
 # NOTE: no anyio_backend fixture here -- pytest.ini's asyncio_mode = auto
 # (repo-wide, untouched by this ticket) already makes pytest-asyncio
 # handle every async def test_... function automatically.
@@ -353,4 +388,3 @@ async def client():
         transport=ASGITransport(app=app), base_url="http://test"
     ) as ac:
         yield ac
-        
