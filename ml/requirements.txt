@@ -1,9 +1,8 @@
 # KYC Face Verification & Liveness
 deepface==0.0.96
-tensorflow==2.21.0
-tf-keras==2.21.0
 opencv-python==4.12.0.88
-mtcnn==0.1.1
+mtcnn==1.0.0
+retina-face==0.0.17
 
 # Fraud Detection
 xgboost==2.0.0
