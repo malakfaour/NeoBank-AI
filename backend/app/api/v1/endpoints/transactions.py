@@ -51,6 +51,9 @@ from app.schemas.transaction import (
 )
 from app.utils.transaction_query_utils import compute_total_pages, parse_summary_month
 
+from app.models.notification import NotificationType
+from app.services.notifications import notify
+
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
 
@@ -246,6 +249,28 @@ async def send_money(
     transaction.status = TransactionStatus.completed
     await db.commit()
     await db.refresh(transaction)
+
+    await notify(
+    user_id=sender_id,
+    notification_type=NotificationType.TX_SENT,
+    metadata={
+        "amount": str(transaction.amount),
+        "currency": transaction.currency.value,
+        "transaction_id": transaction.id,
+    },
+    db=db,
+    )
+
+    await notify(
+    user_id=receiver_id,
+    notification_type=NotificationType.TX_RECEIVED,
+    metadata={
+        "amount": str(transaction.amount),
+        "currency": transaction.currency.value,
+        "transaction_id": transaction.id,
+    },
+    db=db,
+    )
 
     score_transaction.delay(transaction.id)
 
