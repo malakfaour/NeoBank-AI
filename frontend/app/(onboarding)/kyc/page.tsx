@@ -8,18 +8,24 @@ import SelfieCapture from "@/components/kyc/SelfieCapture";
 
 type Profile = Record<string, string>;
 type Workflow = "not_started" | "in_progress" | "pending" | "approved" | "rejected";
-export type KYCDocumentType = "national_id" | "passport";
+export type KYCDocumentType = "national_id" | "passport" | "drivers_license";
 
 export function buildKycUploadForm(
-  files: { front: File; back: File },
+  files: { front: File; back?: File },
   documentType: KYCDocumentType,
 ) {
   const form = new FormData();
   form.append("id_photo", files.front);
-  form.append("back_id_photo", files.back);
+  if (files.back) form.append("back_id_photo", files.back);
   form.append("document_type", documentType);
   form.append("submit_for_review", "false");
   return form;
+}
+
+// Passports are a single photo page - only national IDs and driver's
+// licenses have a meaningful back side to capture.
+function requiresBackPage(identificationType: string | undefined): boolean {
+  return identificationType !== "passport";
 }
 
 export function buildKycSelfieForm(selfie: File) {
@@ -133,7 +139,7 @@ const steps: { title: string; subtitle: string; fields: Field[] }[] = [
     title: "Identification and document upload",
     subtitle: "Provide current identification, review your details, and submit.",
     fields: [
-      { key: "identification_type", label: "Identification type", options: ["national_id", "passport"], required: true },
+      { key: "identification_type", label: "Identification type", options: ["national_id", "passport", "drivers_license"], required: true },
       { key: "identification_number", label: "Identification number", required: true },
       { key: "record_number", label: "Record number" },
       { key: "register_place", label: "Register place" },
@@ -158,7 +164,8 @@ export function getKycResumeStep(data: KYCResponse) {
   const identificationComplete = steps[5].fields
     .filter((field) => field.required)
     .every((field) => String(data.profile_data[field.key] ?? "").trim());
-  if (!identificationComplete || !data.has_front_id || !data.has_back_id) return 6;
+  const backPageComplete = !requiresBackPage(data.profile_data.identification_type) || data.has_back_id;
+  if (!identificationComplete || !data.has_front_id || !backPageComplete) return 6;
   return Math.min(Math.max(data.current_step || 6, 1), 6);
 }
 
@@ -228,7 +235,9 @@ export default function KYCPage() {
     }
     if (step === 6) {
       if (!documents.front && !files.front) nextErrors.front = "Front ID image is required.";
-      if (!documents.back && !files.back) nextErrors.back = "Back ID image is required.";
+      if (requiresBackPage(profile.identification_type) && !documents.back && !files.back) {
+        nextErrors.back = "Back ID image is required.";
+      }
     }
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
@@ -243,13 +252,13 @@ export default function KYCPage() {
       );
       setDocuments((current) => ({ ...current, selfie: true }));
     }
-    if (step === 6 && files.front && files.back) {
+    if (step === 6 && files.front) {
       const form = buildKycUploadForm(
         { front: files.front, back: files.back },
         (profile.identification_type as KYCDocumentType) || "national_id",
       );
       await api.post("/kyc/upload", form, multipartRequestConfig);
-      setDocuments((current) => ({ ...current, front: true, back: true }));
+      setDocuments((current) => ({ ...current, front: true, back: current.back || Boolean(files.back) }));
     }
     await api.put("/kyc/profile", { current_step: targetStep, profile_data: profile });
   };
@@ -318,21 +327,8 @@ export default function KYCPage() {
         <p style={{ color: "#777", marginBottom: 24 }}>{steps[step - 1].subtitle}</p>
         {message && <div role="alert" style={{ color: "#B91C1C", background: "#FEF2F2", padding: 12, borderRadius: 10, marginBottom: 16 }}>{message}</div>}
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 16 }}>
-          {visibleFields.map((field) => <label key={field.key} style={{ display: "grid", gap: 6, fontSize: 13, fontWeight: 600 }}>
-            {field.label}{field.required ? " *" : ""}
-            {field.options ? <select value={profile[field.key] ?? ""} onChange={(e) => setProfile({ ...profile, [field.key]: e.target.value })} style={inputStyle}>
-              <option value="">Select</option>{field.options.map((option) => <option key={option} value={option}>{option.replaceAll("_", " ")}</option>)}
-            </select> : <input type={field.type || "text"} value={profile[field.key] ?? ""} onChange={(e) => setProfile({ ...profile, [field.key]: e.target.value })} style={inputStyle} />}
-            {errors[field.key] && <span style={{ color: "#B91C1C", fontWeight: 400 }}>{errors[field.key]}</span>}
-          </label>)}
-          {step === 6 && (["front", "back"] as const).map((key) => <label key={key} style={{ display: "grid", gap: 6, fontSize: 13, fontWeight: 600 }}>
-            {key === "front" ? "Front ID image" : "Back ID image"} *
-            <input type="file" accept="image/jpeg,image/png" onChange={(e) => setFiles({ ...files, [key]: e.target.files?.[0] })} style={inputStyle} />
-            {documents[key] && !files[key] && <span style={{ color: "#00A844" }}>Already uploaded</span>}
-            {errors[key] && <span style={{ color: "#B91C1C", fontWeight: 400 }}>{errors[key]}</span>}
-          </label>)}
-          {step === 5 && <div style={{ display: "grid", gap: 6, fontSize: 13, fontWeight: 600, gridColumn: "1 / -1" }}>
+        {step === 5 ? (
+          <div style={{ display: "grid", gap: 6, fontSize: 13, fontWeight: 600 }}>
             Selfie *
             <SelfieCapture
               capturedSelfie={files.selfie}
@@ -348,8 +344,54 @@ export default function KYCPage() {
               })}
             />
             {errors.selfie && <span style={{ color: "#B91C1C", fontWeight: 400 }}>{errors.selfie}</span>}
-          </div>}
-        </div>
+          </div>
+        ) : step === 6 ? (
+          <>
+            <p style={{ fontSize: 13, fontWeight: 700, color: "#000", marginBottom: 12 }}>Identification details</p>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 16, marginBottom: 28 }}>
+              {visibleFields.map((field) => <label key={field.key} style={{ display: "grid", gap: 6, fontSize: 13, fontWeight: 600 }}>
+                {field.label}{field.required ? " *" : ""}
+                {field.options ? <select value={profile[field.key] ?? ""} onChange={(e) => setProfile({ ...profile, [field.key]: e.target.value })} style={inputStyle}>
+                  <option value="">Select</option>{field.options.map((option) => <option key={option} value={option}>{option.replaceAll("_", " ")}</option>)}
+                </select> : <input type={field.type || "text"} value={profile[field.key] ?? ""} onChange={(e) => setProfile({ ...profile, [field.key]: e.target.value })} style={inputStyle} />}
+                {errors[field.key] && <span style={{ color: "#B91C1C", fontWeight: 400 }}>{errors[field.key]}</span>}
+              </label>)}
+            </div>
+
+            <p style={{ fontSize: 13, fontWeight: 700, color: "#000", marginBottom: 4 }}>Upload documents</p>
+            <p style={{ fontSize: 12, color: "#999", marginBottom: 12 }}>
+              {requiresBackPage(profile.identification_type)
+                ? "Photograph both sides of your ID."
+                : "Photograph the photo page of your passport."}
+            </p>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 16 }}>
+              <label style={{ display: "grid", gap: 6, fontSize: 13, fontWeight: 600 }}>
+                {requiresBackPage(profile.identification_type) ? "Front ID image" : "Passport photo page"} *
+                <input type="file" accept="image/jpeg,image/png" onChange={(e) => setFiles({ ...files, front: e.target.files?.[0] })} style={inputStyle} />
+                {documents.front && !files.front && <span style={{ color: "#00A844" }}>Already uploaded</span>}
+                {errors.front && <span style={{ color: "#B91C1C", fontWeight: 400 }}>{errors.front}</span>}
+              </label>
+              {requiresBackPage(profile.identification_type) && (
+                <label style={{ display: "grid", gap: 6, fontSize: 13, fontWeight: 600 }}>
+                  Back ID image *
+                  <input type="file" accept="image/jpeg,image/png" onChange={(e) => setFiles({ ...files, back: e.target.files?.[0] })} style={inputStyle} />
+                  {documents.back && !files.back && <span style={{ color: "#00A844" }}>Already uploaded</span>}
+                  {errors.back && <span style={{ color: "#B91C1C", fontWeight: 400 }}>{errors.back}</span>}
+                </label>
+              )}
+            </div>
+          </>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 16 }}>
+            {visibleFields.map((field) => <label key={field.key} style={{ display: "grid", gap: 6, fontSize: 13, fontWeight: 600 }}>
+              {field.label}{field.required ? " *" : ""}
+              {field.options ? <select value={profile[field.key] ?? ""} onChange={(e) => setProfile({ ...profile, [field.key]: e.target.value })} style={inputStyle}>
+                <option value="">Select</option>{field.options.map((option) => <option key={option} value={option}>{option.replaceAll("_", " ")}</option>)}
+              </select> : <input type={field.type || "text"} value={profile[field.key] ?? ""} onChange={(e) => setProfile({ ...profile, [field.key]: e.target.value })} style={inputStyle} />}
+              {errors[field.key] && <span style={{ color: "#B91C1C", fontWeight: 400 }}>{errors[field.key]}</span>}
+            </label>)}
+          </div>
+        )}
 
         {step === 6 && <>
           <div style={{ display: "grid", gap: 12, marginBottom: 20 }}>
