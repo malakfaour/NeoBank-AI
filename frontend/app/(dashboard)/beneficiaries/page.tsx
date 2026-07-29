@@ -13,6 +13,26 @@ interface Beneficiary {
   value: string;
 }
 
+function beneficiaryTypeLabel(type: BeneficiaryType) {
+  return type === "mobile" ? "Mobile" : "IBAN";
+}
+
+function beneficiarySectionLabel(type: BeneficiaryType) {
+  return type === "mobile"
+    ? "Mobile beneficiaries"
+    : "IBAN beneficiaries";
+}
+
+function beneficiarySearchPlaceholder(type: BeneficiaryType) {
+  return type === "mobile"
+    ? "Search by nickname or mobile number"
+    : "Search by nickname or IBAN";
+}
+
+function beneficiaryValuePlaceholder(type: BeneficiaryType) {
+  return type === "mobile" ? "+96170123456" : "LB00...";
+}
+
 function getErrorMessage(error: unknown, fallback: string) {
   const detail = (error as { response?: { data?: { detail?: unknown } } })
     ?.response?.data?.detail;
@@ -55,6 +75,7 @@ function PageHeader({ onBack }: { onBack: () => void }) {
 export default function BeneficiariesPage() {
   const router = useRouter();
   const [activeType, setActiveType] = useState<BeneficiaryType>("mobile");
+  const [search, setSearch] = useState("");
   const [beneficiaries, setBeneficiaries] = useState<Beneficiary[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -69,7 +90,14 @@ export default function BeneficiariesPage() {
   useEffect(() => {
     let cancelled = false;
 
-    api.get(`/beneficiaries?type=${activeType}`)
+    const params = new URLSearchParams({ type: activeType });
+    const trimmedSearch = search.trim();
+
+    if (trimmedSearch) {
+      params.set("search", trimmedSearch);
+    }
+
+    api.get(`/beneficiaries?${params.toString()}`)
       .then((response) => {
         if (!cancelled) setBeneficiaries(response.data?.items ?? []);
       })
@@ -86,10 +114,17 @@ export default function BeneficiariesPage() {
     return () => {
       cancelled = true;
     };
-  }, [activeType]);
+  }, [activeType, search]);
 
   const refreshBeneficiaries = async () => {
-    const response = await api.get(`/beneficiaries?type=${activeType}`);
+    const params = new URLSearchParams({ type: activeType });
+    const trimmedSearch = search.trim();
+
+    if (trimmedSearch) {
+      params.set("search", trimmedSearch);
+    }
+
+    const response = await api.get(`/beneficiaries?${params.toString()}`);
     setBeneficiaries(response.data?.items ?? []);
   };
 
@@ -150,6 +185,7 @@ export default function BeneficiariesPage() {
     setLoading(true);
     setError("");
     setActiveType(type);
+    setSearch("");
     setShowAddForm(false);
     setNickname("");
     setValue("");
@@ -181,14 +217,31 @@ export default function BeneficiariesPage() {
             onClick={() => switchType(type)}
             style={{ flex: 1, padding: "10px", borderRadius: "12px", border: "none", backgroundColor: activeType === type ? "#00C853" : "#E5E7EB", color: activeType === type ? "#fff" : "#666", fontWeight: "600", fontSize: "13px", cursor: "pointer" }}
           >
-            {type === "mobile" ? "Mobile" : "IBAN"}
+            {beneficiaryTypeLabel(type)}
           </button>
         ))}
       </div>
 
+      <input
+        type="search"
+        value={search}
+        onChange={(event) => {
+          setSearch(event.target.value);
+          setLoading(true);
+          setError("");
+        }}
+        placeholder={beneficiarySearchPlaceholder(activeType)}
+        aria-label="Search beneficiaries"
+        style={{
+          ...inputStyle,
+          backgroundColor: "#fff",
+          marginBottom: "14px",
+        }}
+      />
+
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
         <p style={{ color: "#666", fontSize: "13px", margin: 0 }}>
-          {activeType === "mobile" ? "Mobile beneficiaries" : "IBAN beneficiaries"}
+          {beneficiarySectionLabel(activeType)}
         </p>
         <button
           type="button"
@@ -214,7 +267,7 @@ export default function BeneficiariesPage() {
           <input
             value={value}
             onChange={(event) => setValue(event.target.value)}
-            placeholder={activeType === "mobile" ? "+96170123456" : "LB00..."}
+            placeholder={beneficiaryValuePlaceholder(activeType)}
             required
             style={inputStyle}
           />
@@ -238,7 +291,11 @@ export default function BeneficiariesPage() {
         </div>
       ) : beneficiaries.length === 0 ? (
         <div style={{ backgroundColor: "#fff", borderRadius: "16px", padding: "32px", textAlign: "center" }}>
-          <p style={{ color: "#888", fontSize: "14px" }}>No saved beneficiaries yet.</p>
+          <p style={{ color: "#888", fontSize: "14px" }}>
+            {search.trim()
+              ? "No beneficiaries match your search."
+              : "No saved beneficiaries yet."}
+          </p>
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
