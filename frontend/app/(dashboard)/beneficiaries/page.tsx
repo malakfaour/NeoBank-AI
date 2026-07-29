@@ -55,6 +55,7 @@ function PageHeader({ onBack }: { onBack: () => void }) {
 export default function BeneficiariesPage() {
   const router = useRouter();
   const [activeType, setActiveType] = useState<BeneficiaryType>("mobile");
+  const [search, setSearch] = useState("");
   const [beneficiaries, setBeneficiaries] = useState<Beneficiary[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -69,7 +70,14 @@ export default function BeneficiariesPage() {
   useEffect(() => {
     let cancelled = false;
 
-    api.get(`/beneficiaries?type=${activeType}`)
+    const params = new URLSearchParams({ type: activeType });
+    const trimmedSearch = search.trim();
+
+    if (trimmedSearch) {
+      params.set("search", trimmedSearch);
+    }
+
+    api.get(`/beneficiaries?${params.toString()}`)
       .then((response) => {
         if (!cancelled) setBeneficiaries(response.data?.items ?? []);
       })
@@ -86,10 +94,17 @@ export default function BeneficiariesPage() {
     return () => {
       cancelled = true;
     };
-  }, [activeType]);
+  }, [activeType, search]);
 
   const refreshBeneficiaries = async () => {
-    const response = await api.get(`/beneficiaries?type=${activeType}`);
+    const params = new URLSearchParams({ type: activeType });
+    const trimmedSearch = search.trim();
+
+    if (trimmedSearch) {
+      params.set("search", trimmedSearch);
+    }
+
+    const response = await api.get(`/beneficiaries?${params.toString()}`);
     setBeneficiaries(response.data?.items ?? []);
   };
 
@@ -150,6 +165,7 @@ export default function BeneficiariesPage() {
     setLoading(true);
     setError("");
     setActiveType(type);
+    setSearch("");
     setShowAddForm(false);
     setNickname("");
     setValue("");
@@ -185,6 +201,27 @@ export default function BeneficiariesPage() {
           </button>
         ))}
       </div>
+
+      <input
+        type="search"
+        value={search}
+        onChange={(event) => {
+          setSearch(event.target.value);
+          setLoading(true);
+          setError("");
+        }}
+        placeholder={
+          activeType === "mobile"
+            ? "Search by nickname or mobile number"
+            : "Search by nickname or IBAN"
+        }
+        aria-label="Search beneficiaries"
+        style={{
+          ...inputStyle,
+          backgroundColor: "#fff",
+          marginBottom: "14px",
+        }}
+      />
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
         <p style={{ color: "#666", fontSize: "13px", margin: 0 }}>
@@ -238,7 +275,11 @@ export default function BeneficiariesPage() {
         </div>
       ) : beneficiaries.length === 0 ? (
         <div style={{ backgroundColor: "#fff", borderRadius: "16px", padding: "32px", textAlign: "center" }}>
-          <p style={{ color: "#888", fontSize: "14px" }}>No saved beneficiaries yet.</p>
+          <p style={{ color: "#888", fontSize: "14px" }}>
+            {search.trim()
+              ? "No beneficiaries match your search."
+              : "No saved beneficiaries yet."}
+          </p>
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
