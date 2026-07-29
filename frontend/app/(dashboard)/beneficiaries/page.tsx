@@ -13,6 +13,26 @@ interface Beneficiary {
   value: string;
 }
 
+function beneficiaryTypeLabel(type: BeneficiaryType) {
+  return type === "mobile" ? "Mobile" : "IBAN";
+}
+
+function beneficiarySectionLabel(type: BeneficiaryType) {
+  return type === "mobile"
+    ? "Mobile beneficiaries"
+    : "IBAN beneficiaries";
+}
+
+function beneficiarySearchPlaceholder(type: BeneficiaryType) {
+  return type === "mobile"
+    ? "Search by nickname or mobile number"
+    : "Search by nickname or IBAN";
+}
+
+function beneficiaryValuePlaceholder(type: BeneficiaryType) {
+  return type === "mobile" ? "+96170123456" : "LB00...";
+}
+
 function getErrorMessage(error: unknown, fallback: string) {
   const detail = (error as { response?: { data?: { detail?: unknown } } })
     ?.response?.data?.detail;
@@ -197,7 +217,7 @@ export default function BeneficiariesPage() {
             onClick={() => switchType(type)}
             style={{ flex: 1, padding: "10px", borderRadius: "12px", border: "none", backgroundColor: activeType === type ? "#00C853" : "#E5E7EB", color: activeType === type ? "#fff" : "#666", fontWeight: "600", fontSize: "13px", cursor: "pointer" }}
           >
-            {type === "mobile" ? "Mobile" : "IBAN"}
+            {beneficiaryTypeLabel(type)}
           </button>
         ))}
       </div>
@@ -210,11 +230,7 @@ export default function BeneficiariesPage() {
           setLoading(true);
           setError("");
         }}
-        placeholder={
-          activeType === "mobile"
-            ? "Search by nickname or mobile number"
-            : "Search by nickname or IBAN"
-        }
+        placeholder={beneficiarySearchPlaceholder(activeType)}
         aria-label="Search beneficiaries"
         style={{
           ...inputStyle,
@@ -225,7 +241,7 @@ export default function BeneficiariesPage() {
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
         <p style={{ color: "#666", fontSize: "13px", margin: 0 }}>
-          {activeType === "mobile" ? "Mobile beneficiaries" : "IBAN beneficiaries"}
+          {beneficiarySectionLabel(activeType)}
         </p>
         <button
           type="button"
@@ -251,7 +267,7 @@ export default function BeneficiariesPage() {
           <input
             value={value}
             onChange={(event) => setValue(event.target.value)}
-            placeholder={activeType === "mobile" ? "+96170123456" : "LB00..."}
+            placeholder={beneficiaryValuePlaceholder(activeType)}
             required
             style={inputStyle}
           />

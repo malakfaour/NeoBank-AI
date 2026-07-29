@@ -37,6 +37,7 @@ export default function ProfilePage() {
   const [user, setLocalUser] = useState<UserMe | null>(null);
   const [wallets, setWallets] = useState<Wallet[]>([]);
   const [copiedIban, setCopiedIban] = useState<string | null>(null);
+  const [copiedAccountNumber, setCopiedAccountNumber] = useState<string | null>(null);
   const [kycProfile, setKycProfile] = useState<KYCProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -188,6 +189,19 @@ const handleDownloadStatement = async () => {
     }
   };
 
+  const maskAccountNumber = (accountNumber: string) =>
+    maskIban(accountNumber);
+
+  const handleCopyAccountNumber = async (accountNumber: string) => {
+    try {
+      await navigator.clipboard.writeText(accountNumber);
+      setCopiedAccountNumber(accountNumber);
+      setTimeout(() => setCopiedAccountNumber(null), 2000);
+    } catch {
+      setError("Could not copy account number.");
+    }
+  };
+
   const initials = user?.full_name?.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase() ?? "?";
 
   if (loading) return (
@@ -263,22 +277,38 @@ const handleDownloadStatement = async () => {
       </div>
 
       {/* Account Details */}
-      {wallets.some((wallet) => wallet.iban) && (
-        <div style={{ backgroundColor: "#fff", borderRadius: "20px", marginBottom: "16px", overflow: "hidden" }}>
-          <p style={{ color: "#aaa", fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px", padding: "16px 16px 8px" }}>
+      {wallets.some(
+        (wallet) => wallet.account_number || wallet.iban,
+      ) && (
+        <div
+          style={{
+            backgroundColor: "#fff",
+            borderRadius: "20px",
+            marginBottom: "16px",
+            overflow: "hidden",
+          }}
+        >
+          <p
+            style={{
+              color: "#aaa",
+              fontSize: "11px",
+              fontWeight: "700",
+              textTransform: "uppercase",
+              letterSpacing: "0.5px",
+              padding: "16px 16px 8px",
+            }}
+          >
             Account details
           </p>
 
           {wallets
-            .filter((wallet) => wallet.iban)
+            .filter(
+              (wallet) => wallet.account_number || wallet.iban,
+            )
             .map((wallet, index, availableWallets) => (
               <div
                 key={wallet.currency}
                 style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: "16px",
                   padding: "14px 16px",
                   borderBottom:
                     index < availableWallets.length - 1
@@ -286,41 +316,138 @@ const handleDownloadStatement = async () => {
                       : "none",
                 }}
               >
-                <div style={{ minWidth: 0 }}>
-                  <p style={{ fontSize: "14px", fontWeight: "700", color: "#000", marginBottom: "4px" }}>
-                    {walletLabel(wallet.currency)}
-                  </p>
-                  <p
-                    title={wallet.iban ?? undefined}
-                    style={{
-                      fontSize: "13px",
-                      color: "#777",
-                      margin: 0,
-                      wordBreak: "break-word",
-                    }}
-                  >
-                    {maskIban(wallet.iban!)}
-                  </p>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => handleCopyIban(wallet.iban!)}
-                  aria-label={`Copy ${walletLabel(wallet.currency)} IBAN`}
+                <p
                   style={{
-                    flexShrink: 0,
-                    color: "#00C853",
-                    backgroundColor: "#F0FDF4",
-                    border: "1px solid #BBF7D0",
-                    borderRadius: "10px",
-                    padding: "8px 12px",
-                    fontSize: "12px",
+                    fontSize: "14px",
                     fontWeight: "700",
-                    cursor: "pointer",
+                    color: "#000",
+                    marginBottom: "12px",
                   }}
                 >
-                  {copiedIban === wallet.iban ? "Copied!" : "Copy IBAN"}
-                </button>
+                  {walletLabel(wallet.currency)}
+                </p>
+
+                {wallet.account_number && (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: "16px",
+                      marginBottom: wallet.iban ? "12px" : "0",
+                    }}
+                  >
+                    <div style={{ minWidth: 0 }}>
+                      <p
+                        style={{
+                          fontSize: "11px",
+                          color: "#aaa",
+                          marginBottom: "3px",
+                        }}
+                      >
+                        Account number
+                      </p>
+
+                      <p
+                        title={wallet.account_number}
+                        style={{
+                          fontSize: "13px",
+                          color: "#777",
+                          margin: 0,
+                        }}
+                      >
+                        {maskAccountNumber(wallet.account_number)}
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleCopyAccountNumber(
+                          wallet.account_number!,
+                        )
+                      }
+                      aria-label={`Copy ${walletLabel(
+                        wallet.currency,
+                      )} account number`}
+                      style={{
+                        flexShrink: 0,
+                        color: "#00C853",
+                        backgroundColor: "#F0FDF4",
+                        border: "1px solid #BBF7D0",
+                        borderRadius: "10px",
+                        padding: "8px 12px",
+                        fontSize: "12px",
+                        fontWeight: "700",
+                        cursor: "pointer",
+                      }}
+                    >
+                      {copiedAccountNumber ===
+                      wallet.account_number
+                        ? "Copied!"
+                        : "Copy account"}
+                    </button>
+                  </div>
+                )}
+
+                {wallet.iban && (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: "16px",
+                    }}
+                  >
+                    <div style={{ minWidth: 0 }}>
+                      <p
+                        style={{
+                          fontSize: "11px",
+                          color: "#aaa",
+                          marginBottom: "3px",
+                        }}
+                      >
+                        IBAN
+                      </p>
+
+                      <p
+                        title={wallet.iban}
+                        style={{
+                          fontSize: "13px",
+                          color: "#777",
+                          margin: 0,
+                        }}
+                      >
+                        {maskIban(wallet.iban)}
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleCopyIban(wallet.iban!)
+                      }
+                      aria-label={`Copy ${walletLabel(
+                        wallet.currency,
+                      )} IBAN`}
+                      style={{
+                        flexShrink: 0,
+                        color: "#00C853",
+                        backgroundColor: "#F0FDF4",
+                        border: "1px solid #BBF7D0",
+                        borderRadius: "10px",
+                        padding: "8px 12px",
+                        fontSize: "12px",
+                        fontWeight: "700",
+                        cursor: "pointer",
+                      }}
+                    >
+                      {copiedIban === wallet.iban
+                        ? "Copied!"
+                        : "Copy IBAN"}
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
         </div>

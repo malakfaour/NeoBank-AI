@@ -85,6 +85,12 @@ def validate_beneficiary_value(
     if beneficiary_type == BeneficiaryType.IBAN:
         validate_iban(value)
 
+    if beneficiary_type == BeneficiaryType.BANK_ACCOUNT:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only mobile and IBAN beneficiaries are supported.",
+        )
+
 
 @router.post(
     "",
