@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { logoutSession } from "@/lib/logoutSession";
 import { useAuthStore } from "@/store/authStore";
-
+import Image from "next/image";
 const links = [
   { href: "/dashboard", label: "Dashboard", svg: <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1H5a1 1 0 01-1-1V9.5z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg> },
   { href: "/transfer", label: "Transfer", svg: <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg> },
@@ -29,9 +29,12 @@ export default function Sidebar() {
     <aside style={{ position: "fixed", left: 0, top: 0, height: "100%", width: "240px", backgroundColor: "#fff", borderRight: "1px solid #F0F0F0", padding: "24px 16px", flexDirection: "column", zIndex: 20 }}
       className="lg-sidebar">
       <div style={{ marginBottom: "32px", paddingLeft: "8px" }}>
-        <div style={{ fontSize: "24px", fontWeight: "800", color: "#000" }}>neo<span style={{ color: "#00C853" }}>.</span></div>
-        <div style={{ color: "#aaa", fontSize: "12px", marginTop: "2px" }}>NeoBank Lebanon</div>
-      </div>
+      <Image
+  src="/logo.svg"
+  alt="NeoBank Lebanon"
+  width={140}
+  height={55}
+/> </div>
       <nav style={{ display: "flex", flexDirection: "column", gap: "4px", flex: 1 }}>
         {visibleLinks.map(({ href, label, svg }) => {
           const active = pathname === href;

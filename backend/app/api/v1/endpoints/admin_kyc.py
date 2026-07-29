@@ -81,6 +81,7 @@ async def get_kyc_queue(
 ):
     if status_filter == "needs_review":
         filters = [
+            KYCRecord.is_submitted.is_(True),
             KYCRecord.status.in_([KYCRecordStatus.flagged, KYCRecordStatus.rejected]),
             KYCRecord.reviewed_by.is_(None),
         ]
@@ -89,7 +90,10 @@ async def get_kyc_queue(
             status_value = KYCRecordStatus(status_filter)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail="Invalid KYC status filter") from exc
-        filters = [KYCRecord.status == status_value]
+        filters = [
+            KYCRecord.is_submitted.is_(True),
+            KYCRecord.status == status_value,
+        ]
     if date_from is not None:
         filters.append(KYCRecord.created_at >= date_from)
 
@@ -110,6 +114,7 @@ async def get_kyc_queue(
     for record, user in rows:
         selfie_presigned_url = None
         id_photo_presigned_url = None
+        back_id_photo_presigned_url = None
         if record.selfie_url:
             selfie_presigned_url = await loop.run_in_executor(
                 None,
@@ -120,6 +125,15 @@ async def get_kyc_queue(
                 None,
                 partial(get_presigned_url, record.id_photo_url),
             )
+        if record.back_id_photo_url:
+            back_id_photo_presigned_url = await loop.run_in_executor(
+                None,
+                partial(get_presigned_url, record.back_id_photo_url),
+            )
+        profile_data = dict(record.profile_data or {})
+        if profile_data.get("identification_number"):
+            number = str(profile_data["identification_number"])
+            profile_data["identification_number"] = f"{'*' * max(len(number) - 4, 0)}{number[-4:]}"
         items.append(
             AdminKYCQueueItem(
                 id=record.id,
@@ -137,6 +151,8 @@ async def get_kyc_queue(
                 document_type=record.document_type,
                 selfie_presigned_url=selfie_presigned_url,
                 id_photo_presigned_url=id_photo_presigned_url,
+                back_id_photo_presigned_url=back_id_photo_presigned_url,
+                profile_data=profile_data,
             )
         )
     return AdminKYCQueueResponse(

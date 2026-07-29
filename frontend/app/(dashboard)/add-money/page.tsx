@@ -11,6 +11,8 @@ import {
 import type { StripeCardElementChangeEvent } from "@stripe/stripe-js";
 import api from "@/lib/axios";
 import { getStripe } from "@/lib/stripe";
+import KYCActionLock from "@/components/kyc/KYCActionLock";
+import { useAuthStore } from "@/store/authStore";
 
 interface Wallet { id?: number; currency: string; balance: number; account_number: string | null; iban: string | null; }
 type Step = "account" | "card" | "confirm" | "receipt";
@@ -52,6 +54,7 @@ const cardElementOptions = {
 // the actual form state and logic, because useStripe()/useElements() only
 // work inside the <Elements> provider tree -- see the default export below.
 function AddMoneyForm() {
+  const user = useAuthStore((state) => state.user);
   const router = useRouter();
   const stripe = useStripe();
   const elements = useElements();
@@ -219,6 +222,8 @@ function AddMoneyForm() {
       setStep("card");
     }
   };
+
+  if (user?.kyc_status !== "approved") return <KYCActionLock action="Top Ups" />;
 
   if (step === "account") return (
     <Wrap>

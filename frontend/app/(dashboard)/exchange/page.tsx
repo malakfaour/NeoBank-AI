@@ -4,6 +4,8 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import api from "@/lib/axios";
+import KYCActionLock from "@/components/kyc/KYCActionLock";
+import { useAuthStore } from "@/store/authStore";
 
 interface MarketStatus {
   market_open: boolean;
@@ -39,6 +41,7 @@ const Header = ({ title, onBack }: { title: string; onBack: () => void }) => (
 
 export default function ExchangePage() {
   const router = useRouter();
+  const user = useAuthStore((state) => state.user);
   const [step, setStep] = useState<Step>("form");
   const [fromCurrency, setFromCurrency] = useState("USD");
   const [toCurrency, setToCurrency] = useState("LBP");
@@ -61,10 +64,7 @@ export default function ExchangePage() {
     api.get("/exchange/rates/history?days=30").then((r) => setHistory(r.data ?? [])).catch(() => {});
     api.get("/exchange/forecast").then((r) => setForecast(r.data.predictions ?? [])).catch(() => {});
     api.get("/exchange/rates").then((r) => {
-      const data: ExchangeRateItem[] = Array.isArray(r.data)
-        ? r.data
-        : [];
-
+      const data: ExchangeRateItem[] = Array.isArray(r.data) ? r.data : [];
       setRates(data);
       setError("");
     }).catch(() => {
@@ -73,42 +73,29 @@ export default function ExchangePage() {
     });
   }, []);
 
-  const selectedRate =
-    rates.find(
-      (item) =>
-        item.base_currency === fromCurrency &&
-        item.target_currency === toCurrency
-    ) ?? null;
+  const selectedRate = rates.find(
+    (item) => item.base_currency === fromCurrency && item.target_currency === toCurrency
+  ) ?? null;
 
-  const numericMarketRate = selectedRate
-    ? Number(selectedRate.rate)
+  const numericMarketRate = selectedRate ? Number(selectedRate.rate) : Number.NaN;
+  const marketRate = Number.isFinite(numericMarketRate) ? numericMarketRate : null;
+
+  const selectedRateUpdatedAt = selectedRate?.last_updated_at
+    ? new Date(selectedRate.last_updated_at).getTime()
     : Number.NaN;
 
-  const marketRate = Number.isFinite(
-    numericMarketRate
-  )
-    ? numericMarketRate
-    : null;
-
-  const selectedRateUpdatedAt =
-    selectedRate?.last_updated_at
-      ? new Date(selectedRate.last_updated_at).getTime()
-      : Number.NaN;
-
-  const marketCurrentTime =
-    marketStatus?.current_time
-      ? new Date(marketStatus.current_time).getTime()
-      : Number.NaN;
+  const marketCurrentTime = marketStatus?.current_time
+    ? new Date(marketStatus.current_time).getTime()
+    : Number.NaN;
 
   const isStale =
     Number.isFinite(selectedRateUpdatedAt) &&
     Number.isFinite(marketCurrentTime) &&
-    marketCurrentTime - selectedRateUpdatedAt >
-      5 * 60 * 1000;
+    marketCurrentTime - selectedRateUpdatedAt > 5 * 60 * 1000;
 
   const rateAvailabilityError =
     rates.length > 0 && marketRate === null
-      ? `Exchange pair ${fromCurrency} ? ${toCurrency} is unavailable.`
+      ? `Exchange pair ${fromCurrency} → ${toCurrency} is unavailable.`
       : "";
 
   const swap = () => {
@@ -121,11 +108,7 @@ export default function ExchangePage() {
   };
 
   const handlePreview = async () => {
-    if (
-      !amount ||
-      parseFloat(amount) <= 0 ||
-      marketRate === null
-    ) return;
+    if (!amount || parseFloat(amount) <= 0 || marketRate === null) return;
     setConverting(true);
     setError("");
     try {
@@ -177,9 +160,14 @@ export default function ExchangePage() {
     else if (step === "confirm") setStep("passcode");
   };
 
-  const marketClosed =
-    marketStatus !== null &&
-    !marketStatus.market_open;
+  const marketClosed = marketStatus !== null && !marketStatus.market_open;
+
+  const chartData = [
+    ...history.map((h) => ({ date: h.date, historical: h.rate })),
+    ...forecast.map((f) => ({ date: f.date, forecast: f.predicted_rate })),
+  ].sort((a, b) => a.date.localeCompare(b.date));
+
+  if (user?.kyc_status !== "approved") return <KYCActionLock action="Currency Exchange" />;
 
   if (step === "form") return (
     <Wrap>
@@ -187,13 +175,36 @@ export default function ExchangePage() {
 
       {marketClosed && (
         <div style={{ backgroundColor: "#FFFBEB", border: "1px solid #FCD34D", borderRadius: "14px", padding: "12px 16px", marginBottom: "16px" }}>
-          <p style={{ fontSize: "13px", fontWeight: "600", color: "#92400E" }}>⏰ Market closed — trading hours are Mon–Fri 08:00–17:00 Beirut time</p>
-        </div>
+         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+  <svg
+    width="16"
+    height="16"
+    viewBox="0 0 24 24"
+    fill="none"
+  >
+    <circle
+      cx="12"
+      cy="12"
+      r="9"
+      stroke="#B45309"
+      strokeWidth="2"
+    />
+    <path
+      d="M12 7V12L15 14"
+      stroke="#B45309"
+      strokeWidth="2"
+      strokeLinecap="round"
+    />
+  </svg>
+
+  <span>
+    Market closed — trading hours are Mon–Fri 08:00–17:00 Beirut time
+  </span>
+</div> </div>
       )}
 
       <div style={{ backgroundColor: "#fff", borderRadius: "20px", padding: "20px", marginBottom: "16px" }}>
         <p style={{ color: "#aaa", fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "12px" }}>Convert</p>
-
         <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "16px" }}>
           <div style={{ flex: 1, backgroundColor: "#F5F5F5", borderRadius: "14px", padding: "12px 16px" }}>
             <p style={{ fontSize: "11px", color: "#aaa", marginBottom: "4px" }}>From</p>
@@ -223,39 +234,38 @@ export default function ExchangePage() {
         </div>
       </div>
 
- {(forecast.length > 0 || history.length > 0) && (
-  <div style={{ backgroundColor: "#fff", borderRadius: "20px", padding: "20px", marginBottom: "16px" }}>
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
-      <p style={{ color: "#aaa", fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-        USD/LBP Rate History + Forecast
-      </p>
-      {isStale && <p style={{ fontSize: "11px", color: "#F59E0B", fontWeight: "600" }}>⚠ Stale data</p>}
-    </div>
-    <div style={{ display: "flex", gap: "16px", marginBottom: "8px" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-        <div style={{ width: "12px", height: "2px", backgroundColor: "#3B82F6" }} />
-        <p style={{ fontSize: "11px", color: "#aaa" }}>Historical</p>
-      </div>
-      <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-        <div style={{ width: "12px", height: "2px", backgroundColor: "#00C853" }} />
-        <p style={{ fontSize: "11px", color: "#aaa" }}>Forecast</p>
-      </div>
-    </div>
-    <ResponsiveContainer width="100%" height={160}>
-      <LineChart>
-        <XAxis dataKey="date" tick={{ fontSize: 10 }} tickFormatter={(v) => String(v).slice(5)} />
-        <YAxis tick={{ fontSize: 10 }} width={60} />
-        <Tooltip formatter={(v) => (typeof v === "number" ? v.toLocaleString() : String(v))} />
-        {history.length > 0 && (
-          <Line data={history} type="monotone" dataKey="rate" stroke="#3B82F6" strokeWidth={2} dot={false} name="Historical" />
-        )}
-        {forecast.length > 0 && (
-          <Line data={forecast} type="monotone" dataKey="predicted_rate" stroke="#00C853" strokeWidth={2} dot={false} strokeDasharray="5 5" name="Forecast" />
-        )}
-      </LineChart>
-    </ResponsiveContainer>
-  </div>
-)}
+      {chartData.length > 0 && (
+        <div style={{ backgroundColor: "#fff", borderRadius: "20px", padding: "20px", marginBottom: "16px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+            <p style={{ color: "#aaa", fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+              USD/LBP Rate History + Forecast
+            </p>
+            {isStale && <p style={{ fontSize: "11px", color: "#F59E0B", fontWeight: "600" }}>⚠ Stale data</p>}
+          </div>
+          <p style={{ fontSize: "10px", color: "#aaa", marginBottom: "10px", fontStyle: "italic" }}>
+            Forecast is indicative only and not guaranteed.
+          </p>
+          <div style={{ display: "flex", gap: "16px", marginBottom: "8px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+              <div style={{ width: "12px", height: "2px", backgroundColor: "#3B82F6" }} />
+              <p style={{ fontSize: "11px", color: "#aaa" }}>Historical</p>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+              <div style={{ width: "12px", height: "2px", backgroundColor: "#00C853" }} />
+              <p style={{ fontSize: "11px", color: "#aaa" }}>Forecast</p>
+            </div>
+          </div>
+          <ResponsiveContainer width="100%" height={160}>
+            <LineChart data={chartData}>
+              <XAxis dataKey="date" tick={{ fontSize: 10 }} tickFormatter={(v) => String(v).slice(5)} />
+              <YAxis tick={{ fontSize: 10 }} width={60} domain={["auto", "auto"]} />
+              <Tooltip formatter={(v) => (typeof v === "number" ? v.toLocaleString() : String(v))} />
+              <Line type="monotone" dataKey="historical" stroke="#3B82F6" strokeWidth={2} dot={false} name="Historical" connectNulls={false} />
+              <Line type="monotone" dataKey="forecast" stroke="#00C853" strokeWidth={2} dot={false} strokeDasharray="5 5" name="Forecast" connectNulls={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
 
       {(error || rateAvailabilityError) && <p style={{ color: "#EF4444", fontSize: "13px", marginBottom: "12px" }}>{error || rateAvailabilityError}</p>}
 

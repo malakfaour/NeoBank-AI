@@ -24,23 +24,19 @@ export function resolvePostAuthDestination(state: AuthRoutingState): string {
   if (!state.email_verified) return "/verify-registration-otp";
   if (!state.passcode_is_set) return "/create-passcode";
   if (!state.app_unlocked) return "/unlock";
-  // Staff accounts review other users' KYC - they don't go through customer onboarding themselves.
-  if (state.role === "admin" || state.role === "compliance_officer") return "/dashboard";
-  if (state.kyc_onboarding_state === "approved") return "/dashboard";
-  // "flagged" is the normal outcome once documents are submitted for
-  // manual review (there's no automated decisioning), so it belongs on
-  // the same wait screen as "pending", not back at document capture.
-  if (state.kyc_onboarding_state === "pending" || state.kyc_onboarding_state === "flagged") {
-    return "/kyc/status";
-  }
-  return "/kyc";
+  // KYC controls financial capabilities, not dashboard authentication.
+  // Customers complete or resume verification from the limited dashboard.
+  return "/dashboard";
 }
 
 export async function getPostAuthDestination(): Promise<string> {
   try {
     const response = await api.get("/auth/status");
     const data = response.data;
-    useAuthStore.getState().setSessionState(data.user, data.passcode_is_set);
+    useAuthStore.getState().setSessionState(
+      { ...data.user, kyc_onboarding_state: data.kyc_onboarding_state },
+      data.passcode_is_set,
+    );
     return resolvePostAuthDestination({
       authenticated: data.authenticated === true,
       email_verified: data.email_verified === true,

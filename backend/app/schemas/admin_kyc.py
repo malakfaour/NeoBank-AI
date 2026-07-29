@@ -22,6 +22,8 @@ class AdminKYCQueueItem(BaseModel):
     document_type: KYCDocumentType | None
     selfie_presigned_url: str | None
     id_photo_presigned_url: str | None
+    back_id_photo_presigned_url: str | None
+    profile_data: dict[str, object]
 
     model_config = ConfigDict(use_enum_values=True)
 

@@ -13,6 +13,13 @@ interface UserMe {
   kyc_status: "pending" | "approved" | "flagged" | "rejected";
   avatar_url?: string | null;
 }
+interface KYCProfile {
+  workflow_status: string;
+  profile_data: Record<string, string | number | null>;
+  has_front_id: boolean;
+  has_back_id: boolean;
+  has_selfie: boolean;
+}
 
 const Wrap = ({ children }: { children: React.ReactNode }) => (
   <div style={{ minHeight: "100vh", backgroundColor: "#F5F5F5", padding: "20px", paddingBottom: "80px" }}>{children}</div>
@@ -22,6 +29,7 @@ export default function ProfilePage() {
   const router = useRouter();
   const setUser = useAuthStore((s) => s.setUser);
   const [user, setLocalUser] = useState<UserMe | null>(null);
+  const [kycProfile, setKycProfile] = useState<KYCProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -49,6 +57,7 @@ useEffect(() => {
       setUser(r.data);
     }).catch(() => setError("Failed to load profile."))
       .finally(() => setLoading(false));
+  api.get("/kyc/profile").then((response) => setKycProfile(response.data)).catch(() => undefined);
   }, [setUser]);
 const handleBiometricToggle = async () => {
   setBiometricLoading(true);
@@ -214,6 +223,34 @@ const handleDownloadStatement = async () => {
           </div>
         ))}
       </div>
+
+      {kycProfile && (
+        <div style={{ backgroundColor: "#fff", borderRadius: "20px", marginBottom: "16px", padding: "16px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+            <div>
+              <p style={{ color: "#aaa", fontSize: "11px", fontWeight: "700", textTransform: "uppercase" }}>Identity & compliance</p>
+              <p style={{ fontWeight: "700", textTransform: "capitalize" }}>{kycProfile.workflow_status.replaceAll("_", " ")}</p>
+            </div>
+            {kycProfile.workflow_status !== "approved" && (
+              <button onClick={() => router.push("/kyc")} style={{ border: "1px solid #BBF7D0", background: "#F0FDF4", color: "#15803D", borderRadius: "10px", padding: "7px 11px", fontWeight: "700", cursor: "pointer" }}>
+                Edit
+              </button>
+            )}
+          </div>
+          {[
+            ["Identification", kycProfile.profile_data.identification_type, kycProfile.profile_data.identification_number],
+            ["Residence", kycProfile.profile_data.city, kycProfile.profile_data.country_of_residence],
+            ["Employment", kycProfile.profile_data.occupation, kycProfile.profile_data.employer_name],
+            ["Financial", kycProfile.profile_data.source_of_funds, kycProfile.profile_data.annual_income_usd ? `${kycProfile.profile_data.annual_income_usd} USD annual income` : null],
+            ["Documents", kycProfile.has_front_id && kycProfile.has_back_id && kycProfile.has_selfie ? "Uploaded securely" : "Incomplete", null],
+          ].map(([title, first, second]) => (
+            <div key={String(title)} style={{ padding: "11px 0", borderTop: "1px solid #F5F5F5" }}>
+              <p style={{ fontSize: "12px", color: "#999" }}>{title}</p>
+              <p style={{ fontSize: "14px", color: "#222", textTransform: "capitalize" }}>{[first, second].filter(Boolean).join(" · ") || "Not provided"}</p>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Security */}
       <div style={{ backgroundColor: "#fff", borderRadius: "20px", marginBottom: "16px", overflow: "hidden" }}>

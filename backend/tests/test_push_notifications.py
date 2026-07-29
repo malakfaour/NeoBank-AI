@@ -14,9 +14,11 @@ from app.models.user import User
 from app.services.notifications import notify
 
 
-async def _register_user(client, label: str) -> dict:
-    suffix = uuid4().hex[:10]
+async def _register_user(client, label: str, monkeypatch) -> dict:
+    suffix = str(uuid4().int)[:10]
     email = f"{label.lower()}-{suffix}@example.com"
+    monkeypatch.setattr("app.services.otp.random.randint", lambda *_: 246810)
+    monkeypatch.setattr("app.services.otp.send_email", lambda **_: None)
 
     response = await client.post(
         "/api/v1/auth/register",
@@ -29,7 +31,13 @@ async def _register_user(client, label: str) -> dict:
     )
 
     assert response.status_code == 200, response.text
-    return {**response.json(), "email": email}
+    verified = await client.post(
+        "/api/v1/auth/registration/verify-otp",
+        json={"email": email, "code": "246810"},
+    )
+
+    assert verified.status_code == 200, verified.text
+    return {**verified.json(), "email": email}
 
 
 async def _get_user_by_email(email: str) -> User:
@@ -46,8 +54,8 @@ async def _add_push_subscription(user_id: int, token: str) -> None:
 
 
 @pytest.mark.anyio
-async def test_subscribe_push_notifications_persists_token(client):
-    tokens = await _register_user(client, "pushsub")
+async def test_subscribe_push_notifications_persists_token(client, monkeypatch):
+    tokens = await _register_user(client, "pushsub", monkeypatch)
     user = await _get_user_by_email(tokens["email"])
     push_token = f"fcm-token-{uuid4().hex}"
 
@@ -75,9 +83,12 @@ async def test_subscribe_push_notifications_persists_token(client):
 
 
 @pytest.mark.anyio
-async def test_subscribe_push_notifications_reassigns_duplicate_token(client):
-    first_tokens = await _register_user(client, "pushfirst")
-    second_tokens = await _register_user(client, "pushsecond")
+async def test_subscribe_push_notifications_reassigns_duplicate_token(
+    client,
+    monkeypatch,
+):
+    first_tokens = await _register_user(client, "pushfirst", monkeypatch)
+    second_tokens = await _register_user(client, "pushsecond", monkeypatch)
     second_user = await _get_user_by_email(second_tokens["email"])
     push_token = f"fcm-token-{uuid4().hex}"
 
@@ -116,7 +127,7 @@ async def test_subscribe_push_notifications_reassigns_duplicate_token(client):
 
 @pytest.mark.anyio
 async def test_notify_sends_fcm_for_kyc_notification(client, monkeypatch):
-    tokens = await _register_user(client, "pushkyc")
+    tokens = await _register_user(client, "pushkyc", monkeypatch)
     user = await _get_user_by_email(tokens["email"])
     push_token = f"fcm-token-{uuid4().hex}"
     await _add_push_subscription(user.id, push_token)
@@ -154,7 +165,7 @@ async def test_notify_does_not_send_fcm_for_general_notification(
     client,
     monkeypatch,
 ):
-    tokens = await _register_user(client, "pushgeneral")
+    tokens = await _register_user(client, "pushgeneral", monkeypatch)
     user = await _get_user_by_email(tokens["email"])
     await _add_push_subscription(user.id, f"fcm-token-{uuid4().hex}")
 
@@ -176,7 +187,7 @@ async def test_notify_does_not_send_fcm_for_general_notification(
 
 @pytest.mark.anyio
 async def test_notify_ignores_fcm_failure(client, monkeypatch):
-    tokens = await _register_user(client, "pushfailure")
+    tokens = await _register_user(client, "pushfailure", monkeypatch)
     user = await _get_user_by_email(tokens["email"])
     await _add_push_subscription(user.id, f"fcm-token-{uuid4().hex}")
 
@@ -284,8 +295,8 @@ async def test_subscribe_push_notifications_requires_auth(client):
 
 
 @pytest.mark.anyio
-async def test_subscribe_push_notifications_rejects_blank_token(client):
-    tokens = await _register_user(client, "pushblank")
+async def test_subscribe_push_notifications_rejects_blank_token(client, monkeypatch):
+    tokens = await _register_user(client, "pushblank", monkeypatch)
 
     response = await client.post(
         "/api/v1/notifications/push/subscribe",

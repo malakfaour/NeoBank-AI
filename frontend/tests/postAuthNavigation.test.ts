@@ -18,11 +18,11 @@ describe("post-authentication routing", () => {
     expect(resolvePostAuthDestination({ ...complete, app_unlocked: false })).toBe("/unlock");
   });
 
-  it("routes KYC states without allowing dashboard bypass", () => {
-    expect(resolvePostAuthDestination({ ...complete, kyc_onboarding_state: "not_submitted" })).toBe("/kyc");
-    expect(resolvePostAuthDestination({ ...complete, kyc_onboarding_state: "pending" })).toBe("/kyc/status");
-    expect(resolvePostAuthDestination({ ...complete, kyc_onboarding_state: "rejected" })).toBe("/kyc");
-    expect(resolvePostAuthDestination({ ...complete, kyc_onboarding_state: "flagged" })).toBe("/kyc");
+  it("allows limited dashboard access for every KYC state", () => {
+    expect(resolvePostAuthDestination({ ...complete, kyc_onboarding_state: "not_submitted" })).toBe("/dashboard");
+    expect(resolvePostAuthDestination({ ...complete, kyc_onboarding_state: "pending" })).toBe("/dashboard");
+    expect(resolvePostAuthDestination({ ...complete, kyc_onboarding_state: "rejected" })).toBe("/dashboard");
+    expect(resolvePostAuthDestination({ ...complete, kyc_onboarding_state: "flagged" })).toBe("/dashboard");
     expect(resolvePostAuthDestination(complete)).toBe("/dashboard");
   });
 
