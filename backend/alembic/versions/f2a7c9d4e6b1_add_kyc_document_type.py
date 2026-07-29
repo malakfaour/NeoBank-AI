@@ -17,14 +17,27 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    if op.get_bind().dialect.name == "postgresql":
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    existing_columns = {col["name"] for col in inspector.get_columns("kyc_records")}
+
+    if "document_type" in existing_columns:
+        # b3f8a1c2d4e6 (a sibling branch merged into this history) already
+        # added this column as NOT NULL - reconcile it to this migration's
+        # intent (nullable, since a KYC record has no document type before
+        # the applicant picks one) instead of trying to add it again.
+        with op.batch_alter_table("kyc_records") as batch_op:
+            batch_op.alter_column("document_type", nullable=True, server_default=None)
+        return
+
+    if bind.dialect.name == "postgresql":
         document_type_enum = postgresql.ENUM(
             "passport",
             "drivers_license",
             "national_id",
             name="kycdocumenttype",
         )
-        document_type_enum.create(op.get_bind(), checkfirst=True)
+        document_type_enum.create(bind, checkfirst=True)
         column_type = postgresql.ENUM(
             "passport",
             "drivers_license",
@@ -47,14 +60,19 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    with op.batch_alter_table("kyc_records") as batch_op:
-        batch_op.drop_column("document_type")
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    existing_columns = {col["name"] for col in inspector.get_columns("kyc_records")}
 
-    if op.get_bind().dialect.name == "postgresql":
+    if "document_type" in existing_columns:
+        with op.batch_alter_table("kyc_records") as batch_op:
+            batch_op.drop_column("document_type")
+
+    if bind.dialect.name == "postgresql":
         document_type_enum = postgresql.ENUM(
             "passport",
             "drivers_license",
             "national_id",
             name="kycdocumenttype",
         )
-        document_type_enum.drop(op.get_bind(), checkfirst=True)
+        document_type_enum.drop(bind, checkfirst=True)

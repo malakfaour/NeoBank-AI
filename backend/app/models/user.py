@@ -1,5 +1,5 @@
 import enum
-from sqlalchemy import Column, Integer, String, DateTime, Enum as SAEnum, JSON
+from sqlalchemy import Boolean, Column, Integer, String, DateTime, Enum as SAEnum, JSON
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -35,6 +35,7 @@ class User(Base):
     password_hash = Column(String(255), nullable=False)
     kyc_status = Column(SAEnum(KYCStatus), nullable=False, default=KYCStatus.pending)
     role = Column(SAEnum(UserRole), nullable=False, default=UserRole.customer)
+    is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

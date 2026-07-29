@@ -16,12 +16,15 @@ const links = [
 
 const adminLink = { href: "/admin/kyc", label: "KYC Review", svg: <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg> };
 const fraudAdminLink = { href: "/admin/flagged-transactions", label: "Flagged Transactions", svg: <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 9v4m0 4h.01M10.29 3.86l-8.18 14.18A2 2 0 004 21h16a2 2 0 001.89-2.96L13.71 3.86a2 2 0 00-3.42 0z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg> };
+const usersAdminLink = { href: "/admin/users", label: "Users", svg: <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8zM23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg> };
+const transactionsAdminLink = { href: "/admin/transactions", label: "All Transactions", svg: <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg> };
 
 export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const role = useAuthStore((s) => s.user?.role);
-  const visibleLinks = role === "admin" || role === "compliance_officer" ? [...links, adminLink, fraudAdminLink] : links;
+  const isStaff = role === "admin" || role === "compliance_officer";
+  const visibleLinks = isStaff ? [adminLink, fraudAdminLink, usersAdminLink, transactionsAdminLink] : links;
 
   return (
     <aside style={{ position: "fixed", left: 0, top: 0, height: "100%", width: "240px", backgroundColor: "#fff", borderRight: "1px solid #F0F0F0", padding: "24px 16px", flexDirection: "column", zIndex: 20 }}

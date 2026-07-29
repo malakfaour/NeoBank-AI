@@ -3,7 +3,6 @@ from sqlalchemy import Boolean, Column, Integer, String, Float, DateTime, Foreig
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-
 from app.db.base import Base
 
 
@@ -15,9 +14,9 @@ class KYCRecordStatus(str, enum.Enum):
 
 
 class KYCDocumentType(str, enum.Enum):
+    national_id = "national_id"
     passport = "passport"
     drivers_license = "drivers_license"
-    national_id = "national_id"
 
 
 class KYCRecord(Base):
@@ -45,5 +44,4 @@ class KYCRecord(Base):
     submitted_at = Column(DateTime(timezone=True), nullable=True)
     reviewed_at = Column(DateTime(timezone=True), nullable=True)
     reviewed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
-
     user = relationship("User", back_populates="kyc_records", foreign_keys=[user_id])

@@ -1,6 +1,8 @@
 from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt import ExpiredSignatureError, InvalidTokenError
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.redis import consume_action_token, is_blacklisted
@@ -10,14 +12,13 @@ from app.models.user import User
 from app.models.kyc_record import KYCRecord
 from app.schemas.auth import CurrentUser, UserRole
 from app.services.kyc_access import assert_approved_kyc
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+    db: AsyncSession = Depends(get_db),
 ) -> CurrentUser:
     """
     FastAPI dependency — validates Bearer token and returns current user.
@@ -72,6 +73,22 @@ async def get_current_user(
         )
 
     role = payload.get("role", UserRole.customer)
+
+    # Suspended accounts must be locked out immediately, not just at their
+    # next login -- a suspension needs to invalidate tokens already issued,
+    # so this checks the live DB row rather than trusting the JWT claims.
+    is_active = await db.scalar(select(User.is_active).where(User.id == int(user_id)))
+    if is_active is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    if not is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This account has been suspended. Contact support for assistance.",
+        )
 
     return CurrentUser(id=user_id, token_jti=jti, role=role)
 

@@ -24,8 +24,13 @@ export function resolvePostAuthDestination(state: AuthRoutingState): string {
   if (!state.email_verified) return "/verify-registration-otp";
   if (!state.passcode_is_set) return "/create-passcode";
   if (!state.app_unlocked) return "/unlock";
-  // KYC controls financial capabilities, not dashboard authentication.
-  // Customers complete or resume verification from the limited dashboard.
+  // Staff accounts review other users' KYC - they land on the admin console,
+  // not the customer dashboard (which they have no wallets/transactions for).
+  if (state.role === "admin" || state.role === "compliance_officer") return "/admin/kyc";
+  // Customers must complete the wizard at least once before touching the dashboard.
+  if (state.kyc_onboarding_state === "not_submitted") return "/kyc";
+  // Once submitted (pending/flagged/rejected/approved), the dashboard is reachable -
+  // KYCActionLock gates the individual money-moving actions until approval.
   return "/dashboard";
 }
 

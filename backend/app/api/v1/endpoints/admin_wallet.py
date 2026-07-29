@@ -19,6 +19,7 @@ from app.models.wallet import Wallet
 from app.schemas.admin import (
     AdminUserSearchItem,
     AdminUserSearchResponse,
+    AdminUserStatusResponse,
     AdminUserWalletsResponse,
     AdminWalletAdjustRequest,
     AdminWalletAdjustResponse,
@@ -88,6 +89,7 @@ async def search_users(
                 phone=u.phone,
                 kyc_status=u.kyc_status.value,
                 role=u.role.value,
+                is_active=u.is_active,
             )
             for u in users
         ],
@@ -141,6 +143,50 @@ async def get_user_wallets(
             for w in wallets
         ],
     )
+
+
+async def _set_user_active(
+    user_id: int,
+    is_active: bool,
+    current_user: CurrentUser,
+    db: AsyncSession,
+) -> AdminUserStatusResponse:
+    if int(current_user.id) == user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You cannot suspend or reactivate your own account.",
+        )
+    user = await db.scalar(select(User).where(User.id == user_id))
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    user.is_active = is_active
+    await db.commit()
+    await db.refresh(user)
+
+    return AdminUserStatusResponse(id=user.id, is_active=user.is_active)
+
+
+@router.post("/users/{user_id}/suspend", response_model=AdminUserStatusResponse)
+async def suspend_user(
+    user_id: int,
+    current_user: CurrentUser = Depends(require_role(UserRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Suspend a user account -- admin only. Blocks future logins and
+    immediately invalidates any active session (get_current_user checks
+    is_active on every request), without deleting the account or its data."""
+    return await _set_user_active(user_id, False, current_user, db)
+
+
+@router.post("/users/{user_id}/activate", response_model=AdminUserStatusResponse)
+async def activate_user(
+    user_id: int,
+    current_user: CurrentUser = Depends(require_role(UserRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Reactivate a previously suspended user account -- admin only."""
+    return await _set_user_active(user_id, True, current_user, db)
 
 
 @router.post("/wallets/{wallet_id}/adjust", response_model=AdminWalletAdjustResponse)

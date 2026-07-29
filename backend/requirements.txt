@@ -116,3 +116,4 @@ groq==0.31.1
 langchain==1.0.3
 langchain-groq==1.0.1
 langgraph-prebuilt==1.0.8
+langgraph==1.0.10

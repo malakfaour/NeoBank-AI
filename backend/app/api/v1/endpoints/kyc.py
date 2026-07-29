@@ -328,7 +328,7 @@ async def upload_kyc_documents(
     kyc_record = await db.scalar(select(KYCRecord).where(KYCRecord.user_id == user.id))
     if (
         kyc_record
-        and kyc_record.status == KYCRecordStatus.pending
+        and kyc_record.status in (KYCRecordStatus.pending, KYCRecordStatus.flagged)
         and kyc_record.is_submitted
         and kyc_record.selfie_url
         and kyc_record.id_photo_url

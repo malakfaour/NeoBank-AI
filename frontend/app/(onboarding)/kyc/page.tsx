@@ -299,8 +299,8 @@ export default function KYCPage() {
     <main style={{ minHeight: "100vh", background: "#F5F5F5", display: "grid", placeItems: "center", padding: 20 }}>
       <section style={{ maxWidth: 520, background: "#fff", padding: 32, borderRadius: 24, textAlign: "center" }}>
         <div style={{ fontSize: 44 }}>{workflow === "approved" ? "✅" : "⏳"}</div>
-        <h1>{workflow === "approved" ? "Identity verified" : "Verification under review"}</h1>
-        <p style={{ color: "#666" }}>{workflow === "approved" ? "Your full NeoBank access is unlocked." : "Transfers, Currency Exchange, and Top Ups will be available after approval."}</p>
+        <h1>{workflow === "approved" ? "Identity verified" : "We're reviewing your documents"}</h1>
+        <p style={{ color: "#666" }}>{workflow === "approved" ? "Your full NeoBank access is unlocked." : "Your selfie and ID have been submitted for manual review. This usually takes 2–4 business days. Transfers, Currency Exchange, and Top Ups will be available after approval."}</p>
         <button onClick={() => router.push("/dashboard")} style={{ ...inputStyle, marginTop: 20, background: "#00C853", color: "#fff", border: 0, fontWeight: 700 }}>Back to dashboard</button>
       </section>
     </main>

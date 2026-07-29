@@ -1,50 +1,13 @@
 import logging
-import sys
-import tempfile
 from datetime import datetime, timezone
-from pathlib import Path
 
 from app.celery_app import celery_app
-from app.core.storage import download_file
 from app.db.sync_session import SyncSessionLocal
 from app.models.kyc_record import KYCRecord, KYCRecordStatus
 from app.models.user import KYCStatus, User
 from app.services.notifications import notify_sync
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
-from ml.kyc.face_verification import verify_face  # noqa: E402
-
 logger = logging.getLogger(__name__)
-
-LIVENESS_THRESHOLD = 0.7
-# Fraction of DeepFace's own ArcFace verification threshold a match's
-# distance must stay under to count as a confident approval. Values are on
-# DeepFace's calibrated distance/threshold scale (0 = identical faces,
-# 1.0 = right at the verified/not-verified boundary), not on match_score.
-MATCH_CONFIDENT_RATIO = 0.85
-
-
-def _run_liveness_check(selfie_path: str) -> float:
-    from deepface import DeepFace
-
-    faces = DeepFace.extract_faces(
-        img_path=selfie_path,
-        detector_backend="retinaface",
-        anti_spoofing=True,
-        enforce_detection=True,
-    )
-    if not faces:
-        raise ValueError("No face detected in selfie")
-
-    face = faces[0]
-    is_real = bool(face.get("is_real", False))
-    antispoof_score = float(face.get("antispoof_score", 0.0))
-    if not is_real or antispoof_score < LIVENESS_THRESHOLD:
-        raise RuntimeError(f"liveness_failed:{antispoof_score}")
-    return antispoof_score
 
 
 def _persist_decision(
@@ -90,143 +53,50 @@ def _persist_decision(
 
 @celery_app.task(name="app.tasks.kyc_tasks.process_kyc")
 def process_kyc(kyc_record_id: int):
-    selfie_temp = tempfile.NamedTemporaryFile(prefix="kyc_selfie_", suffix=".jpg", delete=False)
-    id_temp = tempfile.NamedTemporaryFile(prefix="kyc_id_", suffix=".jpg", delete=False)
-    selfie_temp.close()
-    id_temp.close()
+    """No automated face-match/liveness decisioning: every submission with
+    both documents present is routed to the compliance queue for a human
+    to approve or reject (see admin_kyc.py)."""
+    with SyncSessionLocal() as db:
+        kyc_record = db.get(KYCRecord, kyc_record_id)
+        if kyc_record is None:
+            logger.warning("KYC record %s not found", kyc_record_id)
+            return {"kyc_record_id": kyc_record_id, "status": "missing"}
 
-    try:
-        with SyncSessionLocal() as db:
-            kyc_record = db.get(KYCRecord, kyc_record_id)
-            if kyc_record is None:
-                logger.warning("KYC record %s not found", kyc_record_id)
-                return {"kyc_record_id": kyc_record_id, "status": "missing"}
+        if kyc_record.status != KYCRecordStatus.pending:
+            return {
+                "kyc_record_id": kyc_record.id,
+                "status": kyc_record.status.value,
+                "match_score": kyc_record.match_score,
+                "liveness_score": kyc_record.liveness_score,
+                "rejection_reason": kyc_record.rejection_reason,
+            }
 
-            if kyc_record.status != KYCRecordStatus.pending:
-                return {
-                    "kyc_record_id": kyc_record.id,
-                    "status": kyc_record.status.value,
-                    "match_score": kyc_record.match_score,
-                    "liveness_score": kyc_record.liveness_score,
-                    "rejection_reason": kyc_record.rejection_reason,
-                }
+        user = db.get(User, kyc_record.user_id)
+        if user is None:
+            logger.warning("User %s missing for KYC record %s", kyc_record.user_id, kyc_record_id)
+            return {"kyc_record_id": kyc_record_id, "status": "missing_user"}
 
-            user = db.get(User, kyc_record.user_id)
-            if user is None:
-                logger.warning("User %s missing for KYC record %s", kyc_record.user_id, kyc_record_id)
-                return {"kyc_record_id": kyc_record_id, "status": "missing_user"}
-
-            if not kyc_record.selfie_url or not kyc_record.id_photo_url:
-                return _persist_decision(
-                    db,
-                    kyc_record=kyc_record,
-                    user=user,
-                    status=KYCRecordStatus.flagged,
-                    user_status=KYCStatus.flagged,
-                    match_score=None,
-                    liveness_score=None,
-                    rejection_reason="documents_missing",
-                    notification_type="KYC_FLAGGED",
-                )
-
-            download_file(kyc_record.selfie_url, selfie_temp.name)
-            download_file(kyc_record.id_photo_url, id_temp.name)
-
-            try:
-                liveness_score = _run_liveness_check(selfie_temp.name)
-            except ValueError:
-                return _persist_decision(
-                    db,
-                    kyc_record=kyc_record,
-                    user=user,
-                    status=KYCRecordStatus.rejected,
-                    user_status=KYCStatus.rejected,
-                    match_score=None,
-                    liveness_score=0.0,
-                    rejection_reason="no_face_detected",
-                    notification_type="KYC_REJECTED",
-                )
-            except RuntimeError as exc:
-                reason, _, score = str(exc).partition(":")
-                parsed_score = float(score) if score else 0.0
-                return _persist_decision(
-                    db,
-                    kyc_record=kyc_record,
-                    user=user,
-                    status=KYCRecordStatus.rejected,
-                    user_status=KYCStatus.rejected,
-                    match_score=None,
-                    liveness_score=parsed_score,
-                    rejection_reason=reason,
-                    notification_type="KYC_REJECTED",
-                )
-
-            verification = verify_face(selfie_temp.name, id_temp.name)
-            match_score = float(verification["match_score"])
-            verified = bool(verification["verified"])
-            distance_ratio = float(verification["raw_distance"]) / float(verification["threshold"])
-
-            # DeepFace's own `verified` boolean is the ArcFace-calibrated
-            # same-person decision. match_score is a diagnostic number only
-            # (see ml/kyc/face_verification.py) - approval tiers are decided
-            # from the distance/threshold ratio, which is on DeepFace's own
-            # calibrated scale.
-            if verified and distance_ratio <= MATCH_CONFIDENT_RATIO:
-                return _persist_decision(
-                    db,
-                    kyc_record=kyc_record,
-                    user=user,
-                    status=KYCRecordStatus.approved,
-                    user_status=KYCStatus.approved,
-                    match_score=match_score,
-                    liveness_score=liveness_score,
-                    rejection_reason=None,
-                    notification_type="KYC_APPROVED",
-                )
-
-            if verified:
-                return _persist_decision(
-                    db,
-                    kyc_record=kyc_record,
-                    user=user,
-                    status=KYCRecordStatus.flagged,
-                    user_status=KYCStatus.flagged,
-                    match_score=match_score,
-                    liveness_score=liveness_score,
-                    rejection_reason=None,
-                    notification_type="KYC_FLAGGED",
-                )
-
+        if not kyc_record.selfie_url or not kyc_record.id_photo_url:
             return _persist_decision(
                 db,
                 kyc_record=kyc_record,
                 user=user,
-                status=KYCRecordStatus.rejected,
-                user_status=KYCStatus.rejected,
-                match_score=match_score,
-                liveness_score=liveness_score,
-                rejection_reason="face_mismatch",
-                notification_type="KYC_REJECTED",
+                status=KYCRecordStatus.flagged,
+                user_status=KYCStatus.flagged,
+                match_score=None,
+                liveness_score=None,
+                rejection_reason="documents_missing",
+                notification_type="KYC_FLAGGED",
             )
-    except Exception:
-        logger.exception("KYC processing failed for record %s", kyc_record_id)
-        with SyncSessionLocal() as db:
-            kyc_record = db.get(KYCRecord, kyc_record_id)
-            if kyc_record is not None:
-                user = db.get(User, kyc_record.user_id)
-                if user is not None:
-                    _persist_decision(
-                        db,
-                        kyc_record=kyc_record,
-                        user=user,
-                        status=KYCRecordStatus.flagged,
-                        user_status=KYCStatus.flagged,
-                        match_score=kyc_record.match_score,
-                        liveness_score=kyc_record.liveness_score,
-                        rejection_reason="processing_failed",
-                        notification_type="KYC_FLAGGED",
-                    )
-        raise
-    finally:
-        Path(selfie_temp.name).unlink(missing_ok=True)
-        Path(id_temp.name).unlink(missing_ok=True)
+
+        return _persist_decision(
+            db,
+            kyc_record=kyc_record,
+            user=user,
+            status=KYCRecordStatus.flagged,
+            user_status=KYCStatus.flagged,
+            match_score=None,
+            liveness_score=None,
+            rejection_reason=None,
+            notification_type="KYC_FLAGGED",
+        )
