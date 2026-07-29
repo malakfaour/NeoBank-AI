@@ -587,7 +587,8 @@ export default function TransferPage() {
       <Header title="Confirm Transfer" step={step} setStep={setStep} router={router} />
       <div style={{ backgroundColor: "#fff", borderRadius: "20px", padding: "24px", marginBottom: "16px", display: "flex", flexDirection: "column", gap: "16px" }}>
         {[
-          { label: "From", value: `${walletLabel(selectedWallet?.currency ?? "")} — ${formatMoney(balance, selectedWallet?.currency ?? "")}` },
+          { label: "From account", value: walletLabel(selectedWallet?.currency ?? "") },
+          { label: "Available balance", value: formatMoney(balance, selectedWallet?.currency ?? "") },
           { label: "To", value: destinationLabel },
           { label: "Amount", value: formatMoney(amountNum, selectedWallet?.currency ?? "") },
           {
