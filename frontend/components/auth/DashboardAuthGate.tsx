@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { getPostAuthDestination } from "@/lib/postAuthNavigation";
 
 export default function DashboardAuthGate({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -14,7 +15,7 @@ export default function DashboardAuthGate({ children }: { children: React.ReactN
       try {
         const destination = await getPostAuthDestination();
         if (!active) return;
-        if (destination !== "/dashboard") return router.replace(destination);
+        if (destination !== pathname) return router.replace(destination);
         setReady(true);
       } catch {
         if (active) router.replace("/login");
@@ -22,7 +23,7 @@ export default function DashboardAuthGate({ children }: { children: React.ReactN
     }
     void validate();
     return () => { active = false; };
-  }, [router]);
+  }, [router, pathname]);
 
   return ready ? children : <main style={{ minHeight: "100vh", display: "grid", placeItems: "center" }}>Checking your secure session…</main>;
 }
