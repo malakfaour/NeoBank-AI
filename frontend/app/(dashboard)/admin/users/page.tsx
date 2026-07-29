@@ -182,7 +182,7 @@ export default function AdminUsersPage() {
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search by name, email, or phone"
+          placeholder="Search by name, phone, or account number"
           style={{ flex: 1, padding: "12px 16px", borderRadius: "14px", border: "1.5px solid #E5E7EB", fontSize: "14px", backgroundColor: "#fff" }}
         />
         <button type="submit" disabled={searching}

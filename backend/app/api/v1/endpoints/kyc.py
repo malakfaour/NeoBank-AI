@@ -145,7 +145,14 @@ async def submit_kyc_profile(
                 "employer_name", "position", "employment_address", "employer_phone"
             ) if not data.get(field)
         )
-    if not (record.id_photo_url and record.back_id_photo_url and record.selfie_url):
+    # Passports are a single photo page - only national IDs and driver's
+    # licenses have a meaningful back side to require.
+    back_page_required = record.document_type != KYCDocumentType.passport
+    if not (
+        record.id_photo_url
+        and record.selfie_url
+        and (record.back_id_photo_url or not back_page_required)
+    ):
         missing.append("identity_documents")
     if missing:
         raise HTTPException(

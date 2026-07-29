@@ -51,31 +51,39 @@ async def search_users(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    DEVATTECH-108: search users by name/email/phone (partial match).
+    DEVATTECH-108: search users by name/phone/account number (partial match).
     """
 
     like_pattern = f"%{q}%"
 
     filter_condition = or_(
         User.full_name.ilike(like_pattern),
-        User.email.ilike(like_pattern),
         User.phone.ilike(like_pattern),
+        Wallet.account_number.ilike(like_pattern),
+    )
+
+    base_query = (
+        select(User.id)
+        .outerjoin(Wallet, Wallet.user_id == User.id)
+        .where(filter_condition)
+        .distinct()
     )
 
     count_result = await db.execute(
-        select(func.count())
-        .select_from(User)
-        .where(filter_condition)
+        select(func.count()).select_from(base_query.subquery())
     )
 
     total = count_result.scalar_one()
 
-    result = await db.execute(
-        select(User)
-        .where(filter_condition)
-        .order_by(User.id.asc())
+    id_result = await db.execute(
+        base_query.order_by(User.id.asc())
         .offset((page - 1) * page_size)
         .limit(page_size)
+    )
+    user_ids = [row[0] for row in id_result.all()]
+
+    result = await db.execute(
+        select(User).where(User.id.in_(user_ids)).order_by(User.id.asc())
     )
 
     users = result.scalars().all()

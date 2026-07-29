@@ -76,7 +76,6 @@ export default function AdminKycQueuePage() {
   const [error, setError] = useState("");
   const [actingOnId, setActingOnId] = useState<number | null>(null);
   const [forbidden, setForbidden] = useState(false);
-  const [expandedId, setExpandedId] = useState<number | null>(null);
   const [counts, setCounts] = useState<Record<string, number | null>>({
     needs_review: null, flagged: null, pending: null, approved: null,
   });
@@ -225,77 +224,68 @@ export default function AdminKycQueuePage() {
             <p style={{ color: "#aaa", fontSize: "14px" }}>Nothing in this queue.</p>
           </div>
         ) : (
-          items.map((item) => {
-            const isExpanded = expandedId === item.id;
-            return (
-              <div key={item.id} style={{ borderBottom: "1px solid #F3F4F6" }}>
-                <div
-                  onClick={() => setExpandedId(isExpanded ? null : item.id)}
-                  style={{ display: "grid", gridTemplateColumns: "2.2fr 1.2fr 1fr 1fr 1fr 1.6fr", gap: "12px", padding: "14px 20px", alignItems: "center", cursor: "pointer" }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0 }}>
-                    <div style={{ width: "34px", height: "34px", borderRadius: "50%", backgroundColor: "#EEF2FF", color: "#3730A3", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "12px", fontWeight: "700", flexShrink: 0 }}>
-                      {initials(item.full_name)}
-                    </div>
-                    <div style={{ minWidth: 0 }}>
-                      <p style={{ fontWeight: "700", color: "#0F172A", fontSize: "13px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.full_name}</p>
-                      <p style={{ fontSize: "11px", color: "#9CA3AF" }}>User #{item.user_id}</p>
-                    </div>
+          items.map((item) => (
+            <div key={item.id} style={{ borderBottom: "1px solid #F3F4F6" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "2.2fr 1.2fr 1fr 1fr 1fr 1.6fr", gap: "12px", padding: "14px 20px", alignItems: "center" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0 }}>
+                  <div style={{ width: "34px", height: "34px", borderRadius: "50%", backgroundColor: "#EEF2FF", color: "#3730A3", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "12px", fontWeight: "700", flexShrink: 0 }}>
+                    {initials(item.full_name)}
                   </div>
-                  <p style={{ fontSize: "12px", color: "#4B5563", textTransform: "capitalize" }}>{item.document_type?.replaceAll("_", " ") ?? "—"}</p>
-                  <p style={{ fontSize: "12px", color: "#4B5563" }}>{new Date(item.created_at).toLocaleDateString()}</p>
-                  <p style={{ fontSize: "12px", fontWeight: "700", color: scoreTone(item.match_score) }}>{formatScore(item.match_score)}</p>
-                  <p style={{ fontSize: "12px", fontWeight: "700", color: scoreTone(item.liveness_score) }}>{formatScore(item.liveness_score)}</p>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
-                    <span style={{ fontSize: "11px", fontWeight: "700", padding: "4px 10px", borderRadius: "999px", backgroundColor: STATUS_BADGE_COLORS[item.status].bg, color: STATUS_BADGE_COLORS[item.status].fg }}>
-                      {item.status}
-                    </span>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ transform: isExpanded ? "rotate(180deg)" : "none", transition: "transform 0.15s", flexShrink: 0 }}>
-                      <path d="M6 9l6 6 6-6" stroke="#9CA3AF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                    </svg>
+                  <div style={{ minWidth: 0 }}>
+                    <p style={{ fontWeight: "700", color: "#0F172A", fontSize: "13px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.full_name}</p>
+                    <p style={{ fontSize: "11px", color: "#9CA3AF" }}>User #{item.user_id}</p>
                   </div>
                 </div>
+                <p style={{ fontSize: "12px", color: "#4B5563", textTransform: "capitalize" }}>{item.document_type?.replaceAll("_", " ") ?? "—"}</p>
+                <p style={{ fontSize: "12px", color: "#4B5563" }}>{new Date(item.created_at).toLocaleDateString()}</p>
+                <p style={{ fontSize: "12px", fontWeight: "700", color: scoreTone(item.match_score) }}>{formatScore(item.match_score)}</p>
+                <p style={{ fontSize: "12px", fontWeight: "700", color: scoreTone(item.liveness_score) }}>{formatScore(item.liveness_score)}</p>
+                <span style={{ fontSize: "11px", fontWeight: "700", padding: "4px 10px", borderRadius: "999px", backgroundColor: STATUS_BADGE_COLORS[item.status].bg, color: STATUS_BADGE_COLORS[item.status].fg, width: "fit-content" }}>
+                  {item.status}
+                </span>
+              </div>
 
-                {isExpanded && (
-                  <div style={{ padding: "0 20px 20px", backgroundColor: "#FAFBFC" }}>
-                    <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", paddingTop: "4px" }}>
-                      <div style={{ display: "flex", gap: "12px" }}>
-                        {item.selfie_presigned_url && (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={item.selfie_presigned_url} alt="Selfie" style={{ width: "110px", height: "140px", objectFit: "cover", borderRadius: "12px", border: "1px solid #E5E7EB" }} />
-                        )}
-                        {item.id_photo_presigned_url && (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={item.id_photo_presigned_url} alt="ID document" style={{ width: "180px", height: "140px", objectFit: "cover", borderRadius: "12px", border: "1px solid #E5E7EB" }} />
-                        )}
-                      </div>
-                      <div style={{ flex: 1, minWidth: "220px" }}>
-                        <p style={{ fontSize: "12px", color: "#6B7280", lineHeight: 1.8 }}>
-                          <strong style={{ color: "#0F172A" }}>Submitted:</strong> {new Date(item.created_at).toLocaleString()}<br />
-                          {item.reviewed_at && <>
-                            <strong style={{ color: "#0F172A" }}>Reviewed:</strong> {new Date(item.reviewed_at).toLocaleString()}<br />
-                          </>}
-                          {item.rejection_reason && <>
-                            <strong style={{ color: "#0F172A" }}>Reason:</strong> {item.rejection_reason}
-                          </>}
-                        </p>
-                        <div style={{ display: "flex", gap: "12px", marginTop: "16px" }}>
-                          <button onClick={(e) => { e.stopPropagation(); reject(item.id); }} disabled={actingOnId === item.id}
-                            style={{ padding: "10px 18px", borderRadius: "12px", border: "1.5px solid #FECACA", backgroundColor: "#fff", color: "#DC2626", fontSize: "13px", fontWeight: "700", cursor: actingOnId === item.id ? "not-allowed" : "pointer" }}>
-                            Reject
-                          </button>
-                          <button onClick={(e) => { e.stopPropagation(); approve(item.id); }} disabled={actingOnId === item.id}
-                            style={{ padding: "10px 18px", borderRadius: "12px", border: "none", backgroundColor: "#00A844", color: "#fff", fontSize: "13px", fontWeight: "700", cursor: actingOnId === item.id ? "not-allowed" : "pointer" }}>
-                            {actingOnId === item.id ? "Working…" : "Approve"}
-                          </button>
-                        </div>
-                      </div>
+              <div style={{ padding: "0 20px 20px" }}>
+                <div style={{ display: "flex", gap: "16px", flexWrap: "wrap" }}>
+                  <div style={{ display: "flex", gap: "12px" }}>
+                    {item.selfie_presigned_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={item.selfie_presigned_url} alt="Selfie" style={{ width: "110px", height: "140px", objectFit: "cover", borderRadius: "12px", border: "1px solid #E5E7EB" }} />
+                    ) : (
+                      <div style={{ width: "110px", height: "140px", borderRadius: "12px", border: "1px dashed #E5E7EB", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "11px", color: "#9CA3AF", textAlign: "center", padding: "8px" }}>No selfie</div>
+                    )}
+                    {item.id_photo_presigned_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={item.id_photo_presigned_url} alt="ID document" style={{ width: "180px", height: "140px", objectFit: "cover", borderRadius: "12px", border: "1px solid #E5E7EB" }} />
+                    ) : (
+                      <div style={{ width: "180px", height: "140px", borderRadius: "12px", border: "1px dashed #E5E7EB", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "11px", color: "#9CA3AF" }}>No ID document</div>
+                    )}
+                  </div>
+                  <div style={{ flex: 1, minWidth: "220px" }}>
+                    <p style={{ fontSize: "12px", color: "#6B7280", lineHeight: 1.8 }}>
+                      <strong style={{ color: "#0F172A" }}>Submitted:</strong> {new Date(item.created_at).toLocaleString()}<br />
+                      {item.reviewed_at && <>
+                        <strong style={{ color: "#0F172A" }}>Reviewed:</strong> {new Date(item.reviewed_at).toLocaleString()}<br />
+                      </>}
+                      {item.rejection_reason && <>
+                        <strong style={{ color: "#0F172A" }}>Reason:</strong> {item.rejection_reason}
+                      </>}
+                    </p>
+                    <div style={{ display: "flex", gap: "12px", marginTop: "16px" }}>
+                      <button onClick={() => reject(item.id)} disabled={actingOnId === item.id}
+                        style={{ padding: "10px 18px", borderRadius: "12px", border: "1.5px solid #FECACA", backgroundColor: "#fff", color: "#DC2626", fontSize: "13px", fontWeight: "700", cursor: actingOnId === item.id ? "not-allowed" : "pointer" }}>
+                        Reject
+                      </button>
+                      <button onClick={() => approve(item.id)} disabled={actingOnId === item.id}
+                        style={{ padding: "10px 18px", borderRadius: "12px", border: "none", backgroundColor: "#00A844", color: "#fff", fontSize: "13px", fontWeight: "700", cursor: actingOnId === item.id ? "not-allowed" : "pointer" }}>
+                        {actingOnId === item.id ? "Working…" : "Approve"}
+                      </button>
                     </div>
                   </div>
-                )}
+                </div>
               </div>
-            );
-          })
+            </div>
+          ))
         )}
       </div>
     </div>
