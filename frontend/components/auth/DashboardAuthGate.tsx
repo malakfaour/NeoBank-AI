@@ -4,6 +4,15 @@ import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { getPostAuthDestination } from "@/lib/postAuthNavigation";
 
+// Groups every route this gate can resolve to into a "section" so a resolved
+// destination of e.g. "/admin/kyc" doesn't bounce the user off "/admin/users" -
+// any page within the same section as the resolved destination is allowed.
+function sectionOf(path: string): string {
+  if (path.startsWith("/admin")) return "/admin";
+  if (path === "/kyc") return "/kyc";
+  return "/dashboard";
+}
+
 export default function DashboardAuthGate({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -15,7 +24,7 @@ export default function DashboardAuthGate({ children }: { children: React.ReactN
       try {
         const destination = await getPostAuthDestination();
         if (!active) return;
-        if (destination !== pathname) return router.replace(destination);
+        if (sectionOf(destination) !== sectionOf(pathname)) return router.replace(destination);
         setReady(true);
       } catch {
         if (active) router.replace("/login");

@@ -29,8 +29,8 @@ describe("post-authentication routing", () => {
     expect(resolvePostAuthDestination(complete)).toBe("/dashboard");
   });
 
-  it("lets staff roles reach the dashboard without completing customer KYC", () => {
-    expect(resolvePostAuthDestination({ ...complete, kyc_onboarding_state: "not_submitted", role: "compliance_officer" })).toBe("/dashboard");
-    expect(resolvePostAuthDestination({ ...complete, kyc_onboarding_state: "rejected", role: "admin" })).toBe("/dashboard");
+  it("routes staff roles to the admin console without completing customer KYC", () => {
+    expect(resolvePostAuthDestination({ ...complete, kyc_onboarding_state: "not_submitted", role: "compliance_officer" })).toBe("/admin/kyc");
+    expect(resolvePostAuthDestination({ ...complete, kyc_onboarding_state: "rejected", role: "admin" })).toBe("/admin/kyc");
   });
 });
