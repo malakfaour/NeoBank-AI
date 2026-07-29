@@ -187,6 +187,11 @@ async def login(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Email verification required",
         )
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This account has been suspended. Contact support for assistance.",
+        )
 
     access_token, _ = create_access_token(str(user.id), role=user.role.value)
     refresh_token, refresh_jti = create_refresh_token(str(user.id), role=user.role.value)

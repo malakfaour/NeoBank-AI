@@ -96,6 +96,7 @@ class AdminUserSearchItem(BaseModel):
     phone: str
     kyc_status: str
     role: str
+    is_active: bool
 
 
 class AdminUserSearchResponse(BaseModel):
@@ -104,6 +105,11 @@ class AdminUserSearchResponse(BaseModel):
     page_size: int
     total: int
     total_pages: int
+
+
+class AdminUserStatusResponse(BaseModel):
+    id: int
+    is_active: bool
 
 
 class AdminWalletItem(BaseModel):

@@ -12,6 +12,7 @@ interface UserSearchItem {
   phone: string;
   kyc_status: string;
   role: string;
+  is_active: boolean;
 }
 
 interface WalletItem {
@@ -37,6 +38,7 @@ export default function AdminUsersPage() {
   const [wallets, setWallets] = useState<WalletItem[]>([]);
   const [loadingWallets, setLoadingWallets] = useState(false);
   const [adjustingId, setAdjustingId] = useState<number | null>(null);
+  const [statusUpdatingId, setStatusUpdatingId] = useState<number | null>(null);
 
   const search = async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -96,6 +98,26 @@ export default function AdminUsersPage() {
       setError(typeof detail === "string" ? detail : "Adjustment failed.");
     } finally {
       setAdjustingId(null);
+    }
+  };
+
+  const toggleUserStatus = async (user: UserSearchItem) => {
+    const suspending = user.is_active;
+    if (!window.confirm(suspending ? `Suspend ${user.full_name}? They won't be able to log in until reactivated.` : `Reactivate ${user.full_name}?`)) {
+      return;
+    }
+    setStatusUpdatingId(user.id);
+    setError("");
+    try {
+      const res = await api.post(`/admin/users/${user.id}/${suspending ? "suspend" : "activate"}`);
+      const updated = { ...user, is_active: res.data.is_active };
+      setResults((prev) => prev.map((u) => (u.id === user.id ? updated : u)));
+      setSelectedUser((prev) => (prev?.id === user.id ? updated : prev));
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+      setError(typeof detail === "string" ? detail : "Could not update account status.");
+    } finally {
+      setStatusUpdatingId(null);
     }
   };
 
@@ -163,6 +185,11 @@ export default function AdminUsersPage() {
                   <span style={{ fontSize: "11px", fontWeight: "700", padding: "3px 8px", borderRadius: "999px", backgroundColor: "#F0FDF4", color: "#00C853" }}>
                     {u.role}
                   </span>
+                  {!u.is_active && (
+                    <span style={{ fontSize: "11px", fontWeight: "700", padding: "3px 8px", borderRadius: "999px", backgroundColor: "#FEF2F2", color: "#DC2626", marginLeft: "6px" }}>
+                      Suspended
+                    </span>
+                  )}
                   <p style={{ fontSize: "11px", color: "#999", marginTop: "4px" }}>KYC: {u.kyc_status}</p>
                 </div>
               </div>
@@ -173,7 +200,27 @@ export default function AdminUsersPage() {
 
       {selectedUser && (
         <div style={{ backgroundColor: "#fff", borderRadius: "20px", padding: "20px" }}>
-          <p style={{ fontWeight: "700", color: "#000", marginBottom: "12px" }}>{selectedUser.full_name}&apos;s wallets</p>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+            <p style={{ fontWeight: "700", color: "#000" }}>{selectedUser.full_name}&apos;s wallets</p>
+            {canAdjust && (
+              <button
+                onClick={() => toggleUserStatus(selectedUser)}
+                disabled={statusUpdatingId === selectedUser.id}
+                style={{
+                  padding: "8px 14px",
+                  borderRadius: "10px",
+                  border: `1.5px solid ${selectedUser.is_active ? "#DC2626" : "#00C853"}`,
+                  backgroundColor: "#fff",
+                  color: selectedUser.is_active ? "#DC2626" : "#00C853",
+                  fontSize: "12px",
+                  fontWeight: "700",
+                  cursor: statusUpdatingId === selectedUser.id ? "not-allowed" : "pointer",
+                }}
+              >
+                {statusUpdatingId === selectedUser.id ? "Working..." : selectedUser.is_active ? "Suspend account" : "Reactivate account"}
+              </button>
+            )}
+          </div>
           {loadingWallets ? (
             <p style={{ color: "#aaa", fontSize: "14px" }}>Loading wallets...</p>
           ) : wallets.length === 0 ? (
