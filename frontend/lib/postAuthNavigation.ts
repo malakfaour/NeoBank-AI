@@ -26,11 +26,11 @@ export function resolvePostAuthDestination(state: AuthRoutingState): string {
   if (!state.app_unlocked) return "/unlock";
   // Staff accounts review other users' KYC - they don't go through customer onboarding themselves.
   if (state.role === "admin" || state.role === "compliance_officer") return "/dashboard";
-  if (state.kyc_onboarding_state === "approved") return "/dashboard";
-  // Every other state (not_submitted, pending, flagged, rejected) routes back into
-  // the onboarding wizard - it resumes at the right step and shows its own
-  // "under review" / rejected screens, so there's no separate status route needed.
-  return "/kyc";
+  // Customers must complete the wizard at least once before touching the dashboard.
+  if (state.kyc_onboarding_state === "not_submitted") return "/kyc";
+  // Once submitted (pending/flagged/rejected/approved), the dashboard is reachable -
+  // KYCActionLock gates the individual money-moving actions until approval.
+  return "/dashboard";
 }
 
 export async function getPostAuthDestination(): Promise<string> {

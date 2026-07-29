@@ -18,11 +18,14 @@ describe("post-authentication routing", () => {
     expect(resolvePostAuthDestination({ ...complete, app_unlocked: false })).toBe("/unlock");
   });
 
-  it("routes customers into the KYC wizard until they are approved", () => {
+  it("forces the KYC wizard only before the first submission", () => {
     expect(resolvePostAuthDestination({ ...complete, kyc_onboarding_state: "not_submitted" })).toBe("/kyc");
-    expect(resolvePostAuthDestination({ ...complete, kyc_onboarding_state: "pending" })).toBe("/kyc");
-    expect(resolvePostAuthDestination({ ...complete, kyc_onboarding_state: "rejected" })).toBe("/kyc");
-    expect(resolvePostAuthDestination({ ...complete, kyc_onboarding_state: "flagged" })).toBe("/kyc");
+  });
+
+  it("allows limited dashboard access once KYC has been submitted at least once", () => {
+    expect(resolvePostAuthDestination({ ...complete, kyc_onboarding_state: "pending" })).toBe("/dashboard");
+    expect(resolvePostAuthDestination({ ...complete, kyc_onboarding_state: "rejected" })).toBe("/dashboard");
+    expect(resolvePostAuthDestination({ ...complete, kyc_onboarding_state: "flagged" })).toBe("/dashboard");
     expect(resolvePostAuthDestination(complete)).toBe("/dashboard");
   });
 

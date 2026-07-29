@@ -8,7 +8,7 @@ export default function KYCActionLock({ action }: { action: string }) {
   const status = useAuthStore((state) => state.user?.kyc_status);
   const workflow = useAuthStore((state) => state.user?.kyc_onboarding_state);
   const message = workflow === "pending"
-    ? "Your identity verification is under review. Transfers, Currency Exchange, and Top Ups will be available after approval."
+    ? "We're reviewing your documents. This usually takes 2–4 business days. Transfers, Currency Exchange, and Top Ups will be available after approval."
     : status === "rejected" || workflow === "rejected"
       ? "Your identity verification needs attention. Review and update the required information."
       : "Complete your profile and identity verification to unlock Transfers, Currency Exchange, and Top Ups.";
