@@ -37,6 +37,8 @@ from app.schemas.auth import CurrentUser
 from app.services.audit_log import append_audit
 from app.services.currency_conversion import to_usd_equivalent
 from app.services.fraud_rules import CurrencyMismatchError, check_currency_match
+from app.models.notification import NotificationType
+from app.services.notifications import notify
 from app.services.rate_limiter import check_rate_limit
 from app.services.wallet_status import WalletClosedError, WalletFrozenError, assert_wallet_active
 from app.tasks.transaction_tasks import score_transaction
@@ -51,9 +53,7 @@ from app.schemas.transaction import (
     TransactionSummaryResponse,
 )
 from app.utils.transaction_query_utils import compute_total_pages, parse_summary_month
-
-from app.models.notification import NotificationType
-from app.services.notifications import notify
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 logger = logging.getLogger(__name__)
