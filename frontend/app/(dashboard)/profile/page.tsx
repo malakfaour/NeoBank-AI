@@ -32,13 +32,16 @@ const [biometric, setBiometric] = useState(() =>
 const [biometricLoading, setBiometricLoading] = useState(false);
 const [biometricError, setBiometricError] = useState("");
   // Sheet states
-  const [sheet, setSheet] = useState<"none" | "email" | "phone" | "passcode">("none");
+  const [sheet, setSheet] = useState<"none" | "name" | "email" | "phone" | "passcode">("none");
   const [sheetVal, setSheetVal] = useState("");
   const [sheetOtp, setSheetOtp] = useState("");
   const [sheetCurrent, setSheetCurrent] = useState("");
   const [sheetNew, setSheetNew] = useState("");
   const [sheetLoading, setSheetLoading] = useState(false);
   const [sheetError, setSheetError] = useState("");
+  const [sheetNotice, setSheetNotice] = useState("");
+  const [sheetOtpSent, setSheetOtpSent] = useState(false);
+  const [otpCooldown, setOtpCooldown] = useState(0);
 const [statementMonth, setStatementMonth] = useState("");
 const [statementFormat, setStatementFormat] = useState<"csv" | "pdf">("pdf");
 const [statementLoading, setStatementLoading] = useState(false);
@@ -73,15 +76,80 @@ const handleBiometricToggle = async () => {
 };
 
   const handleAvatarUpload = async (file: File) => {
+    setError("");
     const form = new FormData();
-    form.append("file", file);
+    form.append("avatar", file);
     try {
-      const res = await api.post("/users/me/avatar", form, { headers: { "Content-Type": "multipart/form-data" } });
+      const res = await api.post("/users/me/avatar", form);
       setLocalUser(res.data);
       setUser(res.data);
       setSuccess("Avatar updated!");
       setTimeout(() => setSuccess(""), 3000);
-    } catch { setError("Avatar upload failed."); }
+    } catch (requestError: unknown) {
+      const detail = (requestError as { response?: { data?: { detail?: string } } })
+        .response?.data?.detail;
+      setError(typeof detail === "string" ? detail : "Avatar upload failed.");
+    }
+  };
+
+  useEffect(() => {
+    if (otpCooldown <= 0) return;
+
+    const timer = window.setInterval(() => {
+      setOtpCooldown((value) => {
+        if (value <= 1) {
+          window.clearInterval(timer);
+          return 0;
+        }
+        return value - 1;
+      });
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [otpCooldown]);
+
+  const handleNameChange = async () => {
+    const fullName = sheetVal.trim();
+    if (!fullName) return;
+
+    setSheetLoading(true);
+    setSheetError("");
+    try {
+      const res = await api.patch("/users/me", { full_name: fullName });
+      setLocalUser(res.data);
+      setUser(res.data);
+      setSheet("none");
+      setSheetVal("");
+      setSuccess("Name updated!");
+      setTimeout(() => setSuccess(""), 3000);
+    } catch (requestError: unknown) {
+      const detail = (requestError as { response?: { data?: { detail?: string } } })
+        .response?.data?.detail;
+      setSheetError(typeof detail === "string" ? detail : "Failed to update name.");
+    } finally {
+      setSheetLoading(false);
+    }
+  };
+
+  const handleSendProfileOtp = async () => {
+    if (sheet !== "email" && sheet !== "phone") return;
+
+    setSheetLoading(true);
+    setSheetError("");
+    setSheetNotice("");
+    try {
+      await api.post(`/users/me/${sheet}/otp`);
+      setSheetOtp("");
+      setSheetOtpSent(true);
+      setOtpCooldown(30);
+      setSheetNotice(`Verification code sent to ${user?.email ?? "your current email"}.`);
+    } catch (requestError: unknown) {
+      const detail = (requestError as { response?: { data?: { detail?: string } } })
+        .response?.data?.detail;
+      setSheetError(typeof detail === "string" ? detail : "Could not send verification code.");
+    } finally {
+      setSheetLoading(false);
+    }
   };
 
   const handleEmailChange = async () => {
@@ -126,9 +194,16 @@ const handleBiometricToggle = async () => {
     } finally { setSheetLoading(false); }
   };
 
-  const openSheet = (s: "email" | "phone" | "passcode") => {
-    setSheet(s); setSheetVal(""); setSheetOtp("");
-    setSheetCurrent(""); setSheetNew(""); setSheetError("");
+  const openSheet = (s: "name" | "email" | "phone" | "passcode") => {
+    setSheet(s);
+    setSheetVal(s === "name" ? user?.full_name ?? "" : "");
+    setSheetOtp("");
+    setSheetCurrent("");
+    setSheetNew("");
+    setSheetError("");
+    setSheetNotice("");
+    setSheetOtpSent(false);
+    setOtpCooldown(0);
   };
 const handleDownloadStatement = async () => {
   if (!statementMonth) return;
@@ -175,8 +250,8 @@ const handleDownloadStatement = async () => {
           }
         </button>
         <p style={{ fontSize: "12px", color: "#aaa", marginTop: "8px" }}>Tap to change photo</p>
-        <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }}
-          onChange={(e) => { const f = e.target.files?.[0]; if (f) handleAvatarUpload(f); }} />
+        <input ref={fileRef} type="file" accept="image/jpeg,image/png" style={{ display: "none" }}
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) handleAvatarUpload(f); e.currentTarget.value = ""; }} />
         <p style={{ fontSize: "18px", fontWeight: "700", color: "#000", marginTop: "12px" }}>{user?.full_name}</p>
       </div>
 
@@ -199,7 +274,7 @@ const handleDownloadStatement = async () => {
       <div style={{ backgroundColor: "#fff", borderRadius: "20px", marginBottom: "16px", overflow: "hidden" }}>
         <p style={{ color: "#aaa", fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px", padding: "16px 16px 8px" }}>Personal Details</p>
         {[
-          { label: "Full name", value: user?.full_name ?? "—" },
+          { label: "Full name", value: user?.full_name ?? "—", action: () => openSheet("name") },
           { label: "Email", value: user?.email ?? "—", action: () => openSheet("email") },
           { label: "Phone", value: user?.phone ?? "—", action: () => openSheet("phone") },
         ].map(({ label, value, action }, i, arr) => (
@@ -257,22 +332,48 @@ const handleDownloadStatement = async () => {
           onClick={(e) => { if (e.target === e.currentTarget) setSheet("none"); }}>
           <div style={{ backgroundColor: "#fff", borderRadius: "24px 24px 0 0", padding: "24px", width: "100%", boxSizing: "border-box" }}>
             <h3 style={{ fontSize: "16px", fontWeight: "700", color: "#000", marginBottom: "20px" }}>
-              {sheet === "email" ? "Change Email" : sheet === "phone" ? "Change Mobile" : "Change Passcode"}
+              {sheet === "name" ? "Change Name" : sheet === "email" ? "Change Email" : sheet === "phone" ? "Change Mobile" : "Change Passcode"}
             </h3>
 
             {sheetError && <p style={{ color: "#EF4444", fontSize: "13px", marginBottom: "12px" }}>{sheetError}</p>}
+            {sheetNotice && <p style={{ color: "#166534", fontSize: "13px", marginBottom: "12px" }}>{sheetNotice}</p>}
+
+            {sheet === "name" && (
+              <>
+                <input value={sheetVal} onChange={(e) => setSheetVal(e.target.value)}
+                  placeholder="Full name"
+                  style={{ width: "100%", border: "1.5px solid #E5E7EB", borderRadius: "14px", padding: "12px 16px", fontSize: "14px", outline: "none", boxSizing: "border-box", marginBottom: "16px" }} />
+                <button onClick={handleNameChange}
+                  disabled={!sheetVal.trim() || sheetLoading}
+                  style={{ width: "100%", backgroundColor: !sheetVal.trim() ? "#E5E7EB" : "#00C853", color: !sheetVal.trim() ? "#999" : "#fff", fontWeight: "700", fontSize: "15px", border: "none", borderRadius: "14px", padding: "14px", cursor: "pointer" }}>
+                  {sheetLoading ? "Saving..." : "Save Name"}
+                </button>
+              </>
+            )}
 
             {(sheet === "email" || sheet === "phone") && (
               <>
                 <input value={sheetVal} onChange={(e) => setSheetVal(e.target.value)}
                   placeholder={sheet === "email" ? "New email address" : "New phone number"}
                   style={{ width: "100%", border: "1.5px solid #E5E7EB", borderRadius: "14px", padding: "12px 16px", fontSize: "14px", outline: "none", boxSizing: "border-box", marginBottom: "12px" }} />
+
+                <button onClick={handleSendProfileOtp}
+                  disabled={!sheetVal || sheetLoading || otpCooldown > 0}
+                  style={{ width: "100%", backgroundColor: otpCooldown > 0 ? "#E5E7EB" : "#fff", color: otpCooldown > 0 ? "#999" : "#00C853", border: "1.5px solid #00C853", fontWeight: "700", fontSize: "14px", borderRadius: "14px", padding: "12px", cursor: !sheetVal || otpCooldown > 0 ? "not-allowed" : "pointer", marginBottom: "12px" }}>
+                  {otpCooldown > 0
+                    ? `Resend code in ${otpCooldown}s`
+                    : sheetOtpSent
+                      ? "Resend verification code"
+                      : "Send verification code"}
+                </button>
+
                 <input value={sheetOtp} onChange={(e) => setSheetOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                  placeholder="6-digit OTP code" maxLength={6}
-                  style={{ width: "100%", border: "1.5px solid #E5E7EB", borderRadius: "14px", padding: "12px 16px", fontSize: "14px", outline: "none", boxSizing: "border-box", marginBottom: "16px" }} />
+                  placeholder="6-digit OTP code" maxLength={6} disabled={!sheetOtpSent}
+                  style={{ width: "100%", border: "1.5px solid #E5E7EB", borderRadius: "14px", padding: "12px 16px", fontSize: "14px", outline: "none", boxSizing: "border-box", marginBottom: "16px", backgroundColor: sheetOtpSent ? "#fff" : "#F9FAFB" }} />
+
                 <button onClick={sheet === "email" ? handleEmailChange : handlePhoneChange}
-                  disabled={!sheetVal || sheetOtp.length < 6 || sheetLoading}
-                  style={{ width: "100%", backgroundColor: !sheetVal || sheetOtp.length < 6 ? "#E5E7EB" : "#00C853", color: !sheetVal || sheetOtp.length < 6 ? "#999" : "#fff", fontWeight: "700", fontSize: "15px", border: "none", borderRadius: "14px", padding: "14px", cursor: "pointer" }}>
+                  disabled={!sheetVal || !sheetOtpSent || sheetOtp.length < 6 || sheetLoading}
+                  style={{ width: "100%", backgroundColor: !sheetVal || !sheetOtpSent || sheetOtp.length < 6 ? "#E5E7EB" : "#00C853", color: !sheetVal || !sheetOtpSent || sheetOtp.length < 6 ? "#999" : "#fff", fontWeight: "700", fontSize: "15px", border: "none", borderRadius: "14px", padding: "14px", cursor: "pointer" }}>
                   {sheetLoading ? "Saving..." : "Save"}
                 </button>
               </>
