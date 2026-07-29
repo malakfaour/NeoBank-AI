@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.api.dependencies import require_role
 from app.core.cache_utils import invalidate_balance_cache
@@ -21,6 +22,8 @@ from app.models.user import User, UserRole
 from app.models.wallet import Wallet, WalletCurrency
 
 from app.schemas.admin import (
+    AdminTransactionItem,
+    AdminTransactionsResponse,
     ComplianceSummaryResponse,
     ExchangeAuditLogItem,
     ExchangeAuditLogPageResponse,
@@ -47,6 +50,72 @@ from app.utils.transaction_query_utils import (
 
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+@router.get("/transactions", response_model=AdminTransactionsResponse)
+async def list_all_transactions(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    status_filter: TransactionStatus | None = Query(default=None, alias="status"),
+    q: str | None = Query(default=None, min_length=1, description="Match sender/receiver name or email"),
+    current_user: CurrentUser = Depends(require_role(UserRole.compliance_officer, UserRole.admin)),
+    db: AsyncSession = Depends(get_db),
+):
+    """General-purpose admin transaction browser, not just flagged ones."""
+    sender = aliased(User)
+    receiver = aliased(User)
+    filters = []
+    if status_filter is not None:
+        filters.append(Transaction.status == status_filter)
+    if q:
+        like_pattern = f"%{q}%"
+        filters.append(
+            or_(
+                sender.full_name.ilike(like_pattern),
+                sender.email.ilike(like_pattern),
+                receiver.full_name.ilike(like_pattern),
+                receiver.email.ilike(like_pattern),
+            )
+        )
+    base_query = (
+        select(Transaction, sender, receiver)
+        .join(sender, sender.id == Transaction.sender_id)
+        .join(receiver, receiver.id == Transaction.receiver_id)
+        .where(*filters)
+    )
+
+    count_result = await db.execute(
+        select(func.count()).select_from(base_query.subquery())
+    )
+    total = count_result.scalar_one()
+
+    result = await db.execute(
+        base_query.order_by(Transaction.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    rows = result.all()
+
+    items = [
+        AdminTransactionItem(
+            id=tx.id,
+            sender_id=tx.sender_id,
+            sender_name=sender_user.full_name,
+            receiver_id=tx.receiver_id,
+            receiver_name=receiver_user.full_name,
+            amount=tx.amount,
+            currency=tx.currency.value,
+            category=tx.category,
+            status=tx.status.value,
+            created_at=tx.created_at,
+        )
+        for tx, sender_user, receiver_user in rows
+    ]
+
+    return AdminTransactionsResponse(
+        items=items, page=page, page_size=page_size, total=total,
+        total_pages=compute_total_pages(total, page_size),
+    )
 
 
 @router.get("/transactions/{transaction_id}/audit-trail", response_model=AuditTrailResponse)
