@@ -256,9 +256,22 @@ export default function TransferPage() {
         : "Destination account"
       : recipient?.display_name ?? recipientValue;
 
-  const filteredBeneficiaries = beneficiaries.filter((b) =>
-    (tab === "mobile" ? b.type === "mobile" : b.type === "iban") &&
-    (b.nickname.toLowerCase().includes(search.toLowerCase()) || b.value.includes(search))
+  const tabBeneficiaries = beneficiaries.filter((beneficiary) =>
+    tab === "mobile"
+      ? beneficiary.type === "mobile"
+      : beneficiary.type === "iban",
+  );
+
+  const normalizedSearch = search.trim().toLowerCase();
+
+  const filteredBeneficiaries = tabBeneficiaries.filter(
+    (beneficiary) =>
+      beneficiary.nickname
+        .toLowerCase()
+        .includes(normalizedSearch) ||
+      beneficiary.value
+        .toLowerCase()
+        .includes(normalizedSearch),
   );
 
   if (user?.kyc_status !== "approved") return <KYCActionLock action="Transfers" />;
@@ -471,7 +484,14 @@ export default function TransferPage() {
       <Header title="Transfer to?" step={step} setStep={setStep} router={router} />
       <div style={{ display: "flex", gap: "8px", marginBottom: "20px" }}>
         {(["mobile", "iban"] as Tab[]).map((t) => (
-          <button key={t} onClick={() => { setTab(t); setRecipient(null); setError(""); setPhone(""); setIban(""); }}
+          <button key={t} onClick={() => {
+            setTab(t);
+            setSearch("");
+            setRecipient(null);
+            setError("");
+            setPhone("");
+            setIban("");
+          }}
             style={{ flex: 1, padding: "10px", borderRadius: "12px", border: "none", backgroundColor: tab === t ? "#00C853" : "#F0F0F0", color: tab === t ? "#fff" : "#666", fontWeight: "600", fontSize: "13px", cursor: "pointer" }}>
             {t === "mobile" ? "Mobile Number" : "IBAN"}
           </button>
@@ -508,23 +528,102 @@ export default function TransferPage() {
           Next
         </button>
       )}
-      {filteredBeneficiaries.length > 0 && (
+      {tabBeneficiaries.length > 0 && (
         <div style={{ marginTop: "20px" }}>
-          <input placeholder="Search saved beneficiaries..." value={search} onChange={(e) => setSearch(e.target.value)}
-            style={{ width: "100%", border: "1.5px solid #E5E7EB", borderRadius: "14px", padding: "12px 16px", fontSize: "14px", color: "#000", outline: "none", boxSizing: "border-box", marginBottom: "12px" }} />
-          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-            {filteredBeneficiaries.map((b) => (
-           <button key={b.id} onClick={() => {
-    if (tab === "mobile") { setPhone(b.value.replace("+961", "")); } else { setIban(b.value); }
-    setRecipient(null);
-    setError("");
-  }}
-  style={{ backgroundColor: "#fff", border: "1px solid #F0F0F0", borderRadius: "14px", padding: "12px 16px", textAlign: "left", cursor: "pointer" }}>
-  <p style={{ fontSize: "14px", fontWeight: "600", color: "#000" }}>{b.nickname}</p>
-  <p style={{ fontSize: "12px", color: "#aaa" }}>{b.value}</p>
-</button>
-            ))}
-          </div>
+          <input
+            type="search"
+            placeholder="Search saved beneficiaries..."
+            aria-label="Search saved beneficiaries"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            style={{
+              width: "100%",
+              border: "1.5px solid #E5E7EB",
+              borderRadius: "14px",
+              padding: "12px 16px",
+              fontSize: "14px",
+              color: "#000",
+              outline: "none",
+              boxSizing: "border-box",
+              marginBottom: "12px",
+            }}
+          />
+
+          {filteredBeneficiaries.length === 0 ? (
+            <div
+              style={{
+                backgroundColor: "#fff",
+                border: "1px solid #F0F0F0",
+                borderRadius: "14px",
+                padding: "20px",
+                textAlign: "center",
+              }}
+            >
+              <p
+                style={{
+                  color: "#888",
+                  fontSize: "13px",
+                  margin: 0,
+                }}
+              >
+                No saved beneficiaries match your search.
+              </p>
+            </div>
+          ) : (
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "8px",
+              }}
+            >
+              {filteredBeneficiaries.map((beneficiary) => (
+                <button
+                  type="button"
+                  key={beneficiary.id}
+                  onClick={() => {
+                    if (tab === "mobile") {
+                      setPhone(
+                        beneficiary.value.replace("+961", ""),
+                      );
+                    } else {
+                      setIban(beneficiary.value);
+                    }
+
+                    setSearch("");
+                    setRecipient(null);
+                    setError("");
+                  }}
+                  style={{
+                    backgroundColor: "#fff",
+                    border: "1px solid #F0F0F0",
+                    borderRadius: "14px",
+                    padding: "12px 16px",
+                    textAlign: "left",
+                    cursor: "pointer",
+                  }}
+                >
+                  <p
+                    style={{
+                      fontSize: "14px",
+                      fontWeight: "600",
+                      color: "#000",
+                    }}
+                  >
+                    {beneficiary.nickname}
+                  </p>
+                  <p
+                    style={{
+                      fontSize: "12px",
+                      color: "#aaa",
+                    }}
+                  >
+                    {beneficiary.value}
+                  </p>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </Wrap>
