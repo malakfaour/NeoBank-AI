@@ -56,7 +56,7 @@ def validate_iban(value: str) -> None:
     if not LEBANESE_IBAN_PATTERN.fullmatch(value):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="IBAN beneficiary must match Lebanese IBAN format starting with LB.",
+            detail="Enter a valid 24-character Lebanese IBAN starting with LB.",
         )
 
     rearranged = value[4:] + value[:4]
