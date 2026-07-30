@@ -80,7 +80,11 @@ const handleBiometricToggle = async () => {
     const form = new FormData();
     form.append("avatar", file);
     try {
-      const res = await api.post("/users/me/avatar", form);
+      const res = await api.post("/users/me/avatar", form, {
+       headers: {
+    "Content-Type": "multipart/form-data",
+  },
+});
       setLocalUser(res.data);
       setUser(res.data);
       setSuccess("Avatar updated!");
@@ -132,13 +136,24 @@ const handleBiometricToggle = async () => {
   };
 
   const handleSendProfileOtp = async () => {
-    if (sheet !== "email" && sheet !== "phone") return;
+    if (sheet !== "email" && sheet !== "phone" && sheet !== "passcode") return;
 
     setSheetLoading(true);
     setSheetError("");
     setSheetNotice("");
     try {
-      await api.post(`/users/me/${sheet}/otp`);
+    if (sheet === "passcode") {
+  if (!user?.id) {
+    throw new Error("User ID missing");
+  }
+
+  await api.post("/auth/send-otp", {
+    user_id: String(user.id),
+  });
+
+} else {
+  await api.post(`/users/me/${sheet}/otp`);
+}
       setSheetOtp("");
       setSheetOtpSent(true);
       setOtpCooldown(30);
@@ -146,7 +161,13 @@ const handleBiometricToggle = async () => {
     } catch (requestError: unknown) {
       const detail = (requestError as { response?: { data?: { detail?: string } } })
         .response?.data?.detail;
-      setSheetError(typeof detail === "string" ? detail : "Could not send verification code.");
+      setSheetError(
+  typeof detail === "string"
+    ? detail
+    : requestError instanceof Error
+    ? requestError.message
+    : "Could not send verification code."
+);
     } finally {
       setSheetLoading(false);
     }
@@ -380,24 +401,123 @@ const handleDownloadStatement = async () => {
             )}
 
             {sheet === "passcode" && (
-              <>
-                <input type="password" value={sheetCurrent} onChange={(e) => setSheetCurrent(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                  placeholder="Current passcode" maxLength={6}
-                  style={{ width: "100%", border: "1.5px solid #E5E7EB", borderRadius: "14px", padding: "12px 16px", fontSize: "14px", outline: "none", boxSizing: "border-box", marginBottom: "12px" }} />
-                <input type="password" value={sheetNew} onChange={(e) => setSheetNew(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                  placeholder="New passcode" maxLength={6}
-                  style={{ width: "100%", border: "1.5px solid #E5E7EB", borderRadius: "14px", padding: "12px 16px", fontSize: "14px", outline: "none", boxSizing: "border-box", marginBottom: "12px" }} />
-                <input value={sheetOtp} onChange={(e) => setSheetOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                  placeholder="6-digit OTP code" maxLength={6}
-                  style={{ width: "100%", border: "1.5px solid #E5E7EB", borderRadius: "14px", padding: "12px 16px", fontSize: "14px", outline: "none", boxSizing: "border-box", marginBottom: "16px" }} />
-                <button onClick={handlePasscodeChange}
-                  disabled={sheetCurrent.length < 6 || sheetNew.length < 6 || sheetOtp.length < 6 || sheetLoading}
-                  style={{ width: "100%", backgroundColor: sheetCurrent.length < 6 || sheetNew.length < 6 || sheetOtp.length < 6 ? "#E5E7EB" : "#00C853", color: sheetCurrent.length < 6 || sheetNew.length < 6 || sheetOtp.length < 6 ? "#999" : "#fff", fontWeight: "700", fontSize: "15px", border: "none", borderRadius: "14px", padding: "14px", cursor: "pointer" }}>
-                  {sheetLoading ? "Saving..." : "Change Passcode"}
-                </button>
-              </>
-              
-            )}
+  <>
+    <input
+      type="password"
+      value={sheetCurrent}
+      onChange={(e) =>
+        setSheetCurrent(e.target.value.replace(/\D/g, "").slice(0, 6))
+      }
+      placeholder="Current passcode"
+      maxLength={6}
+      style={{
+        width: "100%",
+        border: "1.5px solid #E5E7EB",
+        borderRadius: "14px",
+        padding: "12px 16px",
+        fontSize: "14px",
+        outline: "none",
+        boxSizing: "border-box",
+        marginBottom: "12px",
+      }}
+    />
+
+    <input
+      type="password"
+      value={sheetNew}
+      onChange={(e) =>
+        setSheetNew(e.target.value.replace(/\D/g, "").slice(0, 6))
+      }
+      placeholder="New passcode"
+      maxLength={6}
+      style={{
+        width: "100%",
+        border: "1.5px solid #E5E7EB",
+        borderRadius: "14px",
+        padding: "12px 16px",
+        fontSize: "14px",
+        outline: "none",
+        boxSizing: "border-box",
+        marginBottom: "12px",
+      }}
+    />
+
+    <button
+      onClick={handleSendProfileOtp}
+      disabled={sheetLoading || otpCooldown > 0}
+      style={{
+        width: "100%",
+        backgroundColor: otpCooldown > 0 ? "#E5E7EB" : "#fff",
+        color: otpCooldown > 0 ? "#999" : "#00C853",
+        border: "1.5px solid #00C853",
+        fontWeight: "700",
+        fontSize: "14px",
+        borderRadius: "14px",
+        padding: "12px",
+        cursor: "pointer",
+        marginBottom: "12px",
+      }}
+    >
+      {otpCooldown > 0
+        ? `Resend OTP in ${otpCooldown}s`
+        : sheetOtpSent
+        ? "Resend OTP"
+        : "Send OTP"}
+    </button>
+
+    <input
+      value={sheetOtp}
+      onChange={(e) =>
+        setSheetOtp(e.target.value.replace(/\D/g, "").slice(0, 6))
+      }
+      placeholder="6-digit OTP code"
+      maxLength={6}
+      disabled={!sheetOtpSent}
+      style={{
+        width: "100%",
+        border: "1.5px solid #E5E7EB",
+        borderRadius: "14px",
+        padding: "12px 16px",
+        fontSize: "14px",
+        outline: "none",
+        boxSizing: "border-box",
+        marginBottom: "16px",
+      }}
+    />
+
+    <button
+      onClick={handlePasscodeChange}
+      disabled={
+        sheetCurrent.length < 6 ||
+        sheetNew.length < 6 ||
+        sheetOtp.length < 6 ||
+        sheetLoading
+      }
+      style={{
+        width: "100%",
+        backgroundColor:
+          sheetCurrent.length < 6 ||
+          sheetNew.length < 6 ||
+          sheetOtp.length < 6
+            ? "#E5E7EB"
+            : "#00C853",
+        color:
+          sheetCurrent.length < 6 ||
+          sheetNew.length < 6 ||
+          sheetOtp.length < 6
+            ? "#999"
+            : "#fff",
+        fontWeight: "700",
+        fontSize: "15px",
+        border: "none",
+        borderRadius: "14px",
+        padding: "14px",
+      }}
+    >
+      {sheetLoading ? "Saving..." : "Change Passcode"}
+    </button>
+  </>
+)}
             
           </div>
         </div>
