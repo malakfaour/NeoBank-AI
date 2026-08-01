@@ -174,16 +174,39 @@ async def login(
     body: LoginRequest,
     db: AsyncSession = Depends(get_async_db),
 ):
-    await check_rate_limit(request, key_prefix="login", max_requests=5, window_seconds=60)
+    await check_rate_limit(
+        request,
+        key_prefix="login",
+        max_requests=5,
+        window_seconds=60,
+    )
 
     email = str(body.email).strip().lower()
-    result = await db.execute(select(User).where(User.email == email))
+
+    result = await db.execute(
+        select(User).where(User.email == email)
+    )
+
     user = result.scalar_one_or_none()
-    if not user or not verify_password(body.password, user.password_hash):
+
+    password_ok = (
+        user is not None
+        and verify_password(body.password, user.password_hash)
+    )
+
+    print("========== LOGIN DEBUG ==========")
+    print("BODY EMAIL:", body.email)
+    print("NORMALIZED EMAIL:", email)
+    print("USER FOUND:", bool(user))
+    print("PASSWORD OK:", password_ok)
+    print("=================================")
+
+    if not password_ok:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid credentials",
         )
+
     if user.email_verified_at is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -195,10 +218,23 @@ async def login(
             detail="This account has been suspended. Contact support for assistance.",
         )
 
-    access_token, _ = create_access_token(str(user.id), role=user.role.value)
-    refresh_token, refresh_jti = create_refresh_token(str(user.id), role=user.role.value)
+    access_token, _ = create_access_token(
+        str(user.id),
+        role=user.role.value,
+    )
+
+    refresh_token, refresh_jti = create_refresh_token(
+        str(user.id),
+        role=user.role.value,
+    )
+
     await store_refresh_jti(str(user.id), refresh_jti)
-    await create_session(user_id=user.id, request=request, db=db)
+
+    await create_session(
+        user_id=user.id,
+        request=request,
+        db=db,
+    )
 
     return {
         "access_token": access_token,
