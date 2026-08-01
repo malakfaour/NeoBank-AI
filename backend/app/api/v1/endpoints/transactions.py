@@ -263,6 +263,11 @@ async def send_money(
         db=db,
     )
 
+    sender_result = await db.execute(
+        select(User).where(User.id == sender_id)
+    )
+    sender = sender_result.scalar_one_or_none()
+
     await notify(
         user_id=receiver_id,
         notification_type=NotificationType.TX_RECEIVED,
@@ -270,6 +275,7 @@ async def send_money(
             "amount": str(transaction.amount),
             "currency": transaction.currency.value,
             "transaction_id": transaction.id,
+            "sender_name": sender.full_name if sender else "Unknown sender",
         },
         db=db,
     )

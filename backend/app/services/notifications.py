@@ -185,6 +185,7 @@ def _build_template(
     transaction_id = metadata.get("transaction_id", "")
     reason = metadata.get("reason", "")
     full_name = metadata.get("full_name", "there")
+    sender_name = metadata.get("sender_name", "the sender")
 
     if type_value == "TX_SENT":
         message = f"Your transfer of {amount} {currency} was sent successfully."
@@ -197,11 +198,11 @@ def _build_template(
         )
 
     elif type_value == "TX_RECEIVED":
-        message = f"You received {amount} {currency}."
+        message = f"You received {amount} {currency} from {sender_name}."
         subject = "Transaction received"
         body = (
             f"Hello {full_name},\n\n"
-            f"You received {amount} {currency} in your NeoBank account.\n"
+            f"You received {amount} {currency} from {sender_name} in your NeoBank account.\n"
             f"Transaction ID: {transaction_id}\n\n"
             "NeoBank Lebanon Team"
         )
