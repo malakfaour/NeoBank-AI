@@ -26,7 +26,7 @@ interface ExchangeRateItem {
 type Step = "form" | "passcode" | "confirm" | "receipt";
 
 const Wrap = ({ children }: { children: React.ReactNode }) => (
-  <div style={{ minHeight: "100vh", backgroundColor: "#F5F5F5", padding: "20px", paddingBottom: "80px" }}>{children}</div>
+  <div className="bank-feature-page" style={{ minHeight: "100vh", backgroundColor: "#F5F5F5", padding: "20px", paddingBottom: "80px" }}>{children}</div>
 );
 
 const Header = ({ title, onBack }: { title: string; onBack: () => void }) => (
@@ -210,7 +210,7 @@ export default function ExchangePage() {
             <p style={{ fontSize: "11px", color: "#aaa", marginBottom: "4px" }}>From</p>
             <p style={{ fontSize: "16px", fontWeight: "700", color: "#00C853" }}>{fromCurrency}</p>
           </div>
-          <button onClick={swap} style={{ width: "40px", height: "40px", borderRadius: "50%", backgroundColor: "#00C853", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <button onClick={swap} style={{ width: "48px", height: "48px", borderRadius: "15px", backgroundColor: "#111713", color: "#00D66F", border: "1px solid #26372E", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, boxShadow: "0 10px 24px rgba(7,24,14,.14)" }}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
           </button>
           <div style={{ flex: 1, backgroundColor: "#F5F5F5", borderRadius: "14px", padding: "12px 16px" }}>
@@ -227,7 +227,7 @@ export default function ExchangePage() {
         <div style={{ display: "flex", gap: "8px", marginTop: "8px" }}>
           {["25", "50", "100", "200"].map((q) => (
             <button key={q} onClick={() => setAmount(q)}
-              style={{ flex: 1, padding: "6px", borderRadius: "8px", border: "1px solid #E5E7EB", backgroundColor: amount === q ? "#00C853" : "#fff", color: amount === q ? "#fff" : "#333", fontSize: "12px", fontWeight: "600", cursor: "pointer" }}>
+              style={{ flex: 1, padding: "9px", borderRadius: "10px", border: amount === q ? "1px solid #26372E" : "1px solid #E5E7EB", backgroundColor: amount === q ? "#111713" : "#fff", color: amount === q ? "#00D66F" : "#333", fontSize: "12px", fontWeight: "700", cursor: "pointer" }}>
               {q}
             </button>
           ))}
@@ -270,7 +270,7 @@ export default function ExchangePage() {
       {(error || rateAvailabilityError) && <p style={{ color: "#EF4444", fontSize: "13px", marginBottom: "12px" }}>{error || rateAvailabilityError}</p>}
 
       <button onClick={handlePreview} disabled={!amount || parseFloat(amount) <= 0 || converting || !!marketClosed || marketRate === null}
-        style={{ width: "100%", backgroundColor: !amount || !!marketClosed || marketRate === null ? "#E5E7EB" : "#00C853", color: !amount || !!marketClosed || marketRate === null ? "#999" : "#fff", fontWeight: "700", fontSize: "15px", border: "none", borderRadius: "14px", padding: "14px", cursor: !amount || !!marketClosed || marketRate === null ? "not-allowed" : "pointer" }}>
+        style={{ width: "100%", backgroundColor: !amount || !!marketClosed || marketRate === null ? "#E5E7EB" : "#111713", color: !amount || !!marketClosed || marketRate === null ? "#999" : "#00D66F", fontWeight: "800", fontSize: "15px", border: !amount || !!marketClosed || marketRate === null ? "none" : "1px solid #26372E", borderRadius: "14px", padding: "15px", cursor: !amount || !!marketClosed || marketRate === null ? "not-allowed" : "pointer" }}>
         {converting ? "Getting rate..." : marketClosed ? "Market Closed" : "Preview Exchange"}
       </button>
     </Wrap>
@@ -298,7 +298,7 @@ export default function ExchangePage() {
       </div>
       {error && <p style={{ color: "#EF4444", fontSize: "13px", marginBottom: "12px" }}>{error}</p>}
       <button onClick={handlePasscode} disabled={passcode.length < 6 || loading}
-        style={{ width: "100%", backgroundColor: passcode.length < 6 ? "#E5E7EB" : "#00C853", color: passcode.length < 6 ? "#999" : "#fff", fontWeight: "700", fontSize: "15px", border: "none", borderRadius: "14px", padding: "14px", cursor: passcode.length < 6 ? "not-allowed" : "pointer" }}>
+        style={{ width: "100%", backgroundColor: passcode.length < 6 ? "#E5E7EB" : "#111713", color: passcode.length < 6 ? "#999" : "#00D66F", fontWeight: "800", fontSize: "15px", border: passcode.length < 6 ? "none" : "1px solid #26372E", borderRadius: "14px", padding: "15px", cursor: passcode.length < 6 ? "not-allowed" : "pointer" }}>
         {loading ? "Verifying..." : "Continue"}
       </button>
     </Wrap>
@@ -321,7 +321,7 @@ export default function ExchangePage() {
       </div>
       {error && <p style={{ color: "#EF4444", fontSize: "13px", marginBottom: "12px" }}>{error}</p>}
       <button onClick={handleExecute} disabled={loading}
-        style={{ width: "100%", backgroundColor: loading ? "#86EFAC" : "#00C853", color: "#fff", fontWeight: "700", fontSize: "15px", border: "none", borderRadius: "14px", padding: "14px", cursor: loading ? "not-allowed" : "pointer" }}>
+        style={{ width: "100%", backgroundColor: loading ? "#86EFAC" : "#111713", color: loading ? "#166534" : "#00D66F", fontWeight: "800", fontSize: "15px", border: loading ? "none" : "1px solid #26372E", borderRadius: "14px", padding: "15px", cursor: loading ? "not-allowed" : "pointer" }}>
         {loading ? "Executing..." : "Confirm Exchange"}
       </button>
     </Wrap>
@@ -345,7 +345,7 @@ export default function ExchangePage() {
           ))}
         </div>
         <button onClick={() => router.push("/dashboard")}
-          style={{ width: "100%", backgroundColor: "#00C853", color: "#fff", fontWeight: "700", fontSize: "15px", border: "none", borderRadius: "14px", padding: "14px", cursor: "pointer" }}>
+          style={{ width: "100%", backgroundColor: "#111713", color: "#00D66F", fontWeight: "800", fontSize: "15px", border: "1px solid #26372E", borderRadius: "14px", padding: "15px", cursor: "pointer", boxShadow: "0 10px 24px rgba(7,24,14,.14)" }}>
           Back to Dashboard
         </button>
       </div>

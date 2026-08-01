@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { getStartupDestination } from "@/lib/startupSession";
+import { getStartupDestination, hasStoredAccountSession } from "@/lib/startupSession";
 
 const STARTUP_PATHS = new Set(["/", "/login"]);
 
@@ -15,6 +15,17 @@ export default function StartupSessionGate({ children }: { children: React.React
     let active = true;
     if (!STARTUP_PATHS.has(pathname)) {
       return;
+    }
+    // The public root is a real welcome page. Keep signed-out visitors there;
+    // only remembered sessions should resume into the secure app.
+    if (pathname === "/" && !hasStoredAccountSession(localStorage)) {
+      const frame = requestAnimationFrame(() => {
+        if (active) setCheckedPath(pathname);
+      });
+      return () => {
+        active = false;
+        cancelAnimationFrame(frame);
+      };
     }
     void getStartupDestination(localStorage).then((destination) => {
       if (!active) return;

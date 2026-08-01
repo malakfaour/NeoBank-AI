@@ -5,11 +5,14 @@ import { usePathname, useRouter } from "next/navigation";
 import { logoutSession } from "@/lib/logoutSession";
 import { useAuthStore } from "@/store/authStore";
 import Image from "next/image";
+import { CirclePlus, MessageCircle, ReceiptText } from "lucide-react";
 const links = [
   { href: "/dashboard", label: "Dashboard", svg: <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1H5a1 1 0 01-1-1V9.5z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg> },
+  { href: "/add-money", label: "Add Money", svg: <CirclePlus size={20} /> },
   { href: "/transfer", label: "Transfer", svg: <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg> },
   { href: "/beneficiaries", label: "Beneficiaries", svg: <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M5 4h14a1 1 0 011 1v14a1 1 0 01-1 1H5a1 1 0 01-1-1V5a1 1 0 011-1z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"/><path d="M8 8h.01M11 8h5M8 12h.01M11 12h5M8 16h.01M11 16h3" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg> },
   { href: "/exchange", label: "Exchange", svg: <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg> },
+  { href: "/bills", label: "Pay Bills", svg: <ReceiptText size={20} /> },
   { href: "/transactions", label: "Transactions", svg: <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg> },
   { href: "/profile", label: "Profile", svg: <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2M12 11a4 4 0 100-8 4 4 0 000 8z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg> },
 ];
@@ -27,7 +30,7 @@ export default function Sidebar() {
   const visibleLinks = isStaff ? [adminLink, fraudAdminLink, usersAdminLink, transactionsAdminLink] : links;
 
   return (
-    <aside style={{ position: "fixed", left: 0, top: 0, height: "100%", width: "240px", backgroundColor: "#fff", borderRight: "1px solid #F0F0F0", padding: "24px 16px", flexDirection: "column", zIndex: 20 }}
+    <aside style={{ position: "fixed", left: 0, top: 0, height: "100%", width: "240px", backgroundColor: "var(--surface)", borderRight: "1px solid var(--line)", padding: "24px 16px", flexDirection: "column", zIndex: 20 }}
       className="lg-sidebar">
       <div style={{ marginBottom: "32px", paddingLeft: "8px" }}>
       <Image
@@ -40,7 +43,7 @@ export default function Sidebar() {
         {visibleLinks.map(({ href, label, svg }) => {
           const active = pathname === href;
           return (
-            <Link key={href} href={href} style={{
+            <Link key={href} href={href} className={`sidebar-link${active ? " is-active" : ""}`} style={{
               display: "flex", alignItems: "center", gap: "12px", padding: "10px 12px", borderRadius: "14px",
               fontSize: "14px", fontWeight: "600", textDecoration: "none",
               backgroundColor: active ? "#F0FDF4" : "transparent",
@@ -52,7 +55,13 @@ export default function Sidebar() {
           );
         })}
       </nav>
-      <button onClick={async () => { await logoutSession(); router.replace("/login"); }}
+      {!isStaff && (
+        <button className="sidebar-chat-button" type="button" onClick={() => window.dispatchEvent(new CustomEvent("neo:open-chat"))}>
+          <MessageCircle size={20} />
+          <span>AI Help</span>
+        </button>
+      )}
+      <button className="sidebar-signout" onClick={async () => { await logoutSession(); router.replace("/login"); }}
         style={{ display: "flex", alignItems: "center", gap: "12px", padding: "10px 12px", borderRadius: "14px", border: "none", backgroundColor: "transparent", fontSize: "14px", fontWeight: "600", color: "#aaa", cursor: "pointer" }}>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h6a2 2 0 012 2v1" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>Sign out
       </button>

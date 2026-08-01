@@ -54,7 +54,7 @@ export default function OTPPage() {
     try {
      const user_id = String(useAuthStore.getState().user?.id ?? "");
 await api.post("/auth/verify-otp", { user_id, code });
-      router.push("/kyc");
+      router.push("/kyc-instructions");
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Invalid or expired code.";
       setError(message);

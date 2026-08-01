@@ -9,7 +9,7 @@ import { getPostAuthDestination } from "@/lib/postAuthNavigation";
 // any page within the same section as the resolved destination is allowed.
 function sectionOf(path: string): string {
   if (path.startsWith("/admin")) return "/admin";
-  if (path === "/kyc") return "/kyc";
+  if (path.startsWith("/kyc")) return "/kyc";
   return "/dashboard";
 }
 

@@ -3,8 +3,8 @@ import { test, expect } from "@playwright/test";
 test("welcome page loads with logo and buttons", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator("img[alt='NeoBank Lebanon']")).toBeVisible();
-  await expect(page.getByText("LOGIN")).toBeVisible();
-  await expect(page.getByText("SIGN UP")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Login" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Sign up" })).toBeVisible();
 });
 
 test("login page has mobile and passcode fields", async ({ page }) => {

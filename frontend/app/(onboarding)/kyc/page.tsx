@@ -303,9 +303,9 @@ export default function KYCPage() {
     }
   };
 
-  if (loading) return <main style={{ minHeight: "100vh", display: "grid", placeItems: "center" }}>Loading profile…</main>;
+  if (loading) return <main className="kyc-flow-page" style={{ minHeight: "100vh", display: "grid", placeItems: "center" }}>Loading profile…</main>;
   if (workflow === "approved" || workflow === "pending") return (
-    <main style={{ minHeight: "100vh", background: "#F5F5F5", display: "grid", placeItems: "center", padding: 20 }}>
+    <main className="kyc-flow-page" style={{ minHeight: "100vh", background: "var(--bg)", display: "grid", placeItems: "center", padding: 20 }}>
       <section style={{ maxWidth: 520, background: "#fff", padding: 32, borderRadius: 24, textAlign: "center" }}>
         <div style={{ fontSize: 44 }}>{workflow === "approved" ? "✅" : "⏳"}</div>
         <h1>{workflow === "approved" ? "Identity verified" : "We're reviewing your documents"}</h1>
@@ -316,7 +316,7 @@ export default function KYCPage() {
   );
 
   return (
-    <main style={{ minHeight: "100vh", background: "#F5F5F5", padding: "24px 16px" }}>
+    <main className="kyc-flow-page" style={{ minHeight: "100vh", background: "var(--bg)", padding: "24px 16px" }}>
       <section style={{ maxWidth: 760, margin: "0 auto", background: "#fff", padding: 28, borderRadius: 24 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginBottom: 24 }}>
           {steps.map((_, index) => <div key={index} style={{ height: 6, flex: 1, borderRadius: 99, background: index < step ? "#00C853" : "#E5E7EB" }} />)}
