@@ -77,6 +77,7 @@ Auth flow (login, register, OTP, passcode, password reset, unlock), onboarding/K
    ```
 2. Install prerequisites: Git, Node.js 22, Python 3.12. PostgreSQL and Redis can be run locally via Docker Compose (`docker-compose.yml`).
 3. Root `.env` (backend/ML — copy `.env.example` to `.env`): database, Redis, JWT/OTP, KYC thresholds, DeepFace/Groq, AWS S3, FCM, email provider, Stripe secret key, payment gateway/biller URLs, and app-level limits/thresholds.
+   - KYC documents (selfies, ID photos) are stored in S3-compatible storage. For local development, `docker-compose.yml` includes a `minio` service (`S3_ENDPOINT_URL=http://localhost:9100`, credentials `minioadmin`/`minioadmin`) as a drop-in S3 replacement. **You must start it (`docker compose up minio -d`) for KYC photos to load in the admin dashboard** — otherwise the presigned image URLs will fail to resolve and selfie/ID thumbnails will appear blank.
 4. Frontend `.env.local` (create under `frontend/`, not tracked in git): `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` (Stripe **publishable** key — the secret key stays in the root `.env` only). See [`frontend/README.md`](frontend/README.md) for full frontend setup (dependencies in `frontend/package.json`).
 5. See `backend/requirements.txt` and `ml/requirements.txt` for backend and ML Python dependencies.
 6. For branching, commits, pull requests, and all engineering conventions, see [docs/ENGINEERING_RULES.md](docs/ENGINEERING_RULES.md) and [docs/TEAM_SETUP.md](docs/TEAM_SETUP.md).
