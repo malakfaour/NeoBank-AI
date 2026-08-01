@@ -1,4 +1,6 @@
+from decimal import Decimal
 from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _ENV_FILE = str(Path(__file__).parent.parent.parent.parent / ".env")
@@ -29,14 +31,31 @@ class Settings(BaseSettings):
 
     # App
     APP_ENV: str = "development"
+    LOG_FORMAT: str = "text"  # "text" (dev) or "json" (prod) -- DEVATTECH-122
 
     # Payment Gateway (Member 4 - top-up, NBL-411)
     PAYMENT_GATEWAY_URL: str = ""
 
+    # DEVATTECH-131: real PSP tokenization via Stripe, replacing the fake
+    # gateway stub above for USD/LBP top-ups. Empty by default so a
+    # missing key fails loudly (see stripe_gateway.py) rather than
+    # silently no-op'ing in an environment that forgot to set it.
+    STRIPE_SECRET_KEY: str = ""
+
     # ML
     DEEPFACE_MODEL: str = "ArcFace"
+    KYC_MATCH_APPROVE_THRESHOLD: float = 0.80
+    KYC_MATCH_FLAG_THRESHOLD: float = 0.60
+    KYC_LIVENESS_THRESHOLD: float = 0.7
     GROQ_API_KEY: str = ""
+
+    FORECAST_MODEL: str = "LightGBM"
+    FEE_PCT: float = 0.01
+    FORECAST_MODEL: str = "LightGBM"
+    FEE_PCT: float = 0.01
     REQUIRE_ACTION_TOKEN: bool = False
+    # Engineering default only; product/compliance must approve the policy.
+    CHATBOT_SESSION_RETENTION_DAYS: int = 30
 
     # AWS / S3
     AWS_ACCESS_KEY_ID: str = ""
@@ -46,6 +65,12 @@ class Settings(BaseSettings):
     S3_BUCKET: str = ""
     S3_REGION: str = ""
     S3_ENDPOINT_URL: str = ""
+
+    # FCM Web Push
+    FCM_PROJECT_ID: str = ""
+    FCM_CLIENT_EMAIL: str = ""
+    FCM_PRIVATE_KEY: str = ""
+    FCM_TIMEOUT_SECONDS: float = 5.0
 
     # Email
     EMAIL_PROVIDER: str = "console"  # console, smtp, sendgrid
@@ -61,12 +86,18 @@ class Settings(BaseSettings):
     TWILIO_ACCOUNT_SID: str = ""
     TWILIO_AUTH_TOKEN: str = ""
     TWILIO_FROM_NUMBER: str = ""
+    HIGH_VALUE_SMS_THRESHOLD: Decimal = Decimal("500")
 
     # Frontend
     NEXT_PUBLIC_API_URL: str = "http://localhost:8000"
 
     # Bill Payments
     BILLER_API_URL: str = "http://localhost:9000/mock-biller"
+
+    # DEVATTECH-107: per-user daily transfer cap (send_money). Default is a
+    # placeholder pending a real product/compliance figure -- override via
+    # the DAILY_TRANSFER_LIMIT_USD env var.
+    DAILY_TRANSFER_LIMIT_USD: Decimal = Decimal("10000")
 
 
 settings = Settings()

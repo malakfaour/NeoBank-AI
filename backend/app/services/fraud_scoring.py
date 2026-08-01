@@ -1,4 +1,4 @@
-"""
+﻿"""
 DEVATTECH-84: fraud scoring for score_transaction.
 
 Two entry points, both with the same (db, transaction) -> float signature
@@ -18,12 +18,14 @@ import json
 import logging
 import os
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import joblib
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.transaction import Transaction
+from app.core.storage import download_file
 
 MODEL_DIR = os.path.join(os.path.dirname(__file__), "..", "ml_models")
 ISOLATION_FOREST_PATH = os.path.join(MODEL_DIR, "isolation_forest.pkl")
@@ -37,15 +39,117 @@ _xgb_pipeline = None
 _xgb_stats = None
 
 logger = logging.getLogger(__name__)
-FRAUD_FLAG_THRESHOLD = 0.75
+
+# DEVATTECH-143: S3 fallback for the two relocated .pkl artifacts only.
+# ISOLATION_FOREST_STATS_PATH / FRAUD_XGB_STATS_PATH stay locally
+# git-tracked and untouched -- only these two paths were approved for
+# relocation.
+
+# Tracks which local paths have already had an S3 fetch attempted in this
+# process, so a down/misconfigured S3 doesn't get re-hit on every single
+# transaction scored -- one attempt per path per process, matching the
+# existing module-level model-caching pattern below.
+_s3_fetch_attempted: set[str] = set()
+
+
+def _ensure_model_file_available(local_path: str, s3_key: str) -> None:
+    """
+    DEVATTECH-143: if local_path doesn't exist, attempt one S3 fetch into
+    that exact same path before the caller's existing joblib.load() runs.
+
+    s3_key is passed explicitly by the caller rather than looked up from
+    local_path in a module-level dict -- a path-keyed dict would silently
+    stop matching (and silently skip the S3 fetch) whenever local_path is
+    monkeypatched to a different value, e.g. in tests. Passing it
+    explicitly avoids that fragility entirely.
+
+    Best-effort only: any failure (S3 unavailable, credentials missing,
+    key not found) is logged and swallowed here -- the caller's existing
+    load code then runs exactly as it does today when the file is
+    genuinely absent. This function does NOT change either loader's
+    existing error-handling behavior:
+      - _load_isolation_forest(): joblib.load() still raises
+        FileNotFoundError uncaught if the file is still missing after
+        this best-effort fetch, unchanged from current behavior.
+      - _load_xgb_model(): its existing try/except FileNotFoundError ->
+        (None, None) fallback still applies unchanged.
+
+    This is purely a "give the local file a chance to exist first" step,
+    not a new failure mode.
+    """
+    if local_path in _s3_fetch_attempted:
+        return
+    _s3_fetch_attempted.add(local_path)
+
+    if os.path.exists(local_path):
+        return
+
+    try:
+        download_file(s3_key, local_path)
+        logger.info("Fetched %s from S3 key %s", local_path, s3_key)
+    except Exception:
+        logger.warning(
+            "Could not fetch %s from S3 (key=%s) -- falling back to "
+            "local-file-missing behavior.",
+            local_path,
+            s3_key,
+            exc_info=True,
+        )
+
+# DEVATTECH-90: justified from ml/fraud/tune_threshold.py's holdout
+# evaluation (evaluation-only pipeline, never touched fraud_xgb.pkl) --
+# precision=0.9909, recall=0.9083, F1=0.9478, flagged_rate=4.58% at this
+# threshold (max-F1 among 14 candidates swept 0.30-0.95). Full sweep
+# results: ml/fraud/threshold_tuning.json.
+FRAUD_FLAG_THRESHOLD = 0.45
+
+# The hour_of_day feature is meant to represent local time-of-day risk
+# ("is this a normal hour to be transacting"), not an arbitrary UTC
+# offset. transaction.created_at is stored as TIMESTAMPTZ (UTC) --
+# same Asia/Beirut convention already used correctly elsewhere in this
+# codebase (see market_hours.py's MARKET_TIMEZONE).
+FRAUD_TIMEZONE = "Asia/Beirut"
 
 
 def _load_isolation_forest():
+    """
+    DEVATTECH-92: lazy-load + module-level cache for the Isolation Forest
+    cold-start model.
+
+    Safe fallback: if the artifact doesn't exist yet (e.g. this code has
+    shipped but train_isolation_forest.py hasn't been run, or the S3
+    upload step was missed), log a warning and return (None, None)
+    instead of raising -- mirrors _load_xgb_model()'s pattern exactly.
+    Previously this had no such guard: a missing file (after a failed S3
+    fetch) raised FileNotFoundError uncaught, which propagated out of
+    score_with_isolation_forest() and out of score_transaction()'s
+    scoring step BEFORE check_fraud_rules_sync() ever ran -- meaning an
+    ML outage didn't just skip ML scoring, it also skipped the
+    rule-based check entirely and blanket-flagged the transaction
+    regardless of what the rules would have said (caught only by
+    score_transaction's outer try/except). Fixing this here means the
+    task's existing flow (score, then rules, then flagged = score >=
+    threshold or rule_triggered) does the right thing automatically:
+    score stays 0.0 (never crosses the flag threshold on its own) and
+    the rules still run and determine the outcome on their own merits.
+    """
     global _isolation_forest_model, _isolation_forest_stats
     if _isolation_forest_model is None:
-        _isolation_forest_model = joblib.load(ISOLATION_FOREST_PATH)
-        with open(ISOLATION_FOREST_STATS_PATH) as f:
-            _isolation_forest_stats = json.load(f)
+        _ensure_model_file_available(ISOLATION_FOREST_PATH, "ml-models/fraud/isolation_forest.pkl")
+        try:
+            _isolation_forest_model = joblib.load(ISOLATION_FOREST_PATH)
+            with open(ISOLATION_FOREST_STATS_PATH) as f:
+                _isolation_forest_stats = json.load(f)
+        except FileNotFoundError:
+            logger.warning(
+                "isolation_forest.pkl not found at %s -- cold-start fraud "
+                "scoring is unavailable until train_isolation_forest.py has "
+                "been run (and its output uploaded to S3). Falling back to "
+                "a safe non-flagged score; rule-based checks still run "
+                "independently.",
+                ISOLATION_FOREST_PATH,
+            )
+            return None, None
     return _isolation_forest_model, _isolation_forest_stats
 
 
@@ -66,6 +170,7 @@ def _load_xgb_model():
     """
     global _xgb_pipeline, _xgb_stats
     if _xgb_pipeline is None:
+        _ensure_model_file_available(FRAUD_XGB_PATH, "ml-models/fraud/fraud_xgb.pkl")
         try:
             _xgb_pipeline = joblib.load(FRAUD_XGB_PATH)
             with open(FRAUD_XGB_STATS_PATH) as f:
@@ -128,7 +233,8 @@ def _compute_features(db: Session, transaction: Transaction) -> list[float]:
     amount = float(transaction.amount)
     amount_zscore = (amount - stats["amount_mean"]) / stats["amount_std"]
 
-    hour_of_day = transaction.created_at.hour
+    local_created_at = transaction.created_at.astimezone(ZoneInfo(FRAUD_TIMEZONE))
+    hour_of_day = local_created_at.hour
 
     result = db.execute(
         select(func.count())
@@ -162,9 +268,15 @@ def _compute_features(db: Session, transaction: Transaction) -> list[float]:
 
     return [amount_zscore, hour_of_day, is_new_recipient, currency_flag]
 
-
 def score_with_isolation_forest(db: Session, transaction: Transaction) -> float:
-    model, _ = _load_isolation_forest()
+    model, stats = _load_isolation_forest()
+    if model is None:
+        # Mirrors score_with_xgboost()'s fallback exactly. Must check and
+        # return here, before _compute_features() -- that function also
+        # calls _load_isolation_forest() internally for `stats`, which
+        # would be None too and crash on stats["amount_mean"].
+        return 0.0
+
     features = _compute_features(db, transaction)
 
     # decision_function: higher = more normal, lower/negative = more
@@ -173,7 +285,7 @@ def score_with_isolation_forest(db: Session, transaction: Transaction) -> float:
     # contract defined in this module and consumed by
     # app/tasks/transaction_tasks.py's score_transaction task.
     raw_score = model.decision_function([features])[0]
-    fraud_score = max(0.0, min(1.0, 0.5 - raw_score))
+    fraud_score = float(max(0.0, min(1.0, 0.5 - raw_score)))
     return fraud_score
 
 def _compute_xgb_features(db: Session, transaction: Transaction) -> list[float]:
@@ -219,8 +331,8 @@ def _compute_xgb_features(db: Session, transaction: Transaction) -> list[float]:
     prior_to_this_receiver = result.scalar_one()
     is_new_recipient = 1 if prior_to_this_receiver == 0 else 0
 
-    hour_of_day = transaction.created_at.hour
-    day_of_week = transaction.created_at.weekday()  # Monday=0 .. Sunday=6
+    hour_of_day = transaction.created_at.astimezone(ZoneInfo(FRAUD_TIMEZONE)).hour
+    day_of_week = transaction.created_at.astimezone(ZoneInfo(FRAUD_TIMEZONE)).weekday()  # Monday=0 .. Sunday=6
 
     sender_tx_count_30d = get_sender_tx_count_30d(db, transaction.sender_id, transaction.id)
 
@@ -278,3 +390,4 @@ def score_with_xgboost(db: Session, transaction: Transaction) -> float:
     # predict_proba returns [[P(class=0), P(class=1)]]; class 1 = fraud.
     fraud_score = float(pipeline.predict_proba([features])[0][1])
     return fraud_score
+    

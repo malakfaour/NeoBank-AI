@@ -21,6 +21,7 @@ class LiveExchangeRateResponse(BaseModel):
     provider: str | None = None
     last_updated_at: datetime | None = None
     cache_age_seconds: int
+    stale: bool = False
 
 
 class ConvertCurrencyResponse(BaseModel):
@@ -29,8 +30,8 @@ class ConvertCurrencyResponse(BaseModel):
     amount: Decimal
     rate: Decimal
     converted_amount: Decimal
-
-
+    fee_pct: float
+    fee_amount: Decimal
 class ExchangeExecutionRequest(BaseModel):
     from_currency: Literal["USD", "LBP"]
     to_currency: Literal["USD", "LBP"]

@@ -1,29 +1,47 @@
-from fastapi import APIRouter, Depends, Header, HTTPException, status
-from sqlalchemy import select
+import asyncio
+import logging
+from functools import partial
+from typing import Literal
+
+from app.core.storage import get_presigned_url, upload_file
+from app.schemas.transaction import StatementResponse
+from app.services.statement_generation import (
+    generate_csv_bytes,
+    generate_pdf_bytes,
+    reconstruct_currency_statements,
+)
+
+from datetime import date, timedelta
+from decimal import Decimal
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_current_user, require_action_token
+from app.core.cache_utils import invalidate_balance_cache
+from app.core.config import settings
 from app.core.redis import (
     cache_idempotent_response,
     get_cached_idempotent_response,
+    get_transfer_daily_total,
     hash_idempotency_key,
+    increment_transfer_daily,
 )
 from app.db.session import get_db
 from app.models.transaction import Transaction, TransactionCurrency, TransactionStatus
 from app.models.wallet import Wallet, WalletCurrency
 from app.schemas.transaction import SendMoneyRequest, SendMoneyResponse
-from app.schemas.user import CurrentUser
-from app.core.cache_utils import invalidate_balance_cache
+from app.schemas.auth import CurrentUser
 from app.services.audit_log import append_audit
+from app.services.currency_conversion import to_usd_equivalent
 from app.services.fraud_rules import CurrencyMismatchError, check_currency_match
+from app.models.notification import NotificationType
+from app.services.notifications import notify
+from app.services.rate_limiter import check_rate_limit
+from app.services.wallet_status import WalletClosedError, WalletFrozenError, assert_wallet_active
 from app.tasks.transaction_tasks import score_transaction
-
-from datetime import date, timedelta
-
-from fastapi import Query
-from sqlalchemy import and_, func, or_
-
 from app.models.transaction_audit_log import TransactionAuditLog
 from app.models.user import User
 from app.schemas.transaction import (
@@ -35,12 +53,15 @@ from app.schemas.transaction import (
     TransactionSummaryResponse,
 )
 from app.utils.transaction_query_utils import compute_total_pages, parse_summary_month
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
+logger = logging.getLogger(__name__)
 
 
 @router.post("/send", response_model=SendMoneyResponse)
 async def send_money(
+    request: Request,
     payload: SendMoneyRequest,
     x_idempotency_key: str = Header(..., alias="X-Idempotency-Key"),
     current_user: CurrentUser = Depends(require_action_token),
@@ -78,6 +99,38 @@ async def send_money(
     if cached_response is not None:
         return SendMoneyResponse(**cached_response)
 
+    # --- DEVATTECH-107: velocity guard -- >5 transfers/min per user.
+    # key_prefix includes sender_id so check_rate_limit's key
+    # (f"sliding:{key_prefix}:{ip}") is scoped per user+IP, not purely
+    # per-IP like the pre-auth login/send_otp usages elsewhere in this
+    # file -- check_rate_limit always folds in request.client.host too,
+    # so a user switching networks mid-burst gets independent counters
+    # per IP. That's a known characteristic of reusing this shared
+    # limiter unchanged (ticket requires zero new limiting logic), not
+    # something fixed here.
+    await check_rate_limit(
+        request,
+        key_prefix=f"transfer:{sender_id}",
+        max_requests=5,
+        window_seconds=60,
+    )
+
+    # --- DEVATTECH-107: daily transfer cap. Placed after the
+    # idempotency replay check above so a retried idempotent request
+    # never consumes rate-limit or daily-cap budget for a transfer
+    # that already happened. ---
+    usd_equivalent = await to_usd_equivalent(payload.amount, wallet_currency.value, db)
+
+    daily_total = await get_transfer_daily_total(sender_id)
+    if daily_total + usd_equivalent > settings.DAILY_TRANSFER_LIMIT_USD:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error": "daily_limit_exceeded",
+                "remaining": str(max(settings.DAILY_TRANSFER_LIMIT_USD - daily_total, Decimal("0"))),
+            },
+        )
+
     # --- locked wallet fetch ---
     # Both wallets are locked in ONE statement, ordered by Wallet.id. Any two
     # concurrent transfers (even in opposite directions between the same two
@@ -100,6 +153,16 @@ async def send_money(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Sender or receiver has no {payload.currency} wallet",
         )
+
+    for _w in (sender_wallet, receiver_wallet):
+        try:
+            assert_wallet_active(_w)
+        except (WalletFrozenError, WalletClosedError) as e:
+            reason = "wallet_frozen" if isinstance(e, WalletFrozenError) else "wallet_closed"
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"error": reason},
+            )
 
     try:
         check_currency_match(payload.currency, sender_wallet)
@@ -134,6 +197,7 @@ async def send_money(
         receiver_id=receiver_id,
         amount=payload.amount,
         currency=TransactionCurrency(wallet_currency.value),
+        category="Transfer",
         status=TransactionStatus.pending,
         idempotency_key=hash_idempotency_key(sender_id, x_idempotency_key),
     )
@@ -160,6 +224,10 @@ async def send_money(
     await invalidate_balance_cache(sender_id)
     await invalidate_balance_cache(receiver_id)
 
+    # --- DEVATTECH-107: daily transfer total, incremented only after a
+    # real (non-replayed) transfer actually commits ---
+    await increment_transfer_daily(sender_id, usd_equivalent)
+
     # --- DEVATTECH-74: audit trail — "created" fires first, right after the
     # transaction row exists, before fraud scoring runs. fraud_score is
     # intentionally omitted here (not known yet) — it's recorded on the
@@ -184,7 +252,47 @@ async def send_money(
     await db.commit()
     await db.refresh(transaction)
 
-    score_transaction.delay(transaction.id)
+    await notify(
+        user_id=sender_id,
+        notification_type=NotificationType.TX_SENT,
+        metadata={
+            "amount": str(transaction.amount),
+            "currency": transaction.currency.value,
+            "transaction_id": transaction.id,
+        },
+        db=db,
+    )
+
+    sender_result = await db.execute(
+        select(User).where(User.id == sender_id)
+    )
+    sender = sender_result.scalar_one_or_none()
+
+    await notify(
+        user_id=receiver_id,
+        notification_type=NotificationType.TX_RECEIVED,
+        metadata={
+            "amount": str(transaction.amount),
+            "currency": transaction.currency.value,
+            "transaction_id": transaction.id,
+            "sender_name": sender.full_name if sender else "Unknown sender",
+        },
+        db=db,
+    )
+
+    try:
+        score_transaction.delay(transaction.id)
+    except Exception:
+        # Fraud scoring is deliberately asynchronous and the transfer has
+        # already committed. A broker transport failure must not turn a
+        # successful money movement into a failed HTTP response (or invite a
+        # duplicate retry). The transaction remains completed with
+        # fraud_score=None and can be picked up by operational reconciliation.
+        logger.exception(
+            "Fraud-scoring enqueue failed for transaction %s",
+            transaction.id,
+            extra={"transaction_id": transaction.id},
+        )
 
     await append_audit(
         db,
@@ -240,6 +348,7 @@ async def send_money(
 # body at call time, not at definition time, so module-level imports placed
 # after a function's def are still valid before any request is served.
 
+
 # Route registration order matters here: "/summary" is registered before
 # "/{transaction_id}" so a request to GET /transactions/summary doesn't get
 # swallowed by the {transaction_id} path parameter.
@@ -249,7 +358,7 @@ async def send_money(
 # (bill payments, exchange execution) that don't write to this table yet.
 # These values are accepted as valid filters (so the endpoint doesn't 400
 # on a legitimate future value) but currently match zero rows.
-VALID_TRANSACTION_TYPES = {"send", "receive", "topup", "bill", "exchange"}
+VALID_TRANSACTION_TYPES = {"send", "receive", "topup", "bill", "exchange", "adjustment", "reversal"}
 TYPES_NOT_YET_SUPPORTED = {"bill"}
 
 
@@ -259,6 +368,10 @@ def _derive_transaction_type(transaction: Transaction, user_id: int) -> str:
             return "exchange"
         if transaction.category == "Bills":
             return "bill"
+        if transaction.category == "Adjustment":
+            return "adjustment"
+        if transaction.category == "Reversal":
+            return "reversal"
         return "topup"
     return "send" if transaction.sender_id == user_id else "receive"
 
@@ -316,6 +429,76 @@ async def get_transaction_summary(
     ]
 
     return TransactionSummaryResponse(month=month, summary=summary_items)
+
+
+@router.get("/statement", response_model=StatementResponse)
+async def get_transaction_statement(
+    month: str = Query(..., description="Format YYYY-MM, e.g. 2026-07"),
+    format: Literal["csv", "pdf"] = Query(...),
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    DEVATTECH-94: monthly account statement (CSV or PDF), uploaded to
+    S3 under the existing bucket's "neobank-statements/{user_id}/
+    {month}.{ext}" key prefix, presigned URL returned. Reuses
+    app/core/storage.py as-is -- no new boto3 code; storage.upload_file
+    already applies server-side encryption automatically.
+
+    Registered before "/{transaction_id}" -- same route-ordering
+    requirement already documented above for "/summary".
+
+    Generation is synchronous, in-memory, CPU-only (stdlib csv /
+    reportlab) -- meets the ticket's "<1s, no Celery" requirement.
+    storage.upload_file/get_presigned_url are SYNCHRONOUS functions
+    (confirmed from the current file -- no async/await in
+    app/core/storage.py); calling either directly here would block the
+    event loop during real S3 network I/O. Wrapped in
+    loop.run_in_executor, same pattern already established in
+    admin.py's get_kyc_queue for this exact same storage helper.
+
+    Balance reconstruction (app/services/statement_generation.py) is
+    guaranteed exact only for a currency with no pre-ledger-fix
+    Exchange/Reversal/Adjustment rows (missing exchange_leg/
+    ledger_direction) -- see that module's docstring. Such a currency's
+    opening/closing balance is omitted from the generated file (never
+    silently defaulted to 0), with its transaction rows still shown.
+    This is entirely internal to the generated file's content -- the
+    API response contract below is unaffected either way.
+    """
+    try:
+        year, month_num = parse_summary_month(month)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="month must be in YYYY-MM format",
+        )
+
+    user_id = int(current_user.id)
+    month_start = date(year, month_num, 1)
+    month_end = date(year + 1, 1, 1) if month_num == 12 else date(year, month_num + 1, 1)
+
+    currency_statements = await reconstruct_currency_statements(db, user_id, month_start, month_end)
+
+    if format == "csv":
+        file_bytes = generate_csv_bytes(month, currency_statements)
+        content_type = "text/csv"
+        ext = "csv"
+    else:
+        file_bytes = generate_pdf_bytes(month, currency_statements)
+        content_type = "application/pdf"
+        ext = "pdf"
+
+    s3_key = f"neobank-statements/{user_id}/{month}.{ext}"
+
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(
+        None,
+        partial(upload_file, file_bytes, s3_key, extra_args={"ContentType": content_type}),
+    )
+    presigned_url = await loop.run_in_executor(None, partial(get_presigned_url, s3_key))
+
+    return StatementResponse(month=month, s3_key=s3_key, presigned_url=presigned_url)
 
 
 @router.get("/{transaction_id}", response_model=TransactionDetailResponse)
@@ -426,6 +609,10 @@ async def list_transactions(
         filters.append(Transaction.category == "TopUp")
     elif type == "exchange":
         filters.append(Transaction.category == "Exchange")
+    elif type == "adjustment":
+        filters.append(Transaction.category == "Adjustment")
+    elif type == "reversal":
+        filters.append(Transaction.category == "Reversal")
 
     if start_date is not None:
         filters.append(Transaction.created_at >= start_date)
@@ -467,6 +654,7 @@ async def list_transactions(
             TransactionListItem(
                 id=tx.id,
                 type=transaction_type,
+                exchange_leg=tx.exchange_leg.value if tx.exchange_leg else None,
                 amount=tx.amount,
                 currency=tx.currency.value,
                 counterparty_name=counterparty.full_name if counterparty else None,

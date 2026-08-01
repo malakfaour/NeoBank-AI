@@ -1,54 +1,17 @@
-\# Contributing to NeoBank Lebanon
+# Contributing to NeoBank Lebanon
 
+The authoritative guide for branching, commits, pull requests, code conventions, and everything else is:
 
+**[docs/ENGINEERING_RULES.md](docs/ENGINEERING_RULES.md)**
 
-\## Branch Strategy
+Read it before starting any task. All rules there take precedence over anything you may have seen elsewhere.
 
-\- `main` → production only, final delivery
+## Quick-start
 
-\- `develop` → integration branch, all PRs merge here
+1. `git fetch origin && git checkout -b feature/DEVATTECH-<id>-<short-name> origin/develop`
+2. Work and commit with real messages: `fix(auth): correct OTP expiry check (DEVATTECH-99)`
+3. Pull `develop` again before opening the PR
+4. `git push origin feature/<name>`
+5. Open PR to `develop` — never to `main`
 
-\- `feature/<name>` → your daily work branch
-
-
-
-\## Daily Workflow
-
-1\. `git checkout feature/<your-branch>`
-
-2\. `git pull origin develop`
-
-3\. Work, commit regularly
-
-4\. `git push origin feature/<your-branch>`
-
-5\. Open PR to `develop` when ticket is done
-
-
-
-\## Commit Message Format
-
-TICKET-ID short description
-
-Example: `DEVATTECH-32 JWT authentication implementation`
-
-
-
-\## Pull Request Rules
-
-\- Always merge into `develop`, never `main`
-
-\- Minimum 1 teammate approval before merging
-
-\- Never merge your own PR
-
-
-
-\## Never
-
-\- Push directly to `main` or `develop`
-
-\- Commit `.env` files
-
-\- Force push to shared branches
-
+For the full rules (migrations, async/sync DB, rate limiting, tests, and more), see [ENGINEERING_RULES.md](docs/ENGINEERING_RULES.md).

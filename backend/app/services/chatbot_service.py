@@ -1,4 +1,5 @@
 import json
+import logging
 from typing import Any
 
 from langchain.agents import create_agent
@@ -17,6 +18,14 @@ from app.services.transaction_query_service import (
 )
 
 GROQ_CHATBOT_MODEL = "llama-3.3-70b-versatile"
+AGENT_HISTORY_MESSAGE_LIMIT = 20
+STORED_HISTORY_MESSAGE_LIMIT = 100
+AGENT_UNAVAILABLE_REPLY = (
+    "The assistant is temporarily unavailable for this request. "
+    "Please try again."
+)
+
+logger = logging.getLogger(__name__)
 
 _SYSTEM_PROMPT = """
 You are NeoBank Lebanon's secure banking assistant.
@@ -126,12 +135,17 @@ async def _get_or_create_chat_session(
     db: AsyncSession,
     user_id: int,
     session_id: str,
+    *,
+    for_update: bool = False,
 ) -> ChatSession:
-    result = await db.execute(
-        select(ChatSession).where(
-            ChatSession.session_id == session_id,
-        )
+    query = select(ChatSession).where(
+        ChatSession.session_id == session_id,
     )
+
+    if for_update:
+        query = query.with_for_update()
+
+    result = await db.execute(query)
 
     session = result.scalar_one_or_none()
 
@@ -144,11 +158,75 @@ async def _get_or_create_chat_session(
         db.add(session)
 
     elif session.user_id != user_id:
-        raise ChatSessionOwnershipError(
-            "Chat session belongs to another user"
-        )
+        raise ChatSessionOwnershipError("Chat session belongs to another user")
 
     return session
+
+
+async def get_chat_history(
+    db: AsyncSession,
+    user_id: int,
+    session_id: str,
+) -> list[dict[str, Any]] | None:
+    """
+    Return the stored conversation for an owned chat session.
+
+    Raw message text is stored only in chat_sessions.messages.
+    chatbot_logs remains analytics-only.
+    """
+    session = await _get_owned_chat_session(
+        db=db,
+        user_id=user_id,
+        session_id=session_id,
+    )
+
+    if session is None:
+        return None
+
+    return list(session.messages or [])
+
+
+async def _get_owned_chat_session(
+    db: AsyncSession,
+    user_id: int,
+    session_id: str,
+) -> ChatSession | None:
+    """Load a chat session and enforce ownership for user-facing operations."""
+    result = await db.execute(
+        select(ChatSession).where(
+            ChatSession.session_id == session_id,
+        )
+    )
+
+    session = result.scalar_one_or_none()
+
+    if session is None:
+        return None
+
+    if session.user_id != user_id:
+        raise ChatSessionOwnershipError("Chat session belongs to another user")
+
+    return session
+
+
+async def delete_chat_session(
+    db: AsyncSession,
+    user_id: int,
+    session_id: str,
+) -> bool:
+    """Delete an owned conversation, returning False when it does not exist."""
+    session = await _get_owned_chat_session(
+        db=db,
+        user_id=user_id,
+        session_id=session_id,
+    )
+
+    if session is None:
+        return False
+
+    await db.delete(session)
+    await db.commit()
+    return True
 
 
 def _history_for_agent(
@@ -176,15 +254,33 @@ def _history_for_agent(
     return history
 
 
+def _append_bounded_turn(
+    messages: list[dict[str, Any]],
+    *,
+    message: str,
+    reply: str,
+) -> list[dict[str, Any]]:
+    history = [
+        *messages,
+        {
+            "role": "user",
+            "content": message,
+        },
+        {
+            "role": "assistant",
+            "content": reply,
+        },
+    ]
+    return history[-STORED_HISTORY_MESSAGE_LIMIT:]
+
+
 def _extract_reply(
     agent_result: dict[str, Any],
 ) -> str:
     messages = agent_result.get("messages", [])
 
     if not messages:
-        raise RuntimeError(
-            "Chatbot agent returned no messages"
-        )
+        raise RuntimeError("Chatbot agent returned no messages")
 
     content = messages[-1].content
 
@@ -226,21 +322,16 @@ async def save_chat_turn(
         db=db,
         user_id=user_id,
         session_id=session_id,
+        for_update=True,
     )
 
     history = list(session.messages or [])
 
-    session.messages = [
-        *history,
-        {
-            "role": "user",
-            "content": message,
-        },
-        {
-            "role": "assistant",
-            "content": reply,
-        },
-    ]
+    session.messages = _append_bounded_turn(
+        history,
+        message=message,
+        reply=reply,
+    )
 
     await db.commit()
 
@@ -261,12 +352,13 @@ async def get_chatbot_response(
         db=db,
         user_id=user_id,
         session_id=session_id,
+        for_update=True,
     )
 
     stored_history = list(session.messages or [])
 
     agent_messages = _history_for_agent(
-        stored_history
+        stored_history[-AGENT_HISTORY_MESSAGE_LIMIT:]
     )
 
     agent_messages.append(
@@ -300,25 +392,26 @@ async def get_chatbot_response(
         ],
     )
 
-    agent_result = await agent.ainvoke(
-        {
-            "messages": agent_messages,
-        }
+    try:
+        agent_result = await agent.ainvoke(
+            {
+                "messages": agent_messages,
+            }
+        )
+        reply = _extract_reply(agent_result)
+    except Exception:
+        logger.exception(
+            "Chatbot agent failed for session %s and user %s",
+            session_id,
+            user_id,
+        )
+        reply = AGENT_UNAVAILABLE_REPLY
+
+    session.messages = _append_bounded_turn(
+        stored_history,
+        message=message,
+        reply=reply,
     )
-
-    reply = _extract_reply(agent_result)
-
-    session.messages = [
-        *stored_history,
-        {
-            "role": "user",
-            "content": message,
-        },
-        {
-            "role": "assistant",
-            "content": reply,
-        },
-    ]
 
     await db.commit()
 

@@ -1,18 +1,20 @@
-from datetime import datetime, timezone
+import json
+import logging
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+import redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
-
 from app.core.cache_utils import invalidate_balance_cache
 from app.api.dependencies import require_action_token
 from app.db.session import get_db
 from app.models.exchange_audit_log import ExchangeAuditLog
 from app.models.exchange_rate import ExchangeRate
-from app.models.transaction import Transaction, TransactionCurrency, TransactionStatus
+from app.models.transaction import Transaction, TransactionCurrency, TransactionStatus, ExchangeLegType
 from app.models.wallet import Wallet, WalletCurrency
 from app.schemas.exchange import (
     ConvertCurrencyResponse,
@@ -22,8 +24,9 @@ from app.schemas.exchange import (
     LiveExchangeRateResponse,
     ExchangeRateResponse,
 )
-from app.schemas.user import CurrentUser
+from app.schemas.auth import CurrentUser
 from app.services.audit_log import append_audit
+from app.core.config import settings
 from app.services.exchange_cache import (
     get_cached_exchange_rates,
     get_cached_exchange_rates_with_age,
@@ -31,22 +34,62 @@ from app.services.exchange_cache import (
 )
 from app.services.exchange_forecast import train_and_forecast_usd_lbp
 from app.services.market_hours import get_market_status, is_market_open
-from app.tasks.exchange_tasks import fetch_exchange_rates
+from app.services.rate_limiter import check_rate_limit
+from app.services.wallet_status import WalletClosedError, WalletFrozenError, assert_wallet_active
+from app.services.exchange_cache import fetch_exchange_rates
+from app.tasks.exchange_tasks import EXCHANGE_FORECAST_CACHE_KEY
 
 
 router = APIRouter(prefix="/exchange", tags=["exchange"])
+logger = logging.getLogger(__name__)
 
 
-async def get_rates_from_cache_or_provider() -> dict[tuple[str, str], Decimal]:
+async def get_rates_from_cache_or_provider(
+    db: AsyncSession | None = None,
+) -> dict[tuple[str, str], Decimal]:
+
     cached_rates = await get_cached_exchange_rates()
 
     if cached_rates is not None:
         return cached_rates
 
-    rates = await fetch_exchange_rates()
-    await set_cached_exchange_rates(rates)
+    try:
+        rates = await fetch_exchange_rates()
 
-    return rates
+        await set_cached_exchange_rates(
+            rates
+        )
+
+        return rates
+
+    except Exception:
+
+        if db is not None:
+            result = await db.execute(
+                select(ExchangeRate)
+                .order_by(
+                    ExchangeRate.last_updated_at.desc()
+                )
+            )
+
+            latest_rates = {}
+
+            for row in result.scalars().all():
+                pair = (
+                    row.base_currency,
+                    row.target_currency,
+                )
+
+                if pair not in latest_rates:
+                    latest_rates[pair] = row.rate
+
+            if latest_rates:
+                return latest_rates
+
+        raise HTTPException(
+            status_code=503,
+            detail="Exchange rate provider unavailable",
+        )
 
 
 @router.get("/market-status")
@@ -103,6 +146,7 @@ async def get_live_exchange_rate(
             "provider": "redis-cache",
             "last_updated_at": None,
             "cache_age_seconds": cache_age_seconds or 0,
+            "stale": (cache_age_seconds or 0) > 300,
         }
 
     latest_db_rate = await db.scalar(
@@ -136,6 +180,7 @@ async def get_live_exchange_rate(
         "provider": latest_db_rate.provider,
         "last_updated_at": last_updated_at,
         "cache_age_seconds": cache_age_seconds,
+        "stale": cache_age_seconds > 300,
     }
 
 
@@ -144,6 +189,7 @@ async def convert_currency(
     amount: Decimal = Query(..., gt=0),
     from_currency: str = Query(..., min_length=3, max_length=3),
     to_currency: str = Query(..., min_length=3, max_length=3),
+    db: AsyncSession = Depends(get_db),
 ):
     from_currency = from_currency.upper()
     to_currency = to_currency.upper()
@@ -164,8 +210,9 @@ async def convert_currency(
         )
 
     rates = await get_rates_from_cache_or_provider()
-
-    rate = rates.get((from_currency, to_currency))
+    rate = rates.get(
+        (from_currency, to_currency)
+    )
 
     if rate is None:
         raise HTTPException(
@@ -175,21 +222,40 @@ async def convert_currency(
 
     converted_amount = amount * rate
 
+    fee_amount = (
+        amount * Decimal(str(settings.FEE_PCT))
+    )
+
     return {
         "from_currency": from_currency,
         "to_currency": to_currency,
         "amount": amount,
         "rate": rate,
         "converted_amount": converted_amount,
+        "fee_pct": settings.FEE_PCT,
+        "fee_amount": fee_amount,
     }
 
 
 @router.post("/execute", response_model=ExchangeExecutionResponse)
 async def execute_exchange(
+    request: Request,
     payload: ExchangeExecutionRequest,
     current_user: CurrentUser = Depends(require_action_token),
     db: AsyncSession = Depends(get_db),
 ):
+    # Write-endpoint rate-limiting gap flagged in the engineering gap
+    # analysis. Scoped per user+IP like the DEVATTECH-107 transfer
+    # velocity guard (transactions.py) -- not a replacement for the
+    # market-hours/balance checks below, just a floor against burst
+    # abuse of this money-moving endpoint.
+    await check_rate_limit(
+        request,
+        key_prefix=f"exchange_execute:{current_user.id}",
+        max_requests=10,
+        window_seconds=60,
+    )
+
     from_currency = payload.from_currency.upper()
     to_currency = payload.to_currency.upper()
 
@@ -210,7 +276,9 @@ async def execute_exchange(
 
     rates = await get_rates_from_cache_or_provider()
 
-    rate = rates.get((from_currency, to_currency))
+    rate = rates.get(
+        (from_currency, to_currency)
+    )
 
     if rate is None:
         raise HTTPException(
@@ -230,21 +298,46 @@ async def execute_exchange(
         )
 
     locked_wallets_result = await db.execute(
-        select(Wallet).where(
+        select(Wallet)
+        .where(
             Wallet.user_id == user_id,
-            Wallet.currency.in_([from_wallet_currency, to_wallet_currency]),
+            Wallet.currency.in_(
+                [
+                    from_wallet_currency,
+                    to_wallet_currency,
+                ]
+            ),
         )
         .order_by(Wallet.id.asc())
         .with_for_update()
     )
-    wallets_by_currency = {wallet.currency: wallet for wallet in locked_wallets_result.scalars().all()}
-    source_wallet = wallets_by_currency.get(from_wallet_currency)
-    target_wallet = wallets_by_currency.get(to_wallet_currency)
+
+    wallets_by_currency = {
+        wallet.currency: wallet
+        for wallet in locked_wallets_result.scalars().all()
+    }
+
+    source_wallet = wallets_by_currency.get(
+        from_wallet_currency
+    )
+
+    target_wallet = wallets_by_currency.get(
+        to_wallet_currency
+    )
 
     if source_wallet is None:
         raise HTTPException(
             status_code=404,
             detail=f"{from_currency} wallet not found",
+        )
+
+    try:
+        assert_wallet_active(source_wallet)
+    except (WalletFrozenError, WalletClosedError) as e:
+        reason = "wallet_frozen" if isinstance(e, WalletFrozenError) else "wallet_closed"
+        raise HTTPException(
+            status_code=422,
+            detail={"error": reason},
         )
 
     if source_wallet.balance < payload.amount:
@@ -259,24 +352,56 @@ async def execute_exchange(
             detail=f"{to_currency} wallet not found",
         )
 
+    try:
+        assert_wallet_active(target_wallet)
+    except (WalletFrozenError, WalletClosedError) as e:
+        reason = "wallet_frozen" if isinstance(e, WalletFrozenError) else "wallet_closed"
+        raise HTTPException(
+            status_code=422,
+            detail={"error": reason},
+        )
+
     converted_amount = payload.amount * rate
 
-    # Move money
     source_wallet.balance -= payload.amount
     target_wallet.balance += converted_amount
 
     exchange_id = uuid4()
-    transaction = Transaction(
+
+    # Ledger fix (Issue 1 of 3, DEVATTECH-92 prerequisite): TWO Transaction
+    # rows now record this exchange -- a debit leg in the source currency
+    # and a credit leg in the target currency -- distinguished by
+    # exchange_leg, so balance reconstruction can identify each leg
+    # directly from transaction data. category="Exchange" is unchanged on
+    # both rows, per instruction -- existing category-based logic
+    # elsewhere (transactions.py's type derivation/filtering) is
+    # untouched and continues to work unmodified. Distinct
+    # idempotency_key suffixes (":debit" / ":credit") are required only
+    # to satisfy the column's UNIQUE constraint -- nothing reads or
+    # parses this suffix; exchange_leg is the actual, reliable signal.
+    debit_transaction = Transaction(
         sender_id=user_id,
         receiver_id=user_id,
         amount=payload.amount,
         currency=TransactionCurrency(from_currency),
         category="Exchange",
         status=TransactionStatus.completed,
-        idempotency_key=f"exchange:{exchange_id.hex}",
+        exchange_leg=ExchangeLegType.debit,
+        idempotency_key=f"exchange:{exchange_id.hex}:debit",
     )
-    db.add(transaction)
+    db.add(debit_transaction)
 
+    credit_transaction = Transaction(
+        sender_id=user_id,
+        receiver_id=user_id,
+        amount=converted_amount,
+        currency=TransactionCurrency(to_currency),
+        category="Exchange",
+        status=TransactionStatus.completed,
+        exchange_leg=ExchangeLegType.credit,
+        idempotency_key=f"exchange:{exchange_id.hex}:credit",
+    )
+    db.add(credit_transaction)
     audit_log = ExchangeAuditLog(
         exchange_id=str(exchange_id),
         user_id=user_id,
@@ -292,22 +417,60 @@ async def execute_exchange(
     db.add(audit_log)
 
     await db.commit()
-    await db.refresh(transaction)
+    await db.refresh(debit_transaction)
+    await db.refresh(credit_transaction)
 
     await invalidate_balance_cache(user_id)
-    await append_audit(
-        db,
-        transaction_id=transaction.id,
-        action="exchange_completed",
-        actor_id=user_id,
-        metadata={
-            "from_currency": from_currency,
-            "to_currency": to_currency,
-            "rate": str(rate),
-            "converted_amount": str(converted_amount),
-        },
-    )
 
+    try:
+        await append_audit(
+            db,
+            transaction_id=debit_transaction.id,
+            action="exchange_completed",
+            actor_id=user_id,
+            metadata={
+                "from_currency": from_currency,
+                "to_currency": to_currency,
+                "rate": str(rate),
+                "converted_amount": str(converted_amount),
+                "leg": "debit",
+                "paired_transaction_id": credit_transaction.id,
+            },
+        )
+    except Exception:
+        logger.error(
+            "Exchange %s succeeded but debit-leg audit write failed for "
+            "transaction %s (user %s). Manual audit backfill may be required.",
+            exchange_id,
+            debit_transaction.id,
+            user_id,
+            exc_info=True,
+        )
+
+    try:
+        await append_audit(
+            db,
+            transaction_id=credit_transaction.id,
+            action="exchange_completed",
+            actor_id=user_id,
+            metadata={
+                "from_currency": from_currency,
+                "to_currency": to_currency,
+                "rate": str(rate),
+                "converted_amount": str(converted_amount),
+                "leg": "credit",
+                "paired_transaction_id": debit_transaction.id,
+            },
+        )
+    except Exception:
+        logger.error(
+            "Exchange %s succeeded but credit-leg audit write failed for "
+            "transaction %s (user %s). Manual audit backfill may be required.",
+            exchange_id,
+            credit_transaction.id,
+            user_id,
+            exc_info=True,
+        )
     return {
         "exchange_id": exchange_id,
         "status": "executed",
@@ -318,10 +481,83 @@ async def execute_exchange(
         "converted_amount": converted_amount,
         "message": "Exchange executed successfully",
     }
+    
+@router.get("/rates/history")
+async def get_exchange_rates_history(
+    days: int = Query(30, ge=1, le=90),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(ExchangeRate)
+        .where(
+            ExchangeRate.base_currency == "USD",
+            ExchangeRate.target_currency == "LBP",
+        )
+        .order_by(
+            ExchangeRate.last_updated_at.asc()
+        )
+    )
+
+    rows = result.scalars().all()
+
+    daily_rates = {}
+
+    for row in rows:
+        day = row.last_updated_at.date()
+        daily_rates[day] = row
+
+    rows = list(daily_rates.values())[-days:]
+
+    return [
+        {
+            "date": row.last_updated_at.date(),
+            "predicted_rate": row.rate,
+            "rate": row.rate,
+            "provider": row.provider,
+        }
+        for row in rows
+    ]
 
 
 @router.get("/forecast", response_model=ExchangeForecastResponse)
-async def forecast_exchange_rate(days: int = Query(7, ge=1, le=7)):
+async def forecast_exchange_rate(
+    days: int = Query(7, ge=1, le=7),
+):
+    try:
+        redis_client = redis.Redis.from_url(
+            settings.REDIS_URL,
+            decode_responses=True,
+        )
+        cached_forecast = await run_in_threadpool(
+            redis_client.get,
+            EXCHANGE_FORECAST_CACHE_KEY,
+        )
+
+        if cached_forecast is not None:
+            cached_payload = json.loads(cached_forecast)
+            if cached_payload.get("predictions"):
+                cached_payload["predictions"] = [
+                    {
+                        "date": date.fromisoformat(item["date"]),
+                        "predicted_rate": Decimal(
+                            item["predicted_rate"]
+                        ),
+                    }
+                    for item in cached_payload["predictions"]
+                ]
+                return cached_payload
+    except (
+        redis.RedisError,
+        json.JSONDecodeError,
+        KeyError,
+        TypeError,
+        ValueError,
+    ):
+        logger.warning(
+            "Unable to serve cached exchange forecast",
+            exc_info=True,
+        )
+
     rates = await get_rates_from_cache_or_provider()
 
     latest_rate = rates.get(("USD", "LBP"))
@@ -336,12 +572,13 @@ async def forecast_exchange_rate(days: int = Query(7, ge=1, le=7)):
         train_and_forecast_usd_lbp,
         latest_rate,
         days,
+        settings.FORECAST_MODEL,
     )
 
     return {
         "base_currency": "USD",
         "target_currency": "LBP",
         "days": days,
-        "model": "LightGBM",
+        "model": settings.FORECAST_MODEL,
         "predictions": predictions,
     }

@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import uuid4
@@ -12,7 +13,7 @@ from app.db.session import AsyncSessionLocal
 from app.models.exchange_audit_log import ExchangeAuditLog
 from app.models.exchange_rate import ExchangeRate
 from app.models.model_metrics import ModelMetrics
-from app.models.transaction import Transaction
+from app.models.transaction import ExchangeLegType, Transaction
 from app.models.user import User, UserRole
 from app.models.wallet import Wallet, WalletCurrency
 from app.services.exchange_cache import set_cached_exchange_rates
@@ -45,13 +46,17 @@ async def _get_user_and_wallets(email: str) -> tuple[User, dict[WalletCurrency, 
 
 
 async def _top_up(client, access_token: str, wallet_id: int, amount: str) -> None:
+    # DEVATTECH-125: X-Idempotency-Key is now required on this endpoint.
     response = await client.post(
         "/api/v1/accounts/top-up",
-        headers={"Authorization": f"Bearer {access_token}"},
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "X-Idempotency-Key": uuid4().hex,
+        },
         json={
             "wallet_id": wallet_id,
             "amount": amount,
-            "card_token": "tok_visa_test_123",
+            "payment_method_id": "pm_card_visa_test_123",
         },
     )
     assert response.status_code == 200, response.text
@@ -139,6 +144,15 @@ async def test_execute_exchange_creates_transaction_and_audit_rows(client, monke
                 Transaction.sender_id == user.id,
                 Transaction.receiver_id == user.id,
                 Transaction.category == "Exchange",
+                # Ledger fix (Issue 1 of 3): this exchange now writes TWO
+                # rows (debit + credit legs); the original unfiltered
+                # query would be ambiguous (.scalar() with no explicit
+                # single-row guarantee). Filtering by the intended
+                # semantic leg -- debit, which is what this assertion
+                # actually checks (currency == "USD", the source
+                # currency) -- keeps this deterministic without relying
+                # on row/insertion order.
+                Transaction.exchange_leg == ExchangeLegType.debit,
             )
         )
         exchange_audit = await session.scalar(
@@ -318,6 +332,74 @@ class _FakeSyncRedis:
     def setex(self, key, ttl, value):
         self.saved[key] = {"ttl": ttl, "value": value}
 
+    def get(self, key):
+        cached = self.saved.get(key)
+        return cached["value"] if cached is not None else None
+
+
+@pytest.mark.anyio
+async def test_forecast_serves_cached_artifact_when_available(
+    client,
+    monkeypatch,
+):
+    fake_sync_redis = _FakeSyncRedis()
+    cached_payload = {
+        "base_currency": "USD",
+        "target_currency": "LBP",
+        "days": 7,
+        "model": "Prophet",
+        "mae": 12.5,
+        "model_status": "accepted",
+        "predictions": [
+            {
+                "date": "2026-07-18",
+                "predicted_rate": "89501.2500",
+            },
+            {
+                "date": "2026-07-19",
+                "predicted_rate": "89502.7500",
+            },
+        ],
+    }
+    fake_sync_redis.setex(
+        exchange_tasks.EXCHANGE_FORECAST_CACHE_KEY,
+        7 * 24 * 60 * 60,
+        json.dumps(cached_payload),
+    )
+
+    monkeypatch.setattr(
+        redis.Redis,
+        "from_url",
+        lambda *args, **kwargs: fake_sync_redis,
+    )
+
+    def fail_if_forecast_called(*args, **kwargs):
+        raise AssertionError(
+            "train_and_forecast_usd_lbp should not be called"
+        )
+
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.exchange.train_and_forecast_usd_lbp",
+        fail_if_forecast_called,
+    )
+
+    response = await client.get(
+        "/api/v1/exchange/forecast"
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["model"] == "Prophet"
+    assert body["predictions"] == [
+        {
+            "date": "2026-07-18",
+            "predicted_rate": "89501.2500",
+        },
+        {
+            "date": "2026-07-19",
+            "predicted_rate": "89502.7500",
+        },
+    ]
 
 @pytest.mark.anyio
 async def test_retrain_exchange_forecast_persists_model_metrics(monkeypatch):
@@ -326,13 +408,24 @@ async def test_retrain_exchange_forecast_persists_model_metrics(monkeypatch):
     async def fake_fetch_exchange_rates():
         return {("USD", "LBP"): Decimal("90000.00")}
 
-    monkeypatch.setattr(exchange_tasks, "fetch_exchange_rates", fake_fetch_exchange_rates)
-    monkeypatch.setattr(redis.Redis, "from_url", lambda *args, **kwargs: fake_sync_redis)
+    monkeypatch.setattr(
+        exchange_tasks,
+        "fetch_exchange_rates",
+        fake_fetch_exchange_rates,
+    )
+
+    monkeypatch.setattr(
+        redis.Redis,
+        "from_url",
+        lambda *args, **kwargs: fake_sync_redis,
+    )
 
     async with AsyncSessionLocal() as session:
         before_count = (
             await session.execute(
-                select(ModelMetrics).where(ModelMetrics.model_name == "LightGBM")
+                select(ModelMetrics).where(
+                    ModelMetrics.model_name == "LightGBM"
+                )
             )
         ).scalars().all()
 
@@ -342,7 +435,9 @@ async def test_retrain_exchange_forecast_persists_model_metrics(monkeypatch):
         metrics_rows = (
             await session.execute(
                 select(ModelMetrics)
-                .where(ModelMetrics.model_name == "LightGBM")
+                .where(
+                    ModelMetrics.model_name == "LightGBM"
+                )
                 .order_by(ModelMetrics.id.asc())
             )
         ).scalars().all()
@@ -351,3 +446,222 @@ async def test_retrain_exchange_forecast_persists_model_metrics(monkeypatch):
     assert result["mae"] >= 0
     assert len(metrics_rows) == len(before_count) + 1
     assert metrics_rows[-1].mae == result["mae"]
+
+
+@pytest.mark.anyio
+async def test_execute_exchange_creates_both_debit_and_credit_ledger_legs(client, monkeypatch):
+    """
+    Ledger fix (Issue 1 of 3, DEVATTECH-92 prerequisite): execute_exchange
+    must write TWO Transaction rows -- a debit leg in the source currency
+    and a credit leg in the target currency -- distinguished by the new
+    Transaction.exchange_leg column, so balance reconstruction can
+    identify both legs directly from transaction data.
+
+    Does not duplicate test_execute_exchange_creates_transaction_and_audit_rows
+    above (already covers the audit-log row and overall wallet balances) --
+    this test is specifically about the new two-row ledger structure and
+    the unchanged response contract.
+
+    Atomic-failure coverage (both legs absent on a rejected exchange) is
+    already provided by
+    test_execute_exchange_rejects_insufficient_balance_without_writing_rows
+    above, unmodified -- its query filters only on sender_id/category=="Exchange",
+    with no dependence on exchange_leg, so it already catches either leg
+    if one were incorrectly written on a failed request.
+    """
+    tokens = await _register_user(client, "exchange-two-legs")
+    user, wallets = await _get_user_and_wallets(tokens["email"])
+    await _top_up(client, tokens["access_token"], wallets[WalletCurrency.USD].id, "120.00")
+
+    async def fake_rates():
+        return {("USD", "LBP"): Decimal("89500.00")}
+
+    monkeypatch.setattr("app.api.v1.endpoints.exchange.is_market_open", lambda: True)
+    monkeypatch.setattr("app.api.v1.endpoints.exchange.get_rates_from_cache_or_provider", fake_rates)
+
+    response = await client.post(
+        "/api/v1/exchange/execute",
+        headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        json={
+            "from_currency": "USD",
+            "to_currency": "LBP",
+            "amount": "10.00",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+
+    # --- unchanged API response contract (ExchangeExecutionResponse) ---
+    assert set(body.keys()) == {
+        "exchange_id", "status", "from_currency", "to_currency",
+        "amount", "rate", "converted_amount", "message",
+    }
+    assert body["status"] == "executed"
+    assert body["from_currency"] == "USD"
+    assert body["to_currency"] == "LBP"
+    assert Decimal(body["amount"]) == Decimal("10.00")
+    assert Decimal(body["converted_amount"]) == Decimal("895000.00")
+
+    # --- both ledger legs exist ---
+    async with AsyncSessionLocal() as session:
+        exchange_rows = (
+            await session.execute(
+                select(Transaction).where(
+                    Transaction.sender_id == user.id,
+                    Transaction.category == "Exchange",
+                )
+            )
+        ).scalars().all()
+
+    assert len(exchange_rows) == 2
+
+    # Proves the column round-trips as the REAL enum class, not merely a
+    # string that happens to match -- `is` comparison against the actual
+    # enum member (Python enum members are singletons), stronger than
+    # `.value == "debit"`.
+    for tx in exchange_rows:
+        assert isinstance(tx.exchange_leg, ExchangeLegType)
+
+    debit_rows = [tx for tx in exchange_rows if tx.exchange_leg is ExchangeLegType.debit]
+    credit_rows = [tx for tx in exchange_rows if tx.exchange_leg is ExchangeLegType.credit]
+
+    assert len(debit_rows) == 1
+    assert len(credit_rows) == 1
+
+    debit_leg = debit_rows[0]
+    credit_leg = credit_rows[0]
+
+    # --- debit leg: source currency, source amount ---
+    assert debit_leg.currency.value == "USD"
+    assert debit_leg.amount == Decimal("10.0000")
+    assert debit_leg.status.value == "completed"
+    assert debit_leg.sender_id == user.id
+    assert debit_leg.receiver_id == user.id
+
+    # --- credit leg: target currency, converted amount ---
+    assert credit_leg.currency.value == "LBP"
+    assert credit_leg.amount == Decimal("895000.0000")
+    assert credit_leg.status.value == "completed"
+    assert credit_leg.sender_id == user.id
+    assert credit_leg.receiver_id == user.id
+@pytest.mark.anyio
+async def test_retrain_exchange_forecast_rolls_back_worse_model(monkeypatch):
+
+    fake_sync_redis = _FakeSyncRedis()
+
+    monkeypatch.setattr(
+        redis.Redis,
+        "from_url",
+        lambda *args, **kwargs: fake_sync_redis,
+    )
+
+    async def fake_fetch_exchange_rates():
+        return {
+            ("USD", "LBP"): Decimal("90000.00")
+        }
+
+    async def fake_previous_mae():
+        return 100.0
+
+    def fake_train_models(_):
+        return {
+            "winner": "LightGBM",
+            "results": [
+                {
+                    "model": "LightGBM",
+                    "mae": 150.0,
+                }
+            ],
+        }
+
+    rollback_called = False
+
+    def fake_rollback():
+        nonlocal rollback_called
+        rollback_called = True
+
+    monkeypatch.setattr(
+        exchange_tasks,
+        "fetch_exchange_rates",
+        fake_fetch_exchange_rates,
+    )
+
+    monkeypatch.setattr(
+        exchange_tasks,
+        "get_previous_mae",
+        fake_previous_mae,
+    )
+
+    monkeypatch.setattr(
+        exchange_tasks,
+        "train_and_evaluate_models",
+        fake_train_models,
+    )
+
+    monkeypatch.setattr(
+        exchange_tasks,
+        "rollback_model",
+        fake_rollback,
+    )
+
+    monkeypatch.setattr(
+        exchange_tasks,
+        "backup_current_model",
+        lambda: None,
+    )
+
+    result = await exchange_tasks.retrain_exchange_forecast_model()
+
+    assert result["status"] == "ok"
+    assert result["mae"] == 150.0
+    assert rollback_called is True
+
+@pytest.mark.anyio
+async def test_exchange_rates_history_returns_predicted_rate(client):
+
+    async with AsyncSessionLocal() as session:
+
+        existing = await session.scalar(
+            select(ExchangeRate).where(
+                ExchangeRate.base_currency == "USD",
+                ExchangeRate.target_currency == "LBP",
+            )
+        )
+
+        if existing:
+            existing.rate = Decimal("90000.00")
+            existing.provider = "test-provider"
+            existing.last_updated_at = (
+                datetime.now(timezone.utc)
+                - timedelta(days=1)
+            )
+
+        else:
+            session.add(
+                ExchangeRate(
+                    base_currency="USD",
+                    target_currency="LBP",
+                    rate=Decimal("90000.00"),
+                    provider="test-provider",
+                    last_updated_at=(
+                        datetime.now(timezone.utc)
+                        - timedelta(days=1)
+                    ),
+                )
+            )
+
+        await session.commit()
+
+    response = await client.get(
+        "/api/v1/exchange/rates/history?days=30"
+    )
+
+    assert response.status_code == 200, response.text
+
+    body = response.json()
+
+    assert len(body) >= 1
+    assert "date" in body[0]
+    assert "rate" in body[0]
+    assert body[-1]["rate"] == 90000.0

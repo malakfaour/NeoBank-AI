@@ -2,7 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
-from app.models.kyc_record import KYCRecordStatus
+from app.models.kyc_record import KYCDocumentType, KYCRecordStatus
 from app.models.user import KYCStatus
 
 
@@ -11,6 +11,7 @@ class AdminKYCQueueItem(BaseModel):
     user_id: int
     full_name: str
     status: KYCRecordStatus
+    created_at: datetime
     match_score: float | None
     liveness_score: float | None
     rejection_reason: str | None
@@ -18,10 +19,21 @@ class AdminKYCQueueItem(BaseModel):
     reviewed_by: int | None
     selfie_url: str | None
     id_photo_url: str | None
+    document_type: KYCDocumentType | None
     selfie_presigned_url: str | None
     id_photo_presigned_url: str | None
+    back_id_photo_presigned_url: str | None
+    profile_data: dict[str, object]
 
     model_config = ConfigDict(use_enum_values=True)
+
+
+class AdminKYCQueueResponse(BaseModel):
+    items: list[AdminKYCQueueItem]
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
 
 
 class AdminKYCDecisionResponse(BaseModel):

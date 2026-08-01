@@ -14,7 +14,14 @@ export default function OTPPage() {
   const [resent, setResent] = useState(false);
   const inputs = useRef<(HTMLInputElement | null)[]>([]);
 
-  useEffect(() => { inputs.current[0]?.focus(); }, []);
+  useEffect(() => {
+  inputs.current[0]?.focus();
+  // Auto-send OTP on page load
+  const user_id = String(useAuthStore.getState().user?.id ?? "");
+  if (user_id) {
+    api.post("/auth/send-otp", { user_id }).catch(() => {});
+  }
+}, []);
 
   const handleChange = (i: number, val: string) => {
     if (!/^\d*$/.test(val)) return;
@@ -45,7 +52,7 @@ export default function OTPPage() {
     setLoading(true);
     setError("");
     try {
-     const user_id = useAuthStore.getState().user?.id;
+     const user_id = String(useAuthStore.getState().user?.id ?? "");
 await api.post("/auth/verify-otp", { user_id, code });
       router.push("/kyc");
     } catch (err: unknown) {
@@ -58,7 +65,7 @@ await api.post("/auth/verify-otp", { user_id, code });
 
   const handleResend = async () => {
     try {
-     const user_id = useAuthStore.getState().user?.id;
+     const user_id = String(useAuthStore.getState().user?.id ?? "");
 await api.post("/auth/send-otp", { user_id });
       setResent(true);
       setDigits(Array(6).fill(""));
@@ -72,14 +79,12 @@ await api.post("/auth/send-otp", { user_id });
   return (
     <div style={{ minHeight: "100vh", backgroundColor: "#F5F5F5", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "20px" }}>
       <div style={{ marginBottom: "32px", textAlign: "center" }}>
-        <div style={{ fontSize: "32px", fontWeight: "800", color: "#000", letterSpacing: "-1px" }}>
-          neo<span style={{ color: "#00C853" }}>.</span>
-        </div>
+      <img src="/logo.svg" alt="NeoBank Lebanon" style={{ width: "160px", height: "auto" }} />
       </div>
 
       <div style={{ width: "100%", maxWidth: "380px", backgroundColor: "#fff", borderRadius: "24px", padding: "28px", boxShadow: "0 2px 20px rgba(0,0,0,0.08)" }}>
         <h2 style={{ fontSize: "22px", fontWeight: "700", color: "#000", marginBottom: "4px" }}>Verify your number</h2>
-        <p style={{ color: "#999", fontSize: "14px", marginBottom: "24px" }}>Enter the 6-digit code sent to your phone.</p>
+        <p style={{ color: "#999", fontSize: "14px", marginBottom: "24px" }}>Enter the 6-digit code sent to your email.</p>
 
         <div style={{ display: "flex", gap: "8px", justifyContent: "space-between", marginBottom: "24px" }} onPaste={handlePaste}>
           {digits.map((d, i) => (

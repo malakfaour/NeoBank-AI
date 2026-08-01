@@ -1,94 +1,60 @@
-﻿"use client";
+"use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import api from "@/lib/axios";
+import AuthCard from "@/components/auth/AuthCard";
+import PasswordInput from "@/components/auth/PasswordInput";
 import { useAuthStore } from "@/store/authStore";
+import { getPostAuthDestination } from "@/lib/postAuthNavigation";
+import { usePreferences } from "@/components/providers/AppPreferences";
 
 export default function LoginPage() {
   const router = useRouter();
-  const { setTokens } = useAuthStore();
-  const [form, setForm] = useState({ email: "", password: "" });
-  const [errors, setErrors] = useState<{ email?: string; password?: string; general?: string }>({});
+  const { locale } = usePreferences();
+  const tr = (en: string, ar: string) => locale === "ar" ? ar : en;
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const validate = () => {
-    const e: typeof errors = {};
-    if (!form.email.trim()) e.email = "Email is required.";
-    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) e.email = "Enter a valid email address.";
-    if (!form.password) e.password = "Password is required.";
-    else if (form.password.length < 6) e.password = "Password must be at least 6 characters.";
-    return e;
-  };
-
-  const handleSubmit = async () => {
-    const e = validate();
-    if (Object.keys(e).length) { setErrors(e); return; }
-    setErrors({});
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    if (!email.trim() || !password) return setError(tr("Email and password are required.", "البريد الإلكتروني وكلمة المرور مطلوبان."));
     setLoading(true);
+    setError("");
     try {
-      const res = await api.post("/auth/login", { email: form.email.trim(), password: form.password });
-      setTokens(res.data.access_token, res.data.refresh_token);
-      router.push("/dashboard");
-    } catch (err: unknown) {
-      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setErrors({ general: typeof detail === "string" ? detail : "Invalid email or password." });
-    } finally {
-      setLoading(false);
-    }
-  };
+      const response = await api.post("/auth/login", { email: email.trim().toLowerCase(), password });
+      const store = useAuthStore.getState();
+      store.setTokens(response.data.access_token, response.data.refresh_token);
+      store.setSessionState(response.data.user, response.data.passcode_is_set);
+      store.unlock();
+      router.replace(await getPostAuthDestination());
+    } catch (requestError: unknown) {
+      const status = (requestError as { response?: { status?: number } }).response?.status;
+      if (status === 403) {
+        sessionStorage.setItem("verification_email", email.trim().toLowerCase());
+        router.replace("/verify-registration-otp");
+      } else {
+        setError(tr("Invalid email or password.", "البريد الإلكتروني أو كلمة المرور غير صحيحة."));
+      }
+    } finally { setLoading(false); }
+  }
 
   return (
-    <div style={{ minHeight: "100vh", backgroundColor: "#F5F5F5", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "20px" }}>
-      <div style={{ marginBottom: "32px", textAlign: "center" }}>
-        <div style={{ fontSize: "32px", fontWeight: "800", color: "#000", letterSpacing: "-1px" }}>
-          neo<span style={{ color: "#00C853" }}>.</span>
-        </div>
-        <div style={{ color: "#999", fontSize: "13px", marginTop: "4px" }}>by NeoBank Lebanon</div>
-      </div>
-
-      <div style={{ width: "100%", maxWidth: "380px", backgroundColor: "#fff", borderRadius: "24px", padding: "28px", boxShadow: "0 2px 20px rgba(0,0,0,0.08)" }}>
-        <h2 style={{ fontSize: "22px", fontWeight: "700", color: "#000", marginBottom: "4px" }}>Welcome back</h2>
-
-        {errors.general && (
-          <div style={{ backgroundColor: "#FEF2F2", border: "1px solid #FECACA", borderRadius: "12px", padding: "12px 16px", color: "#DC2626", fontSize: "13px", marginBottom: "16px" }}>
-            {errors.general}
-          </div>
-        )}
-
-        <div style={{ marginBottom: "16px" }}>
-          <label style={{ display: "block", fontSize: "13px", fontWeight: "600", color: "#333", marginBottom: "8px" }}>Email</label>
-          <input
-            type="email"
-            placeholder="you@example.com"
-            value={form.email}
-            onChange={(e) => setForm({ ...form, email: e.target.value })}
-            style={{ width: "100%", border: `1.5px solid ${errors.email ? "#EF4444" : "#E5E7EB"}`, borderRadius: "14px", padding: "12px 16px", fontSize: "14px", color: "#000", outline: "none", boxSizing: "border-box" }}
-          />
-          {errors.email && <p style={{ color: "#EF4444", fontSize: "12px", marginTop: "6px" }}>{errors.email}</p>}
-        </div>
-
-        <div style={{ marginBottom: "24px" }}>
-          <label style={{ display: "block", fontSize: "13px", fontWeight: "600", color: "#333", marginBottom: "8px" }}>Password</label>
-          <input
-            type="password"
-            placeholder="••••••"
-            value={form.password}
-            onChange={(e) => setForm({ ...form, password: e.target.value })}
-            onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
-            style={{ width: "100%", border: `1.5px solid ${errors.password ? "#EF4444" : "#E5E7EB"}`, borderRadius: "14px", padding: "12px 16px", fontSize: "14px", color: "#000", outline: "none", boxSizing: "border-box" }}
-          />
-          {errors.password && <p style={{ color: "#EF4444", fontSize: "12px", marginTop: "6px" }}>{errors.password}</p>}
-        </div>
-
-        <button
-          onClick={handleSubmit}
-          disabled={loading}
-          style={{ width: "100%", backgroundColor: loading ? "#86EFAC" : "#00C853", color: "#fff", fontWeight: "700", fontSize: "15px", border: "none", borderRadius: "14px", padding: "14px", cursor: loading ? "not-allowed" : "pointer" }}
-        >
-          {loading ? "Signing in..." : "Sign in"}
-        </button>
-      </div>
-    </div>
+    <AuthCard title={tr("Welcome back", "أهلاً بعودتك")} subtitle={tr("Sign in with your account password", "سجّل الدخول باستخدام كلمة مرور حسابك") }>
+      <form onSubmit={submit} noValidate>
+        {error && <p role="alert" style={{ color: "#B91C1C", background: "#FEF2F2", padding: 12, borderRadius: 12 }}>{error}</p>}
+        <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#333", marginBottom: 16 }}>
+          {tr("Email", "البريد الإلكتروني")}
+          <input type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} style={{ display: "block", width: "100%", boxSizing: "border-box", marginTop: 8, border: "1.5px solid #E5E7EB", borderRadius: 14, padding: "12px 16px", outline: 0 }} />
+        </label>
+        <PasswordInput label={tr("Password", "كلمة المرور")} value={password} onChange={setPassword} autoComplete="current-password" />
+        <div style={{ textAlign: locale === "ar" ? "left" : "right", margin: "-6px 0 18px" }}><Link href="/forgot-password" style={{ color: "#00A844", fontSize: 13 }}>{tr("Forgot password?", "نسيت كلمة المرور؟")}</Link></div>
+        <button type="submit" disabled={loading} style={{ width: "100%", background: "#111", color: "#00C853", border: 0, borderRadius: 14, padding: 15, fontWeight: 700, cursor: loading ? "not-allowed" : "pointer" }}>{loading ? tr("Signing in...", "جارٍ تسجيل الدخول...") : tr("LOGIN", "تسجيل الدخول")}</button>
+      </form>
+      <p style={{ textAlign: "center", color: "#777", fontSize: 13 }}>{tr("Don't have an account?", "ليس لديك حساب؟")} <Link href="/register" style={{ color: "#00A844" }}>{tr("Create account", "إنشاء حساب")}</Link></p>
+    </AuthCard>
   );
 }

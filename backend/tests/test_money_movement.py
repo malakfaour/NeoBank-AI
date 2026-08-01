@@ -56,14 +56,24 @@ async def _get_wallet_balance(user_id: int, currency: WalletCurrency) -> Decimal
         return wallet.balance
 
 
-async def _top_up_wallet(client, access_token: str, wallet_id: int, amount: str) -> None:
+async def _top_up_wallet(
+    client, access_token: str, wallet_id: int, amount: str, idempotency_key: str | None = None
+) -> None:
+    # DEVATTECH-125: X-Idempotency-Key is now required on this endpoint.
+    # Defaults to a fresh key per call so every EXISTING call site's
+    # intent (a brand-new, non-retried top-up) is preserved unchanged --
+    # only tests that specifically exercise retry/idempotency behavior
+    # pass an explicit, reused key.
     response = await client.post(
         "/api/v1/accounts/top-up",
-        headers={"Authorization": f"Bearer {access_token}"},
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "X-Idempotency-Key": idempotency_key or uuid4().hex,
+        },
         json={
             "wallet_id": wallet_id,
             "amount": amount,
-            "card_token": "tok_visa_test_123",
+            "payment_method_id": "pm_card_visa_test_123",
         },
     )
     assert response.status_code == 200, response.text
@@ -277,19 +287,27 @@ async def test_send_money_to_nonexistent_recipient_keeps_balance_unchanged(clien
 # --- NBL-411: card top-up ---
 
 
-async def _top_up_wallet_raw(client, access_token: str, wallet_id: int, amount: str):
+async def _top_up_wallet_raw(
+    client, access_token: str, wallet_id: int, amount: str, idempotency_key: str | None = None
+):
     """
     Like _top_up_wallet above, but returns the raw response instead of
     asserting 200 -- needed here since these tests exercise non-200 paths
     (gateway decline, daily limit) that _top_up_wallet's assert would mask.
+
+    DEVATTECH-125: same default-fresh-key-per-call convention as
+    _top_up_wallet above.
     """
     return await client.post(
         "/api/v1/accounts/top-up",
-        headers={"Authorization": f"Bearer {access_token}"},
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "X-Idempotency-Key": idempotency_key or uuid4().hex,
+        },
         json={
             "wallet_id": wallet_id,
             "amount": amount,
-            "card_token": "tok_visa_test_123",
+            "payment_method_id": "pm_card_visa_test_123",
         },
     )
 
@@ -297,9 +315,9 @@ async def _top_up_wallet_raw(client, access_token: str, wallet_id: int, amount: 
 @pytest.mark.anyio
 async def test_top_up_success_credits_wallet_balance(client):
     """
-    Happy path (NBL-411): a gateway approval credits the wallet by the
-    top-up amount. The default autouse mock_payment_gateway fixture
-    (conftest.py) already returns a 200 "approved" response, so no
+    Happy path (NBL-411): a successful Stripe charge credits the wallet by
+    the top-up amount. The default autouse mock_payment_gateway fixture
+    (conftest.py) already fakes a successful charge_card() call, so no
     per-test monkeypatch is needed here.
     """
     tokens = await _register_user(client, "topup-success")
@@ -318,32 +336,18 @@ async def test_top_up_success_credits_wallet_balance(client):
 @pytest.mark.anyio
 async def test_top_up_declined_by_gateway_does_not_credit_wallet(client, monkeypatch):
     """
-    NBL-411: a 402 from the gateway must surface as a 402 with the
-    card_declined shape and must NOT touch the wallet balance.
+    DEVATTECH-131 (was NBL-411, updated for the real Stripe integration):
+    a declined card must surface as a 402 with the card_declined shape
+    and must NOT touch the wallet balance.
     """
+    from app.services.stripe_gateway import CardDeclinedError
 
-    class _DeclinedGatewayClient:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            return False
-
-        async def post(self, url, json=None):
-            class _DeclinedResponse:
-                status_code = 402
-
-                def json(self):
-                    return {"message": "Insufficient funds on card"}
-
-            return _DeclinedResponse()
+    async def _declined_charge_card(payment_method_id, amount, currency, idempotency_key):
+        raise CardDeclinedError("Insufficient funds on card")
 
     monkeypatch.setattr(
-        "app.api.v1.endpoints.accounts.httpx.AsyncClient",
-        _DeclinedGatewayClient,
+        "app.api.v1.endpoints.accounts.charge_card",
+        _declined_charge_card,
     )
 
     tokens = await _register_user(client, "topup-declined")
@@ -356,6 +360,76 @@ async def test_top_up_declined_by_gateway_does_not_credit_wallet(client, monkeyp
         "error": "card_declined",
         "gateway_message": "Insufficient funds on card",
     }
+    assert await _get_wallet_balance(user.id, WalletCurrency.USD) == Decimal("0.0000")
+
+
+@pytest.mark.anyio
+async def test_top_up_rejects_usdt_wallet(client):
+    """
+    DEVATTECH-131: card top-up only supports USD/LBP -- Stripe charges a
+    card and settles in fiat, there's no path from that to crediting a
+    USDT wallet directly. Must reject before ever calling charge_card().
+    """
+    tokens = await _register_user(client, "topup-usdt")
+    user, usdt_wallet = await _get_user_and_wallet(tokens["email"], WalletCurrency.USDT)
+
+    response = await _top_up_wallet_raw(client, tokens["access_token"], usdt_wallet.id, "10.00")
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"]["error"] == "unsupported_topup_currency"
+    assert await _get_wallet_balance(user.id, WalletCurrency.USDT) == Decimal("0.0000")
+
+
+@pytest.mark.anyio
+async def test_top_up_lbp_wallet_succeeds(client):
+    """
+    DEVATTECH-131: LBP is in scope alongside USD (confirmed decision --
+    see stripe_gateway.py's SUPPORTED_CURRENCIES).
+
+    Amount is deliberately small (500 LBP, not a realistic top-up size):
+    TOPUP_DAILY_LIMIT (app/core/redis.py) is a flat Decimal("1000")
+    applied to every currency with no conversion -- pre-existing, not
+    introduced by this ticket, and out of scope to fix here. In practice
+    this caps LBP top-ups at ~1000 LBP/day (a fraction of a cent), which
+    makes real LBP top-up unusable. Flagged separately as a follow-up;
+    this test only needs an amount under that cap to prove the
+    USD-vs-LBP currency-conversion path itself (_to_minor_units) works.
+    """
+    tokens = await _register_user(client, "topup-lbp")
+    user, lbp_wallet = await _get_user_and_wallet(tokens["email"], WalletCurrency.LBP)
+
+    response = await _top_up_wallet_raw(client, tokens["access_token"], lbp_wallet.id, "500.00")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "success"
+    assert Decimal(body["new_balance"]) == Decimal("500.0000")
+    assert await _get_wallet_balance(user.id, WalletCurrency.LBP) == Decimal("500.0000")
+
+
+@pytest.mark.anyio
+async def test_top_up_gateway_unavailable_returns_502_without_crediting(client, monkeypatch):
+    """
+    DEVATTECH-131: a non-decline Stripe failure (network, API outage,
+    misconfiguration) must surface as 502, matching the old fake
+    gateway's 5xx contract, and must not touch the wallet balance.
+    """
+    from app.services.stripe_gateway import GatewayUnavailableError
+
+    async def _unavailable_charge_card(payment_method_id, amount, currency, idempotency_key):
+        raise GatewayUnavailableError("stripe api outage")
+
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.accounts.charge_card",
+        _unavailable_charge_card,
+    )
+
+    tokens = await _register_user(client, "topup-unavailable")
+    user, wallet = await _get_user_and_wallet(tokens["email"], WalletCurrency.USD)
+
+    response = await _top_up_wallet_raw(client, tokens["access_token"], wallet.id, "20.00")
+
+    assert response.status_code == 502, response.text
     assert await _get_wallet_balance(user.id, WalletCurrency.USD) == Decimal("0.0000")
 
 
@@ -413,3 +487,238 @@ async def test_top_up_success_creates_transaction_row(client):
     assert Decimal(tx.amount) == Decimal("42.00")
     assert tx.status.value == "completed"
     assert tx.currency.value == "USD"
+
+
+@pytest.mark.anyio
+async def test_top_up_is_idempotent(client, monkeypatch):
+    """
+    DEVATTECH-125: same X-Idempotency-Key retried against /accounts/top-up
+    must return the identical cached response, credit the wallet exactly
+    once, and must NOT call the payment gateway a second time -- the
+    cache-hit check happens before the gateway call, per approved scope.
+    """
+    call_count = {"count": 0}
+
+    async def _counting_charge_card(payment_method_id, amount, currency, idempotency_key):
+        call_count["count"] += 1
+        return "pi_test_idempotent_123"
+
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.accounts.charge_card",
+        _counting_charge_card,
+    )
+
+    tokens = await _register_user(client, "topup-idem")
+    user, wallet = await _get_user_and_wallet(tokens["email"], WalletCurrency.USD)
+
+    idempotency_key = uuid4().hex
+    headers = {
+        "Authorization": f"Bearer {tokens['access_token']}",
+        "X-Idempotency-Key": idempotency_key,
+    }
+    request_body = {
+        "wallet_id": wallet.id,
+        "amount": "20.00",
+        "payment_method_id": "pm_card_visa_test_123",
+    }
+
+    first = await client.post("/api/v1/accounts/top-up", headers=headers, json=request_body)
+    second = await client.post("/api/v1/accounts/top-up", headers=headers, json=request_body)
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert second.json() == first.json()
+    assert await _get_wallet_balance(user.id, WalletCurrency.USD) == Decimal("20.0000")
+    assert call_count["count"] == 1
+
+
+@pytest.mark.anyio
+async def test_shared_idempotency_key_does_not_collide_across_endpoints(client, stub_fraud_scoring):
+    """
+    DEVATTECH-125 regression: the SAME raw X-Idempotency-Key value, reused
+    by the same user across /accounts/top-up and /transactions/send, must
+    NOT collide. hash_idempotency_key(user_id, raw_key) ignores its
+    `endpoint` parameter when raw_key is passed directly (see
+    app/core/redis.py, not modified by this ticket) -- the "topup:"
+    prefix applied only at the top-up call site is what prevents this
+    collision, without touching the shared Redis helper. Both calls must
+    succeed independently, each producing its own distinct Transaction
+    row with a distinct idempotency_key.
+    """
+    sender_tokens = await _register_user(client, "collision-sender")
+    receiver_tokens = await _register_user(client, "collision-receiver")
+
+    sender_user, sender_wallet = await _get_user_and_wallet(
+        sender_tokens["email"], WalletCurrency.USD
+    )
+    receiver_user, _ = await _get_user_and_wallet(
+        receiver_tokens["email"], WalletCurrency.USD
+    )
+
+    shared_key = uuid4().hex
+
+    top_up_response = await client.post(
+        "/api/v1/accounts/top-up",
+        headers={
+            "Authorization": f"Bearer {sender_tokens['access_token']}",
+            "X-Idempotency-Key": shared_key,
+        },
+        json={
+            "wallet_id": sender_wallet.id,
+            "amount": "80.00",
+            "payment_method_id": "pm_card_visa_test_123",
+        },
+    )
+    assert top_up_response.status_code == 200, top_up_response.text
+
+    send_response = await client.post(
+        "/api/v1/transactions/send",
+        headers={
+            "Authorization": f"Bearer {sender_tokens['access_token']}",
+            "X-Idempotency-Key": shared_key,
+        },
+        json={
+            "receiver_id": str(receiver_user.id),
+            "amount": "30.00",
+            "currency": "USD",
+        },
+    )
+    assert send_response.status_code == 200, send_response.text
+
+    # Both operations must have actually happened -- proving neither call
+    # was silently short-circuited as a false "duplicate" of the other.
+    assert await _get_wallet_balance(sender_user.id, WalletCurrency.USD) == Decimal("50.0000")
+    assert await _get_wallet_balance(receiver_user.id, WalletCurrency.USD) == Decimal("30.0000")
+
+    async with AsyncSessionLocal() as session:
+        topup_tx = (
+            await session.execute(
+                select(Transaction).where(
+                    Transaction.sender_id == sender_user.id,
+                    Transaction.receiver_id == sender_user.id,
+                    Transaction.category == "TopUp",
+                )
+            )
+        ).scalar_one()
+        send_tx = (
+            await session.execute(
+                select(Transaction).where(
+                    Transaction.id == send_response.json()["transaction_id"]
+                )
+            )
+        ).scalar_one()
+
+    assert topup_tx.idempotency_key != send_tx.idempotency_key
+    assert stub_fraud_scoring == [send_tx.id]
+
+# --- 3D Secure: requires_action -> confirm ---
+
+
+@pytest.mark.anyio
+async def test_top_up_requires_action_does_not_credit_wallet_until_confirmed(client, monkeypatch):
+    """
+    When Stripe requires a 3DS challenge, /accounts/top-up must return
+    CardTopUpRequiresActionResponse WITHOUT touching the wallet balance --
+    the balance should only move after the frontend runs the challenge
+    and POSTs to /accounts/top-up/confirm.
+    """
+    tokens = await _register_user(client, "topup3ds")
+    user, wallet = await _get_user_and_wallet(tokens["email"], WalletCurrency.USD)
+    balance_before = await _get_wallet_balance(user.id, WalletCurrency.USD)
+
+    async def _requires_action_charge(payment_method_id, amount, currency, idempotency_key):
+        from app.services.stripe_gateway import RequiresActionError
+        raise RequiresActionError("pi_3ds_test_1", "pi_3ds_test_1_secret_abc")
+
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.accounts.charge_card",
+        _requires_action_charge,
+    )
+
+    idem_key = uuid4().hex
+    response = await client.post(
+        "/api/v1/accounts/top-up",
+        headers={
+            "Authorization": f"Bearer {tokens['access_token']}",
+            "X-Idempotency-Key": idem_key,
+        },
+        json={
+            "wallet_id": wallet.id,
+            "amount": "20.00",
+            "payment_method_id": "pm_card_threeDSecure2Required",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "requires_action"
+    assert body["payment_intent_id"] == "pi_3ds_test_1"
+    assert body["client_secret"] == "pi_3ds_test_1_secret_abc"
+
+    balance_after_requires_action = await _get_wallet_balance(user.id, WalletCurrency.USD)
+    assert balance_after_requires_action == balance_before
+
+    # Now the frontend has (hypothetically) run stripe.confirmCardPayment
+    # and calls the confirm endpoint. The default autouse
+    # mock_payment_gateway fixture fakes get_confirmed_charge as a
+    # success returning the same payment_intent_id.
+    confirm_response = await client.post(
+        "/api/v1/accounts/top-up/confirm",
+        headers={
+            "Authorization": f"Bearer {tokens['access_token']}",
+            "X-Idempotency-Key": idem_key,
+        },
+        json={
+            "wallet_id": wallet.id,
+            "amount": "20.00",
+            "payment_intent_id": "pi_3ds_test_1",
+        },
+    )
+
+    assert confirm_response.status_code == 200, confirm_response.text
+    confirm_body = confirm_response.json()
+    assert confirm_body["status"] == "success"
+    assert Decimal(confirm_body["new_balance"]) == balance_before + Decimal("20.00")
+
+    balance_after_confirm = await _get_wallet_balance(user.id, WalletCurrency.USD)
+    assert balance_after_confirm == balance_before + Decimal("20.00")
+
+
+@pytest.mark.anyio
+async def test_top_up_confirm_declined_challenge_does_not_credit_wallet(client, monkeypatch):
+    """
+    If the 3DS challenge itself gets declined, confirm_top_up must
+    surface a 402 (matching the direct-decline contract) and leave the
+    wallet untouched.
+    """
+    tokens = await _register_user(client, "topup3dsdeclined")
+    user, wallet = await _get_user_and_wallet(tokens["email"], WalletCurrency.USD)
+    balance_before = await _get_wallet_balance(user.id, WalletCurrency.USD)
+
+    async def _declined_confirm(payment_intent_id, expected_amount, expected_currency):
+        from app.services.stripe_gateway import CardDeclinedError
+        raise CardDeclinedError("Card authentication failed")
+
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.accounts.get_confirmed_charge",
+        _declined_confirm,
+    )
+
+    response = await client.post(
+        "/api/v1/accounts/top-up/confirm",
+        headers={
+            "Authorization": f"Bearer {tokens['access_token']}",
+            "X-Idempotency-Key": uuid4().hex,
+        },
+        json={
+            "wallet_id": wallet.id,
+            "amount": "20.00",
+            "payment_intent_id": "pi_3ds_test_declined",
+        },
+    )
+
+    assert response.status_code == 402
+    assert response.json()["detail"]["error"] == "card_declined"
+
+    balance_after = await _get_wallet_balance(user.id, WalletCurrency.USD)
+    assert balance_after == balance_before

@@ -1,0 +1,66 @@
+from __future__ import annotations
+
+import os
+
+
+def liveness_threshold() -> float:
+    """Read the deployed threshold directly from the process environment."""
+    return float(os.environ.get("KYC_LIVENESS_THRESHOLD", "0.7"))
+
+
+def _normalize_orientation(image_path: str) -> None:
+    """Apply EXIF rotation in-place so sideways/upside-down phone photos are upright.
+
+    Best-effort: if the file can't be read as an image here, leave it untouched and
+    let DeepFace's own detection raise the real error.
+    """
+    from PIL import Image, ImageOps, UnidentifiedImageError
+
+    try:
+        with Image.open(image_path) as image:
+            oriented = ImageOps.exif_transpose(image)
+            oriented.convert("RGB").save(image_path)
+    except (UnidentifiedImageError, OSError):
+        pass
+
+
+def _extract_faces(image_path: str) -> list[dict]:
+    """Call the external DeepFace anti-spoofing boundary."""
+    from deepface import DeepFace
+
+    _normalize_orientation(image_path)
+    return DeepFace.extract_faces(
+        img_path=image_path,
+        detector_backend="mtcnn",
+        anti_spoofing=True,
+        enforce_detection=True,
+    )
+
+
+def check_liveness(image_path: str) -> dict[str, bool | float]:
+    """Return the deployed DeepFace decision, score, and thresholded outcome."""
+    try:
+        faces = _extract_faces(image_path)
+    except ValueError as exc:
+        raise RuntimeError("no_face_detected:0.0") from exc
+    if not faces:
+        raise RuntimeError("no_face_detected:0.0")
+
+    face = faces[0]
+    is_real = bool(face.get("is_real", False))
+    score = float(face.get("antispoof_score", 0.0))
+    threshold = liveness_threshold()
+    return {
+        "is_real": is_real,
+        "antispoof_score": score,
+        "passed": is_real and score >= threshold,
+    }
+
+
+def require_liveness(image_path: str) -> float:
+    """Return the score for a live image or raise the production rejection."""
+    result = check_liveness(image_path)
+    score = float(result["antispoof_score"])
+    if not result["passed"]:
+        raise RuntimeError(f"liveness_failed:{score}")
+    return score

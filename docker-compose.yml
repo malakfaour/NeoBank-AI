@@ -21,17 +21,19 @@ services:
     ports:
       - "6379:6379"
     restart: unless-stopped
-
   api:
     build: ./backend
     volumes:
       - ./backend:/app
+      - ./ml:/app/ml
+      - ./ml:/ml
     env_file:
       - .env
     environment:
       DATABASE_URL: postgresql+asyncpg://neobank:neobank@postgres:5432/neobank
       DATABASE_URL_DIRECT: postgresql+asyncpg://neobank:neobank@postgres:5432/neobank
       REDIS_URL: redis://redis:6379
+      PYTHONPATH: /app:/ml
     depends_on:
       postgres:
         condition: service_healthy
@@ -39,6 +41,12 @@ services:
         condition: service_started
     ports:
       - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     command: >
       sh -c "alembic upgrade head &&
       uvicorn app.main:app --host 0.0.0.0 --port 8000"
@@ -47,12 +55,15 @@ services:
     build: ./backend
     volumes:
       - ./backend:/app
+      - ./ml:/app/ml
+      - ./ml:/ml
     env_file:
       - .env
     environment:
       DATABASE_URL: postgresql+asyncpg://neobank:neobank@postgres:5432/neobank
       DATABASE_URL_DIRECT: postgresql+asyncpg://neobank:neobank@postgres:5432/neobank
       REDIS_URL: redis://redis:6379
+      PYTHONPATH: /app:/ml
     depends_on:
       postgres:
         condition: service_healthy
@@ -60,5 +71,44 @@ services:
         condition: service_started
     command: celery -A app.celery_app:celery_app worker --loglevel=info
 
+  celery-beat:
+    build: ./backend
+    volumes:
+      - ./backend:/app
+      - ./ml:/ml
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://neobank:neobank@postgres:5432/neobank
+      DATABASE_URL_DIRECT: postgresql+asyncpg://neobank:neobank@postgres:5432/neobank
+      REDIS_URL: redis://redis:6379
+      PYTHONPATH: /app:/ml
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    command: celery -A app.celery_app:celery_app beat --loglevel=info
+
+  gateway-stub:
+    build: ./tools/gateway_stub
+    ports:
+      - "9000:9000"
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    ports:
+      - "9100:9000"
+      - "9101:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    restart: unless-stopped
+
 volumes:
   postgres_data:
+  minio_data:

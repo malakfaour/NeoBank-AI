@@ -9,6 +9,16 @@ except ImportError:  # pragma: no cover - covered indirectly once boto3 is insta
 
 from app.core.config import settings
 
+S3_ENCRYPTION_ARGS = frozenset(
+    {
+        "ServerSideEncryption",
+        "SSEKMSKeyId",
+        "SSECustomerAlgorithm",
+        "SSECustomerKey",
+        "SSECustomerKeyMD5",
+    }
+)
+
 
 def _get_bucket_name() -> str:
     return settings.S3_BUCKET or settings.AWS_BUCKET_NAME or "neobank-kyc"
@@ -60,6 +70,24 @@ def _require_storage_client() -> Any:
     return storage_client
 
 
+def _resolve_upload_extra_args(
+    extra_args: dict[str, Any] | None,
+) -> dict[str, Any]:
+    caller_args = dict(extra_args or {})
+    default_args = (
+        {}
+        if S3_ENCRYPTION_ARGS.intersection(caller_args)
+        else {"ServerSideEncryption": "AES256"}
+    )
+    resolved_extra_args = {**default_args, **caller_args}
+
+    if settings.S3_ENDPOINT_URL.strip():
+        for key in S3_ENCRYPTION_ARGS:
+            resolved_extra_args.pop(key, None)
+
+    return resolved_extra_args
+
+
 def upload_file(
     file_source: str | bytes,
     destination_key: str,
@@ -68,9 +96,9 @@ def upload_file(
 ) -> str:
     client = _require_storage_client()
     resolved_bucket = bucket_name or _get_bucket_name()
-    resolved_extra_args = extra_args or {}
 
     if isinstance(file_source, bytes):
+        resolved_extra_args = _resolve_upload_extra_args(extra_args)
         client.put_object(
             Bucket=resolved_bucket,
             Key=destination_key,
@@ -79,6 +107,7 @@ def upload_file(
         )
         return destination_key
 
+    resolved_extra_args = _resolve_upload_extra_args(extra_args)
     upload_kwargs: dict[str, Any] = {}
     if resolved_extra_args:
         upload_kwargs["ExtraArgs"] = resolved_extra_args
@@ -97,10 +126,16 @@ def download_file(
     return destination_path
 
 
+def delete_file(s3_key: str, bucket_name: str | None = None) -> None:
+    client = _require_storage_client()
+    resolved_bucket = bucket_name or _get_bucket_name()
+    client.delete_object(Bucket=resolved_bucket, Key=s3_key)
+
+
 def get_presigned_url(s3_key: str, ttl_seconds: int = 3600) -> str:
     client = _require_storage_client()
     return client.generate_presigned_url(
         "get_object",
         Params={"Bucket": _get_bucket_name(), "Key": s3_key},
-        ExpiresIn=ttl_seconds,
+        ExpiresIn=min(ttl_seconds, 3600),
     )

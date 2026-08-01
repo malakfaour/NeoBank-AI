@@ -25,7 +25,8 @@ class SendMoneyResponse(BaseModel):
 
 class TransactionListItem(BaseModel):
     id: int
-    type: str  # "send" | "receive" (see DEVATTECH-73 notes: topup/bill/exchange not yet derivable)
+    type: str
+    exchange_leg: str | None = None
     amount: Decimal
     currency: str
     counterparty_name: str | None
@@ -84,3 +85,8 @@ class CategorySummaryItem(BaseModel):
 class TransactionSummaryResponse(BaseModel):
     month: str
     summary: list[CategorySummaryItem]
+
+class StatementResponse(BaseModel):
+    month: str
+    s3_key: str
+    presigned_url: str

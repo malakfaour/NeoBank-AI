@@ -17,13 +17,14 @@ def send_email(
     html_body: str | None = None,
 ) -> None:
     provider = settings.EMAIL_PROVIDER.lower()
+    print(f">>> Sending email to: {to_email}")
 
     if provider == "console":
         logger.info("Console email provider enabled.")
         logger.info("To: %s", to_email)
         logger.info("From: %s", settings.EMAIL_FROM)
         logger.info("Subject: %s", subject)
-        logger.info("Body: %s", body)
+        logger.info("Email body omitted from logs.")
         return
 
     if provider == "smtp":

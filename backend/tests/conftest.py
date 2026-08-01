@@ -11,12 +11,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 REPO_ROOT = BACKEND_DIR.parent
-TEST_DB_PATH = BACKEND_DIR / "test_neobank.db"
+
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
 if str(REPO_ROOT) not in sys.path:
     # Import the shared top-level ml package from the repo root.
-    sys.path.insert(0, str(REPO_ROOT))
+    sys.path.insert(1, str(REPO_ROOT))
 
-TEST_DB_URL = f"sqlite+aiosqlite:///{TEST_DB_PATH.resolve().as_posix()}"
+TEST_DB_URL = "sqlite+aiosqlite:///:memory:"
 
 os.environ["DATABASE_URL"] = TEST_DB_URL
 os.environ["DATABASE_URL_DIRECT"] = TEST_DB_URL
@@ -42,7 +45,9 @@ os.environ["SMTP_PASSWORD"] = "test_password"
 os.environ["TWILIO_ACCOUNT_SID"] = "test_sid"
 os.environ["TWILIO_AUTH_TOKEN"] = "test_token"
 os.environ["TWILIO_FROM_NUMBER"] = "+15555555555"
-os.environ["PAYMENT_GATEWAY_URL"] = "https://sandbox.paymentgateway.example.com/v1/charge"
+os.environ["PAYMENT_GATEWAY_URL"] = (
+    "https://sandbox.paymentgateway.example.com/v1/charge"
+)
 
 from app.db.base import Base  # noqa: E402
 from app.db.session import engine  # noqa: E402
@@ -63,15 +68,20 @@ async def create_tables():
         Base.metadata.tables["wallets"],
         Base.metadata.tables["user_sessions"],
         Base.metadata.tables["transactions"],
+        Base.metadata.tables["device_credentials"],
         Base.metadata.tables["transaction_audit_logs"],
+        Base.metadata.tables["account_status_audit_logs"],
         Base.metadata.tables["bill_payments"],
         Base.metadata.tables["exchange_rates"],
         Base.metadata.tables["exchange_audit_logs"],
         Base.metadata.tables["fraud_resolutions"],
         Base.metadata.tables["beneficiaries"],
         Base.metadata.tables["kyc_records"],
+        Base.metadata.tables["kyc_audit_logs"],
         Base.metadata.tables["model_metrics"],
         Base.metadata.tables["notifications"],
+        Base.metadata.tables["push_subscriptions"],
+        Base.metadata.tables["chat_sessions"],
         Base.metadata.tables["chatbot_logs"],
     ]
     async with engine.begin() as conn:
@@ -88,18 +98,22 @@ async def create_tables():
 @pytest.fixture(autouse=True)
 async def mock_redis():
     fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
-    with patch("app.core.redis.redis_client", fake), \
-         patch("app.core.cache_utils.redis_client", fake), \
-         patch("app.main.redis_client", fake), \
-         patch("app.services.exchange_cache.redis_client", fake), \
-         patch("app.services.otp.redis_client", fake), \
-         patch("app.services.rate_limiter.redis_client", fake):
+    with (
+        patch("app.core.redis.redis_client", fake),
+        patch("app.core.cache_utils.redis_client", fake),
+        patch("app.main.redis_client", fake),
+        patch("app.services.exchange_cache.redis_client", fake),
+        patch("app.services.otp.redis_client", fake),
+        patch("app.services.rate_limiter.redis_client", fake),
+    ):
         yield fake
 
 
-
 class _FakeGatewayResponse:
-    """Stand-in for httpx.Response, used by the payment gateway mock below."""
+    """Stand-in for httpx.Response, used by bills.py's payment gateway
+    mock below. NOT used for accounts.py top-up anymore -- that now goes
+    through stripe_gateway.charge_card (DEVATTECH-131), mocked separately
+    below via _fake_charge_card."""
 
     def __init__(self, status_code=200, json_data=None):
         self.status_code = status_code
@@ -111,11 +125,11 @@ class _FakeGatewayResponse:
 
 class _FakeGatewayClient:
     """
-    Stand-in for httpx.AsyncClient used only by
-    app.api.v1.endpoints.accounts._call_payment_gateway (NBL-411).
-    Defaults to a 200 "approved" response for every test; individual tests
-    override this per-call by monkeypatching the same target with their
-    own client class (e.g. to simulate a 402 decline or a 5xx).
+    Stand-in for httpx.AsyncClient used by bills.py's own (separate,
+    unmodified) fake-gateway stub. Defaults to a 200 "approved" response
+    for every test; individual tests override this per-call by
+    monkeypatching the same target with their own client class (e.g. to
+    simulate a 402 decline or a 5xx).
     """
 
     def __init__(self, *args, **kwargs):
@@ -130,19 +144,51 @@ class _FakeGatewayClient:
     async def post(self, url, json=None):
         return _FakeGatewayResponse(status_code=200)
 
+async def _fake_charge_card(payment_method_id, amount, currency, idempotency_key):
+    """
+    Stand-in for stripe_gateway.charge_card, used by accounts.py's
+    card_top_up (DEVATTECH-131). Defaults to a successful charge for
+    every test; individual tests override this same patch target locally
+    to simulate a decline (raise CardDeclinedError), a gateway failure
+    (raise GatewayUnavailableError), or a 3DS challenge (raise
+    RequiresActionError) -- same override pattern the old httpx-based
+    fake used.
+    """
+    return f"pi_test_{idempotency_key[:24]}"
+
+
+async def _fake_get_confirmed_charge(payment_intent_id, expected_amount, expected_currency):
+    """
+    Stand-in for stripe_gateway.get_confirmed_charge, used by accounts.py's
+    confirm_top_up (3D Secure follow-up). Defaults to confirming success
+    for every test; individual tests override this same patch target
+    locally to simulate a failed challenge (raise CardDeclinedError) or a
+    gateway failure (raise GatewayUnavailableError).
+    """
+    return payment_intent_id
+
 
 @pytest.fixture(autouse=True)
 def mock_payment_gateway(monkeypatch):
     """
-    NBL-411: the real payment gateway is an external HTTP call and must be
-    mocked in tests (see ENGINEERING_RULES.md #6 -- external calls are
-    always mocked in CI). Autouse so every existing top-up call in the
-    suite gets a default success without each test needing its own
-    fixture; tests exercising decline/5xx paths monkeypatch this same
-    target locally to override the behavior.
+    NBL-411 / DEVATTECH-131: external payment calls are always mocked in
+    tests (see ENGINEERING_RULES.md #6). Autouse so every existing
+    top-up/bill-pay call in the suite gets a default success without each
+    test needing its own fixture; tests exercising decline/5xx paths
+    monkeypatch the relevant target locally to override the behavior.
     """
     monkeypatch.setattr(
-        "app.api.v1.endpoints.accounts.httpx.AsyncClient",
+        "app.api.v1.endpoints.accounts.charge_card",
+        _fake_charge_card,
+    )
+
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.accounts.get_confirmed_charge",
+        _fake_get_confirmed_charge,
+    )
+
+    monkeypatch.setattr(
+    "app.api.v1.endpoints.bills.httpx.AsyncClient",
         _FakeGatewayClient,
     )
 
@@ -152,6 +198,7 @@ async def client():
         transport=ASGITransport(app=app), base_url="http://test"
     ) as ac:
         yield ac
+
 
 @pytest_asyncio.fixture
 async def db_session():
