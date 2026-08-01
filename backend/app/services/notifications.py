@@ -181,6 +181,8 @@ def _build_template(
     type_value = _notification_type_value(notification_type)
 
     amount = metadata.get("amount", "")
+    if amount:
+         amount = format(Decimal(str(amount)).normalize(), "f")
     currency = metadata.get("currency", "")
     transaction_id = metadata.get("transaction_id", "")
     reason = metadata.get("reason", "")
