@@ -1,14 +1,15 @@
 import asyncio
 import io
+import logging
 from functools import partial
 from time import time
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_current_user
-from app.core.storage import delete_file, upload_file
+from app.core.storage import delete_file, get_presigned_url, upload_file
 from app.db.session import get_db
 from app.models.notification import Notification
 from app.models.user import User
@@ -20,11 +21,16 @@ from app.schemas.user_profile import (
     UserUpdatePhoneRequest,
     UserUpdateProfileRequest,
 )
-from app.services.otp import verify_and_consume_otp
+from app.services.otp import generate_purpose_otp, verify_purpose_otp
+from app.services.rate_limiter import check_rate_limit
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 ALLOWED_AVATAR_TYPES = {"image/jpeg", "image/png", "image/jpg"}
+PROFILE_EMAIL_OTP_PURPOSE = "profile_email_change"
+PROFILE_PHONE_OTP_PURPOSE = "profile_phone_change"
 
 
 async def _get_user_or_404(db: AsyncSession, current_user: CurrentUser) -> User:
@@ -40,6 +46,18 @@ def _user_notification_preferences(user: User) -> NotificationPreferences:
     return NotificationPreferences(**(user.notification_preferences or {}))
 
 
+async def _resolve_avatar_url(user: User) -> str | None:
+    if not user.avatar_url:
+        return None
+
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.run_in_executor(None, get_presigned_url, user.avatar_url)
+    except Exception:
+        logger.exception("Could not create avatar URL for user %s", user.id)
+        return None
+
+
 async def _build_user_me_response(
     db: AsyncSession,
     user: User,
@@ -50,6 +68,7 @@ async def _build_user_me_response(
             Notification.read.is_(False),
         )
     )
+    avatar_url = await _resolve_avatar_url(user)
 
     return UserMeResponse(
         id=user.id,
@@ -57,7 +76,7 @@ async def _build_user_me_response(
         email=user.email,
         phone=user.phone,
         kyc_status=user.kyc_status,
-        avatar_url=user.avatar_url,
+        avatar_url=avatar_url,
         created_at=user.created_at,
         role=user.role,
         unread_count=unread_count or 0,
@@ -113,6 +132,48 @@ async def patch_me(
     return await _build_user_me_response(db, user)
 
 
+@router.post("/me/email/otp")
+async def send_profile_email_otp(
+    request: Request,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await check_rate_limit(
+        request,
+        key_prefix="profile_email_otp",
+        max_requests=3,
+        window_seconds=300,
+    )
+    user = await _get_user_or_404(db, current_user)
+    await generate_purpose_otp(
+        PROFILE_EMAIL_OTP_PURPOSE,
+        str(user.id),
+        user.email,
+    )
+    return {"message": "Verification code sent to your current email."}
+
+
+@router.post("/me/phone/otp")
+async def send_profile_phone_otp(
+    request: Request,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await check_rate_limit(
+        request,
+        key_prefix="profile_phone_otp",
+        max_requests=3,
+        window_seconds=300,
+    )
+    user = await _get_user_or_404(db, current_user)
+    await generate_purpose_otp(
+        PROFILE_PHONE_OTP_PURPOSE,
+        str(user.id),
+        user.email,
+    )
+    return {"message": "Verification code sent to your current email."}
+
+
 @router.patch("/me/email", response_model=UserMeResponse)
 async def patch_my_email(
     body: UserUpdateEmailRequest,
@@ -120,14 +181,11 @@ async def patch_my_email(
     db: AsyncSession = Depends(get_db),
 ):
     user = await _get_user_or_404(db, current_user)
-    if not await verify_and_consume_otp(current_user.id, body.otp_code):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired OTP"
-        )
+    email = str(body.email).strip().lower()
 
     existing = await db.scalar(
         select(User).where(
-            User.email == body.email,
+            User.email == email,
             User.id != user.id,
         )
     )
@@ -136,7 +194,16 @@ async def patch_my_email(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Email already exists"
         )
 
-    user.email = body.email
+    if not await verify_purpose_otp(
+        PROFILE_EMAIL_OTP_PURPOSE,
+        str(user.id),
+        body.otp_code,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired OTP"
+        )
+
+    user.email = email
     await db.commit()
     await db.refresh(user)
     return await _build_user_me_response(db, user)
@@ -149,10 +216,6 @@ async def patch_my_phone(
     db: AsyncSession = Depends(get_db),
 ):
     user = await _get_user_or_404(db, current_user)
-    if not await verify_and_consume_otp(current_user.id, body.otp_code):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired OTP"
-        )
 
     existing = await db.scalar(
         select(User).where(
@@ -163,6 +226,15 @@ async def patch_my_phone(
     if existing is not None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Phone already exists"
+        )
+
+    if not await verify_purpose_otp(
+        PROFILE_PHONE_OTP_PURPOSE,
+        str(user.id),
+        body.otp_code,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired OTP"
         )
 
     user.phone = body.phone
@@ -187,11 +259,22 @@ async def upload_avatar(
     previous_avatar_key = user.avatar_url
     avatar_bytes = await avatar.read()
     await avatar.close()
+    if not avatar_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="avatar file is empty",
+        )
 
     loop = asyncio.get_running_loop()
-    resized = await loop.run_in_executor(
-        None, partial(_resize_avatar_to_jpeg, avatar_bytes)
-    )
+    try:
+        resized = await loop.run_in_executor(
+            None, partial(_resize_avatar_to_jpeg, avatar_bytes)
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="avatar must be a valid JPEG or PNG image",
+        ) from exc
     avatar_key = f"{user.id}/avatar_{int(time())}.jpg"
     await loop.run_in_executor(
         None,

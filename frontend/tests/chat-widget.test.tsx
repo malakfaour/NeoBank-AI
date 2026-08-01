@@ -69,6 +69,6 @@ describe("ChatWidget history", () => {
     expect(consoleError).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button"));
-    expect(screen.getByText("Hi! How can I help you today?")).toBeInTheDocument();
+    expect(screen.getByText("How can Neo AI help?")).toBeInTheDocument();
   });
 });
