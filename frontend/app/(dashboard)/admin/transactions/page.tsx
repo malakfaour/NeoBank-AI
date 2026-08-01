@@ -1,8 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { ArrowRight, Search, WalletCards } from "lucide-react";
 import api from "@/lib/axios";
+import AdminPageHeader from "@/components/admin/AdminPageHeader";
+import { usePreferences } from "@/components/providers/AppPreferences";
 
 interface AdminTransactionItem {
   id: number;
@@ -26,16 +28,11 @@ const STATUS_FILTERS: { value: string; label: string }[] = [
   { value: "reversed", label: "Reversed" },
 ];
 
-const STATUS_BADGE_COLORS: Record<string, { bg: string; fg: string }> = {
-  pending: { bg: "#FFFBEB", fg: "#B45309" },
-  completed: { bg: "#F0FDF4", fg: "#00C853" },
-  flagged: { bg: "#FFFBEB", fg: "#B45309" },
-  failed: { bg: "#FEF2F2", fg: "#DC2626" },
-  reversed: { bg: "#F3F4F6", fg: "#374151" },
-};
-
 export default function AdminTransactionsPage() {
-  const router = useRouter();
+  const { locale } = usePreferences();
+  const tr = useCallback((en: string, ar: string) => locale === "ar" ? ar : en, [locale]);
+  const statusLabel = (status: string) => locale === "ar" ? ({ "": "الكل", pending: "قيد الانتظار", completed: "مكتملة", flagged: "معلّمة", failed: "فشلت", reversed: "معكوسة" } as Record<string, string>)[status] ?? status : status.replaceAll("_", " ") || "All";
+  const categoryLabel = (category: string | null) => locale === "ar" ? ({ transfer: "تحويل", exchange: "صرف عملات", bills: "فواتير", topup: "إضافة رصيد", other: "أخرى" } as Record<string, string>)[category?.toLowerCase() ?? ""] ?? "غير مصنّفة" : category ?? "Uncategorized";
   const [items, setItems] = useState<AdminTransactionItem[]>([]);
   const [statusFilter, setStatusFilter] = useState("");
   const [query, setQuery] = useState("");
@@ -62,11 +59,11 @@ export default function AdminTransactionsPage() {
     } catch (err: unknown) {
       const status = (err as { response?: { status?: number } })?.response?.status;
       if (status === 403) setForbidden(true);
-      else setError("Failed to load transactions.");
+      else setError(tr("Failed to load transactions.", "تعذّر تحميل المعاملات."));
     } finally {
       setLoading(false);
     }
-  }, [page, statusFilter, query]);
+  }, [page, statusFilter, query, tr]);
 
   // Same pattern as admin/kyc/page.tsx's fetchQueue -- see that file's
   // comment for why this suppression is needed.
@@ -82,95 +79,60 @@ export default function AdminTransactionsPage() {
 
   if (forbidden) {
     return (
-      <div style={{ minHeight: "100vh", backgroundColor: "#F5F5F5", padding: "20px" }}>
-        <div style={{ backgroundColor: "#fff", borderRadius: "20px", padding: "32px", textAlign: "center", maxWidth: "420px", margin: "80px auto" }}>
-          <p style={{ fontWeight: "700", color: "#000", marginBottom: "8px" }}>Compliance access required</p>
-          <p style={{ color: "#999", fontSize: "13px" }}>Your account needs the compliance_officer or admin role to view all transactions.</p>
+      <div className="admin-page">
+        <div className="admin-access-card">
+          <strong>{tr("Compliance access required", "صلاحية الامتثال مطلوبة")}</strong>
+          <p>{tr("Your account needs the compliance officer or administrator role to view all transactions.", "يجب أن يملك حسابك صلاحية مسؤول امتثال أو مدير لعرض جميع المعاملات.")}</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div style={{ minHeight: "100vh", backgroundColor: "#F5F5F5", padding: "20px", paddingBottom: "80px" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "20px" }}>
-        <button onClick={() => router.back()}
-          style={{ width: "36px", height: "36px", borderRadius: "12px", border: "1px solid #E5E7EB", background: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M19 12H5M12 19l-7-7 7-7" stroke="#333" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-        </button>
-        <h2 style={{ fontSize: "18px", fontWeight: "700", color: "#000" }}>All transactions</h2>
-      </div>
+    <div className="admin-page">
+      <AdminPageHeader
+        eyebrow={tr("Ledger operations", "عمليات السجل المالي")}
+        title={tr("All transactions", "جميع المعاملات")}
+        description={tr("Search the complete Neo ledger and monitor payment status across every customer account.", "ابحث في سجل Neo المالي الكامل وتابع حالة المدفوعات عبر جميع حسابات العملاء.")}
+      />
 
-      <form onSubmit={submitSearch} style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
-        <input
-          value={searchInput}
-          onChange={(e) => setSearchInput(e.target.value)}
-          placeholder="Search sender/receiver name or email"
-          style={{ flex: 1, padding: "12px 16px", borderRadius: "14px", border: "1.5px solid #E5E7EB", fontSize: "14px", backgroundColor: "#fff" }}
-        />
-        <button type="submit"
-          style={{ padding: "12px 20px", borderRadius: "14px", border: "none", backgroundColor: "#00C853", color: "#fff", fontSize: "14px", fontWeight: "700", cursor: "pointer" }}>
-          Search
-        </button>
-      </form>
-
-      <div style={{ display: "flex", gap: "8px", marginBottom: "20px", overflowX: "auto" }}>
-        {STATUS_FILTERS.map((f) => (
-          <button key={f.value} onClick={() => { setLoading(true); setPage(1); setStatusFilter(f.value); }}
-            style={{ padding: "8px 16px", borderRadius: "999px", border: `1.5px solid ${statusFilter === f.value ? "#00C853" : "#E5E7EB"}`, backgroundColor: statusFilter === f.value ? "#F0FDF4" : "#fff", color: statusFilter === f.value ? "#00C853" : "#666", fontSize: "13px", fontWeight: "600", cursor: "pointer", whiteSpace: "nowrap" }}>
-            {f.label}
-          </button>
-        ))}
+      <div className="admin-toolbar">
+        <div className="admin-toolbar__filters">
+          {STATUS_FILTERS.map((f) => <button className={`admin-filter-button${statusFilter === f.value ? " is-active" : ""}`} key={f.value} onClick={() => { setLoading(true); setPage(1); setStatusFilter(f.value); }}>{statusLabel(f.value)}</button>)}
+        </div>
+        <form className="admin-search" onSubmit={submitSearch}>
+          <Search size={17} />
+          <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder={tr("Search name or email", "ابحث بالاسم أو البريد الإلكتروني")} />
+          <button className="admin-primary-button" type="submit">{tr("Search", "بحث")}</button>
+        </form>
       </div>
 
       {error && (
-        <div style={{ backgroundColor: "#FEF2F2", border: "1px solid #FECACA", borderRadius: "12px", padding: "12px", color: "#DC2626", fontSize: "13px", marginBottom: "16px" }}>
+        <div className="admin-error-banner">
           {error}
         </div>
       )}
 
-      {loading ? (
-        <div style={{ padding: "32px", textAlign: "center" }}><p style={{ color: "#aaa" }}>Loading...</p></div>
-      ) : items.length === 0 ? (
-        <div style={{ backgroundColor: "#fff", borderRadius: "20px", padding: "32px", textAlign: "center" }}>
-          <p style={{ color: "#aaa", fontSize: "14px" }}>No transactions found.</p>
-        </div>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          {items.map((item) => (
-            <div key={item.id} style={{ backgroundColor: "#fff", borderRadius: "20px", padding: "20px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "12px" }}>
-                <div>
-                  <p style={{ fontWeight: "700", color: "#000" }}>{item.sender_name} &rarr; {item.receiver_name}</p>
-                  <p style={{ fontSize: "12px", color: "#999" }}>Transaction #{item.id} &middot; {item.category ?? "Uncategorized"}</p>
-                </div>
-                <span style={{ fontSize: "12px", fontWeight: "700", padding: "4px 10px", borderRadius: "999px", backgroundColor: STATUS_BADGE_COLORS[item.status]?.bg ?? "#F3F4F6", color: STATUS_BADGE_COLORS[item.status]?.fg ?? "#374151" }}>
-                  {item.status}
-                </span>
-              </div>
-
-              <div style={{ fontSize: "13px", color: "#666", lineHeight: 1.7 }}>
-                <div>Amount: {Number(item.amount).toLocaleString()} {item.currency}</div>
-                <div>Created: {new Date(item.created_at).toLocaleString()}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {totalPages > 1 && (
-        <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "12px", marginTop: "20px" }}>
-          <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}
-            style={{ padding: "8px 16px", borderRadius: "10px", border: "1px solid #E5E7EB", backgroundColor: page === 1 ? "#F5F5F5" : "#fff", color: page === 1 ? "#aaa" : "#000", cursor: page === 1 ? "not-allowed" : "pointer", fontSize: "13px", fontWeight: "600" }}>
-            Previous
-          </button>
-          <p style={{ fontSize: "13px", color: "#aaa" }}>{page} / {totalPages}</p>
-          <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages}
-            style={{ padding: "8px 16px", borderRadius: "10px", border: "1px solid #E5E7EB", backgroundColor: page === totalPages ? "#F5F5F5" : "#fff", color: page === totalPages ? "#aaa" : "#000", cursor: page === totalPages ? "not-allowed" : "pointer", fontSize: "13px", fontWeight: "600" }}>
-            Next
-          </button>
-        </div>
-      )}
+      <section className="admin-data-card">
+        <div className="admin-table-head admin-transactions-grid"><span>{tr("Route", "مسار التحويل")}</span><span>{tr("Category", "الفئة")}</span><span>{tr("Amount", "المبلغ")}</span><span>{tr("Created", "التاريخ")}</span><span>{tr("Status", "الحالة")}</span></div>
+        {loading ? <div className="admin-empty"><div><p>{tr("Loading transactions...", "جارٍ تحميل المعاملات...")}</p></div></div>
+        : items.length === 0 ? <div className="admin-empty"><div><span className="admin-empty__icon"><WalletCards size={24} /></span><strong>{tr("No transactions found", "لا توجد معاملات")}</strong><p>{tr("Try changing your search or status filter.", "جرّب تغيير عبارة البحث أو فلتر الحالة.")}</p></div></div>
+        : items.map((item) => <div className="admin-table-row admin-transactions-grid" key={item.id}>
+          <div className="admin-person admin-transaction-route">
+            <span className="admin-person__avatar"><ArrowRight size={17} /></span>
+            <span><strong>{item.sender_name} → {item.receiver_name}</strong><small>{tr("Transaction", "معاملة")} #{item.id}</small></span>
+          </div>
+          <div className="admin-cell"><span className="admin-cell-label">{tr("Category", "الفئة")}</span><strong>{categoryLabel(item.category)}</strong></div>
+          <div className="admin-cell"><span className="admin-cell-label">{tr("Amount", "المبلغ")}</span><strong>{Number(item.amount).toLocaleString(locale === "ar" ? "ar-LB" : "en-US")} {item.currency}</strong></div>
+          <div className="admin-cell"><span className="admin-cell-label">{tr("Created", "التاريخ")}</span><strong>{new Date(item.created_at).toLocaleDateString(locale === "ar" ? "ar-LB" : "en-GB")}</strong><small>{new Date(item.created_at).toLocaleTimeString(locale === "ar" ? "ar-LB" : "en-GB", { hour: "2-digit", minute: "2-digit" })}</small></div>
+          <div className="admin-cell"><span className="admin-cell-label">{tr("Status", "الحالة")}</span><span className={`admin-status ${item.status === "completed" ? "admin-status--success" : item.status === "failed" ? "admin-status--danger" : item.status === "pending" || item.status === "flagged" ? "admin-status--warning" : "admin-status--neutral"}`}>{statusLabel(item.status)}</span></div>
+        </div>)}
+        {totalPages > 1 && <div className="admin-pagination">
+          <button className="admin-secondary-button" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>{tr("Previous", "السابق")}</button>
+          <span>{locale === "ar" ? `الصفحة ${page} من ${totalPages}` : `Page ${page} of ${totalPages}`}</span>
+          <button className="admin-secondary-button" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages}>{tr("Next", "التالي")}</button>
+        </div>}
+      </section>
     </div>
   );
 }

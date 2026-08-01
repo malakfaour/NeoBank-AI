@@ -7,9 +7,12 @@ import api from "@/lib/axios";
 import AuthCard from "@/components/auth/AuthCard";
 import PasswordInput from "@/components/auth/PasswordInput";
 import { normalizeLebanesePhone, passwordError, passwordRules } from "@/lib/authValidation";
+import { usePreferences } from "@/components/providers/AppPreferences";
 
 export default function RegisterPage() {
   const router = useRouter();
+  const { locale } = usePreferences();
+  const tr = (en: string, ar: string) => locale === "ar" ? ar : en;
   const [form, setForm] = useState({ full_name: "", email: "", phone: "", password: "", confirm: "", accepted: false });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
@@ -53,24 +56,24 @@ export default function RegisterPage() {
   );
 
   return (
-    <AuthCard title="Create account" subtitle="Join NeoBank Lebanon today">
+    <AuthCard title={tr("Create account", "إنشاء حساب")} subtitle={tr("Join NeoBank Lebanon today", "انضم إلى نيو بنك لبنان اليوم") }>
       <form onSubmit={submit} noValidate>
         {errors.general && <p role="alert" style={{ color: "#B91C1C", background: "#FEF2F2", padding: 12, borderRadius: 12 }}>{errors.general}</p>}
-        {field("full_name", "Full name")}
-        {field("email", "Email", "email")}
-        {field("phone", "Mobile number (+961)", "tel")}
-        <PasswordInput label="Password" value={form.password} onChange={(password) => setForm({ ...form, password })} autoComplete="new-password" error={errors.password} />
+        {field("full_name", tr("Full name", "الاسم الكامل"))}
+        {field("email", tr("Email", "البريد الإلكتروني"), "email")}
+        {field("phone", tr("Mobile number (+961)", "رقم الهاتف (+961)"), "tel")}
+        <PasswordInput label={tr("Password", "كلمة المرور")} value={form.password} onChange={(password) => setForm({ ...form, password })} autoComplete="new-password" error={errors.password} />
         <ul style={{ margin: "-8px 0 16px", paddingLeft: 20, fontSize: 12, color: "#666" }}>
-          {passwordRules.map((rule) => <li key={rule.label} style={{ color: rule.test(form.password) ? "#00A844" : "#777" }}>{rule.label}</li>)}
+          {passwordRules.map((rule, index) => <li key={rule.label} style={{ color: rule.test(form.password) ? "#00A844" : "#777" }}>{locale === "ar" ? ["8 أحرف على الأقل", "حرف كبير واحد", "حرف صغير واحد", "رقم واحد", "رمز خاص واحد"][index] ?? rule.label : rule.label}</li>)}
         </ul>
-        <PasswordInput label="Confirm password" value={form.confirm} onChange={(confirm) => setForm({ ...form, confirm })} autoComplete="new-password" error={errors.confirm} />
+        <PasswordInput label={tr("Confirm password", "تأكيد كلمة المرور")} value={form.confirm} onChange={(confirm) => setForm({ ...form, confirm })} autoComplete="new-password" error={errors.confirm} />
         <label style={{ display: "flex", gap: 10, fontSize: 13, color: "#555", marginBottom: 18 }}>
           <input type="checkbox" checked={form.accepted} onChange={(e) => setForm({ ...form, accepted: e.target.checked })} />
-          <span>I agree to the Terms and Privacy Policy.{errors.accepted && <span style={{ display: "block", color: "#EF4444" }}>{errors.accepted}</span>}</span>
+          <span>{tr("I agree to the Terms and Privacy Policy.", "أوافق على الشروط وسياسة الخصوصية.")}{errors.accepted && <span style={{ display: "block", color: "#EF4444" }}>{errors.accepted}</span>}</span>
         </label>
-        <button type="submit" disabled={loading} style={{ width: "100%", background: loading ? "#86EFAC" : "#00C853", color: "#fff", border: 0, borderRadius: 14, padding: 14, fontWeight: 700, cursor: loading ? "not-allowed" : "pointer" }}>{loading ? "Creating account…" : "Create account"}</button>
+        <button type="submit" disabled={loading} style={{ width: "100%", background: loading ? "#86EFAC" : "#00C853", color: "#fff", border: 0, borderRadius: 14, padding: 14, fontWeight: 700, cursor: loading ? "not-allowed" : "pointer" }}>{loading ? tr("Creating account...", "جارٍ إنشاء الحساب...") : tr("Create account", "إنشاء حساب")}</button>
       </form>
-      <p style={{ textAlign: "center", fontSize: 13, color: "#777" }}>Already have an account? <Link href="/login" style={{ color: "#00A844" }}>Sign in</Link></p>
+      <p style={{ textAlign: "center", fontSize: 13, color: "#777" }}>{tr("Already have an account?", "لديك حساب بالفعل؟")} <Link href="/login" style={{ color: "#00A844" }}>{tr("Sign in", "تسجيل الدخول")}</Link></p>
     </AuthCard>
   );
 }

@@ -14,6 +14,7 @@ import {
   Zap,
 } from "lucide-react";
 import api from "@/lib/axios";
+import { usePreferences } from "@/components/providers/AppPreferences";
 
 interface Wallet { id?: number; currency: string; balance: number; account_number: string | null; iban: string | null; }
 interface BillHistoryItem {
@@ -56,6 +57,10 @@ function formatAmount(currency: string | undefined, value: number) {
 
 export default function BillsPage() {
   const router = useRouter();
+  const { locale } = usePreferences();
+  const tr = (en: string, ar: string) => locale === "ar" ? ar : en;
+  const billLabel = (value: string, fallback: string) => value === "ogero" ? tr("Ogero", "أوجيرو") : value === "edl" ? tr("EDL", "كهرباء لبنان") : value === "water" ? tr("Water", "المياه") : value === "mobile_topup" ? tr("Mobile Top-up", "تعبئة الهاتف") : fallback;
+  const billDescription = (value: string, fallback: string) => value === "ogero" ? tr("Internet & telephone", "الإنترنت والهاتف") : value === "edl" ? tr("Electricity", "فاتورة الكهرباء") : value === "water" ? tr("Water authority", "مؤسسة المياه") : value === "mobile_topup" ? tr("Recharge mobile", "إعادة تعبئة الرصيد") : fallback;
   const [step, setStep] = useState<Step>("form");
   const [wallets, setWallets] = useState<Wallet[]>([]);
   const [selectedWallet, setSelectedWallet] = useState<Wallet | null>(null);
@@ -120,20 +125,20 @@ export default function BillsPage() {
 
   if (step === "confirm") return (
     <Wrap>
-      <Header title="Confirm Payment" onBack={goBack} />
+      <Header title={tr("Confirm Payment", "تأكيد الدفع")} onBack={goBack} />
       <section className="bill-summary-panel">
-        <div className="bill-summary-heading"><span><ReceiptText size={22} /></span><div><h3>Review your payment</h3><p>Check the bill details before confirming.</p></div></div>
+        <div className="bill-summary-heading"><span><ReceiptText size={22} /></span><div><h3>{tr("Review your payment", "مراجعة عملية الدفع")}</h3><p>{tr("Check the bill details before confirming.", "تحقق من تفاصيل الفاتورة قبل التأكيد.")}</p></div></div>
         <div className="bill-summary-rows">
           {[
-            { label: "Bill type", value: selectedBill?.label ?? "" },
-            { label: "Reference", value: reference },
-            { label: "From", value: selectedWallet?.currency === "USD" ? "Fresh USD" : "Cash LBP" },
-            { label: "Amount", value: formatAmount(selectedWallet?.currency, amountNum) },
+            { label: tr("Bill type", "نوع الفاتورة"), value: selectedBill ? billLabel(selectedBill.value, selectedBill.label) : "" },
+            { label: tr("Reference", "رقم المرجع"), value: reference },
+            { label: tr("From", "من حساب"), value: selectedWallet?.currency === "USD" ? tr("Fresh USD", "دولار أميركي") : tr("Cash LBP", "ليرة لبنانية") },
+            { label: tr("Amount", "المبلغ"), value: formatAmount(selectedWallet?.currency, amountNum) },
           ].map(({ label, value }) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}
         </div>
         {error && <p className="bill-error"><AlertTriangle size={16} />{error}</p>}
         <button className="bill-primary-button" onClick={handlePay} disabled={loading}>
-          {loading ? "Processing..." : "Confirm Payment"}<ArrowRight size={18} />
+          {loading ? tr("Processing...", "جارٍ تنفيذ العملية...") : tr("Confirm Payment", "تأكيد الدفع")}<ArrowRight size={18} />
         </button>
       </section>
     </Wrap>
@@ -143,38 +148,38 @@ export default function BillsPage() {
     <Wrap>
       <section className="bill-receipt-panel">
         <div className="transfer-success-icon"><CheckCircle2 size={34} /></div>
-        <h2>Payment Successful</h2>
-        <p>Your bill was paid securely.</p>
+        <h2>{tr("Payment Successful", "تم دفع الفاتورة بنجاح")}</h2>
+        <p>{tr("Your bill was paid securely.", "تم دفع فاتورتك بأمان.")}</p>
         <div className="bill-summary-rows">
           {[
-            { label: "Bill", value: selectedBill?.label ?? "" },
+            { label: tr("Bill", "الفاتورة"), value: selectedBill ? billLabel(selectedBill.value, selectedBill.label) : "" },
             { label: "Reference", value: reference },
             { label: "Amount", value: formatAmount(selectedWallet?.currency, amountNum) },
             { label: "Payment ID", value: String(receipt?.bill_payment_id ?? "—") },
           ].map(({ label, value }) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}
         </div>
-        <button className="bill-primary-button" onClick={() => router.push("/dashboard")}>Back to Dashboard<ArrowRight size={18} /></button>
+        <button className="bill-primary-button" onClick={() => router.push("/dashboard")}>{tr("Back to Dashboard", "العودة إلى الرئيسية")}<ArrowRight size={18} /></button>
       </section>
     </Wrap>
   );
 
   return (
     <Wrap>
-      <Header title="Pay Bills" onBack={goBack} />
+      <Header title={tr("Pay Bills", "دفع الفواتير")} onBack={goBack} />
       <section className="bill-payment-panel">
-        <div className="bill-section-heading"><div><h3>Select bill type</h3><p>Choose the service you want to pay.</p></div><ReceiptText size={22} /></div>
+        <div className="bill-section-heading"><div><h3>{tr("Select bill type", "اختر نوع الفاتورة")}</h3><p>{tr("Choose the service you want to pay.", "اختر الخدمة التي تريد دفعها.")}</p></div><ReceiptText size={22} /></div>
         <div className="bill-type-grid">
           {BILL_TYPES.map(({ value, label, Icon, desc }) => (
             <button className={`bill-type-card${billType === value ? " is-selected" : ""}`} key={value} onClick={() => setBillType(value)}>
-              <span><Icon size={22} /></span><strong>{label}</strong><small>{desc}</small>
+              <span><Icon size={22} /></span><strong>{billLabel(value, label)}</strong><small>{billDescription(value, desc)}</small>
               {billType === value && <CheckCircle2 className="bill-type-check" size={18} />}
             </button>
           ))}
         </div>
 
         <div className="bill-form-grid">
-          <label className="bill-field bill-field--wide"><span>Reference number</span><input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Bill reference or account number" /></label>
-          <div className="bill-field bill-field--wide"><span>Pay from</span><div className="bill-wallet-grid">
+          <label className="bill-field bill-field--wide"><span>{tr("Reference number", "رقم المرجع")}</span><input value={reference} onChange={(e) => setReference(e.target.value)} placeholder={tr("Bill reference or account number", "رقم الفاتورة أو الحساب")} /></label>
+          <div className="bill-field bill-field--wide"><span>{tr("Pay from", "الدفع من")}</span><div className="bill-wallet-grid">
             {wallets.map((wallet) => (
               <button className={`bill-wallet-option${selectedWallet?.currency === wallet.currency ? " is-selected" : ""}`} key={wallet.currency} onClick={() => setSelectedWallet(wallet)}>
                 <span>{wallet.currency}</span><div><small>{wallet.currency === "USD" ? "Fresh USD" : "Cash LBP"}</small><strong>{formatAmount(wallet.currency, wallet.balance)}</strong></div>
@@ -182,25 +187,25 @@ export default function BillsPage() {
               </button>
             ))}
           </div></div>
-          <label className="bill-field bill-field--wide"><span>Amount ({selectedWallet?.currency})</span><input className={insufficient ? "has-error" : ""} type="number" value={amount} onChange={(e) => { setAmount(e.target.value); setError(""); }} placeholder="0.00" />
-            {insufficient && <small className="bill-inline-error"><AlertTriangle size={14} />Insufficient balance</small>}
+          <label className="bill-field bill-field--wide"><span>{tr("Amount", "المبلغ")} ({selectedWallet?.currency})</span><input className={insufficient ? "has-error" : ""} type="number" value={amount} onChange={(e) => { setAmount(e.target.value); setError(""); }} placeholder="0.00" />
+            {insufficient && <small className="bill-inline-error"><AlertTriangle size={14} />{tr("Insufficient balance", "الرصيد غير كافٍ")}</small>}
           </label>
         </div>
         {error && <p className="bill-error"><AlertTriangle size={16} />{error}</p>}
-        <button className="bill-primary-button" onClick={() => setStep("confirm")} disabled={cannotContinue}>Continue<ArrowRight size={18} /></button>
+        <button className="bill-primary-button" onClick={() => setStep("confirm")} disabled={cannotContinue}>{tr("Continue", "متابعة")}<ArrowRight size={18} /></button>
       </section>
 
       <section className="bill-history-section">
-        <div className="bill-history-heading"><div><h3>Payment history</h3><p>Your recent bill payments.</p></div><span>{history.length} payments</span></div>
+        <div className="bill-history-heading"><div><h3>{tr("Payment history", "سجل المدفوعات")}</h3><p>{tr("Your recent bill payments.", "أحدث مدفوعات الفواتير.")}</p></div><span>{history.length} {tr("payments", "دفعات")}</span></div>
         <div className="bill-history-card">
           {historyLoading ? <div className="bill-history-empty">Loading payments...</div> : history.length === 0 ? (
-            <div className="bill-history-empty"><span><ReceiptText size={23} /></span><strong>No bill payments yet</strong><p>Your completed payments will appear here.</p></div>
+            <div className="bill-history-empty"><span><ReceiptText size={23} /></span><strong>{tr("No bill payments yet", "لا توجد مدفوعات بعد")}</strong><p>{tr("Your completed payments will appear here.", "ستظهر مدفوعاتك المكتملة هنا.")}</p></div>
           ) : history.map((item) => {
             const bill = BILL_TYPES.find((entry) => entry.value === item.bill_type);
             const Icon = bill?.Icon ?? ReceiptText;
             return <div className="bill-history-row" key={item.id}>
               <span className="bill-history-icon"><Icon size={20} /></span>
-              <div><strong>{bill?.label ?? item.bill_type}</strong><small>{item.bill_reference} · {timeAgo(item.paid_at)}</small></div>
+              <div><strong>{bill ? billLabel(bill.value, bill.label) : item.bill_type}</strong><small>{item.bill_reference} · {timeAgo(item.paid_at)}</small></div>
               <div className="bill-history-amount"><strong>-{formatAmount(item.currency, Number(item.amount))}</strong><small className={item.status === "success" ? "is-paid" : "is-failed"}>{item.status === "success" ? "Paid" : "Failed"}</small></div>
             </div>;
           })}

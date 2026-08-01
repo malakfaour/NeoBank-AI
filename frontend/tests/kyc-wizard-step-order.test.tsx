@@ -105,6 +105,10 @@ describe("KYC wizard step order", () => {
     render(<KYCPage />);
 
     expect(await screen.findByText("STEP 5 OF 6")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Before we open the camera" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Mock selfie capture")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open camera" }));
     expect(screen.getByRole("heading", { name: "Selfie verification" })).toBeInTheDocument();
     expect(screen.getByLabelText("Mock selfie capture")).toBeInTheDocument();
     expect(screen.queryByLabelText(/Identification number/)).not.toBeInTheDocument();

@@ -262,7 +262,7 @@ export default function DashboardPage() {
         <div className="dashboard-balance-grid">
           <article className="dashboard-balance-card dashboard-balance-card--usd">
             <div className="dashboard-balance-card__top">
-              <span>Fresh USD</span>
+              <span>{t("dashboard.freshUsd")}</span>
               <Image src="/logo.svg" alt="Neo" width={62} height={28} />
             </div>
             <div className="dashboard-balance-card__amount">
@@ -270,14 +270,14 @@ export default function DashboardPage() {
               <small>{t("dashboard.available")}</small>
             </div>
             <div className="dashboard-balance-card__bottom">
-              {usdWallet?.iban && <button onClick={() => copyIBAN(usdWallet.iban!)}><Copy size={14} />{copied === usdWallet.iban ? t("dashboard.copied") : "Copy IBAN"}</button>}
+              {usdWallet?.iban && <button onClick={() => copyIBAN(usdWallet.iban!)}><Copy size={14} />{copied === usdWallet.iban ? t("dashboard.copied") : t("dashboard.iban")}</button>}
               <span className="mastercard" aria-label="Mastercard"><i /><i /></span>
             </div>
           </article>
 
           <article className="dashboard-balance-card dashboard-balance-card--lbp">
             <div className="dashboard-balance-card__top">
-              <span>Cash LBP</span>
+              <span>{t("dashboard.cashLbp")}</span>
               <Image src="/logo.svg" alt="Neo" width={62} height={28} />
             </div>
             <div className="dashboard-balance-card__amount">
@@ -285,7 +285,7 @@ export default function DashboardPage() {
               <small>{t("dashboard.available")}</small>
             </div>
             <div className="dashboard-balance-card__bottom">
-              {lbpWallet?.iban && <button onClick={() => copyIBAN(lbpWallet.iban!)}><Copy size={14} />{copied === lbpWallet.iban ? t("dashboard.copied") : "Copy IBAN"}</button>}
+              {lbpWallet?.iban && <button onClick={() => copyIBAN(lbpWallet.iban!)}><Copy size={14} />{copied === lbpWallet.iban ? t("dashboard.copied") : t("dashboard.iban")}</button>}
               <span className="mastercard" aria-label="Mastercard"><i /><i /></span>
             </div>
           </article>
@@ -304,8 +304,8 @@ export default function DashboardPage() {
           <div className="exchange-strip">
             <span><ArrowDownLeft size={20} /></span>
             <div className="exchange-strip__rate"><small>USD / LBP</small><strong>{exchangeRate ? `1 USD = ${exchangeRate.rate.toLocaleString()} LBP` : "—"}</strong></div>
-            <div className="exchange-strip__meta"><small>Market exchange rate</small>{rateAge && <span>Updated {rateAge}</span>}</div>
-            <b><i /> Live</b>
+            <div className="exchange-strip__meta"><small>{t("dashboard.marketRate")}</small>{rateAge && <span>{t("dashboard.updated")} {rateAge}</span>}</div>
+            <b><i /> {t("dashboard.live")}</b>
           </div>
         </div>
       </section>
@@ -313,7 +313,7 @@ export default function DashboardPage() {
       {/* Spending chart */}
       <div className="dashboard-card spending-card" style={{ backgroundColor: "var(--surface)", borderRadius: "20px", border: "1px solid var(--line)", padding: "20px" }}>
         <p style={{ color: "#aaa", fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "12px" }}>
-          Spending by category — {currentMonth}
+          {t("dashboard.spending")} — {currentMonth}
         </p>
         {chartData.length === 0 ? (
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "24px 0", gap: "8px" }}>
@@ -326,8 +326,8 @@ export default function DashboardPage() {
     strokeLinejoin="round"
   />
 </svg>
-            <p style={{ color: "#aaa", fontSize: "13px" }}>No spending data yet this month</p>
-            <p style={{ color: "#ccc", fontSize: "12px" }}>Make a transaction to see your breakdown</p>
+            <p style={{ color: "#aaa", fontSize: "13px" }}>{t("dashboard.noSpending")}</p>
+            <p style={{ color: "#ccc", fontSize: "12px" }}>{t("dashboard.makeTransaction")}</p>
           </div>
         ) : (
           <>
@@ -368,7 +368,7 @@ export default function DashboardPage() {
         <div className="transaction-list">
           {transactions.length === 0 ? (
             <div style={{ padding: "32px", textAlign: "center" }}>
-              <p style={{ color: "#aaa", fontSize: "14px" }}>No transactions yet</p>
+              <p style={{ color: "#aaa", fontSize: "14px" }}>{t("dashboard.noTransactions")}</p>
             </div>
           ) : transactions.map((tx) => {
             const cat = tx.category ?? "Uncategorized";

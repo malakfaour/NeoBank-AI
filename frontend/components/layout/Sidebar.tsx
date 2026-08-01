@@ -6,6 +6,14 @@ import { logoutSession } from "@/lib/logoutSession";
 import { useAuthStore } from "@/store/authStore";
 import Image from "next/image";
 import { CirclePlus, MessageCircle, ReceiptText } from "lucide-react";
+import { usePreferences } from "@/components/providers/AppPreferences";
+const labelKeys: Record<string, string> = {
+  Dashboard: "nav.dashboard", "Add Money": "nav.addMoney", Transfer: "nav.transfer",
+  Beneficiaries: "nav.beneficiaries", Exchange: "nav.exchange", "Pay Bills": "nav.payBills",
+  Transactions: "nav.transactions", Profile: "nav.profile",
+  "KYC Review": "nav.kycReview", "Flagged Transactions": "nav.flaggedTransactions",
+  Users: "nav.users", "All Transactions": "nav.allTransactions",
+};
 const links = [
   { href: "/dashboard", label: "Dashboard", svg: <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1H5a1 1 0 01-1-1V9.5z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg> },
   { href: "/add-money", label: "Add Money", svg: <CirclePlus size={20} /> },
@@ -26,12 +34,13 @@ export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const role = useAuthStore((s) => s.user?.role);
+  const { t } = usePreferences();
   const isStaff = role === "admin" || role === "compliance_officer";
   const visibleLinks = isStaff ? [adminLink, fraudAdminLink, usersAdminLink, transactionsAdminLink] : links;
 
   return (
     <aside style={{ position: "fixed", left: 0, top: 0, height: "100%", width: "240px", backgroundColor: "var(--surface)", borderRight: "1px solid var(--line)", padding: "24px 16px", flexDirection: "column", zIndex: 20 }}
-      className="lg-sidebar">
+      className={`lg-sidebar${isStaff ? " is-admin" : ""}`}>
       <div style={{ marginBottom: "32px", paddingLeft: "8px" }}>
       <Image
   src="/logo.svg"
@@ -40,6 +49,7 @@ export default function Sidebar() {
   height={55}
 /> </div>
       <nav style={{ display: "flex", flexDirection: "column", gap: "4px", flex: 1 }}>
+        {isStaff && <p className="admin-sidebar-label">{t("nav.operations")}</p>}
         {visibleLinks.map(({ href, label, svg }) => {
           const active = pathname === href;
           return (
@@ -50,7 +60,7 @@ export default function Sidebar() {
               color: active ? "#00C853" : "#666",
             }}>
               {svg}
-              {label}
+              {labelKeys[label] ? t(labelKeys[label]) : label}
             </Link>
           );
         })}
@@ -58,12 +68,12 @@ export default function Sidebar() {
       {!isStaff && (
         <button className="sidebar-chat-button" type="button" onClick={() => window.dispatchEvent(new CustomEvent("neo:open-chat"))}>
           <MessageCircle size={20} />
-          <span>AI Help</span>
+          <span>{t("nav.aiHelp")}</span>
         </button>
       )}
       <button className="sidebar-signout" onClick={async () => { await logoutSession(); router.replace("/login"); }}
         style={{ display: "flex", alignItems: "center", gap: "12px", padding: "10px 12px", borderRadius: "14px", border: "none", backgroundColor: "transparent", fontSize: "14px", fontWeight: "600", color: "#aaa", cursor: "pointer" }}>
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h6a2 2 0 012 2v1" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>Sign out
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h6a2 2 0 012 2v1" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>{t("nav.signOut")}
       </button>
     </aside>
   );

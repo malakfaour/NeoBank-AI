@@ -4,6 +4,7 @@ import axios from "axios";
 import { useEffect, useMemo, useRef, useState } from "react";
 import api from "@/lib/axios";
 import { useAuthStore } from "@/store/authStore";
+import { usePreferences } from "@/components/providers/AppPreferences";
 
 interface ChatMessage { role: "user" | "bot"; text: string; }
 interface PendingAction {
@@ -105,6 +106,10 @@ function getChatErrorMessage(error: unknown, isTransferAttempt: boolean): string
 
 export default function ChatWidget() {
   const userId = useAuthStore((state) => state.user?.id);
+  const role = useAuthStore((state) => state.user?.role);
+  const isStaff = role === "admin" || role === "compliance_officer";
+  const { locale } = usePreferences();
+  const tr = (en: string, ar: string) => locale === "ar" ? ar : en;
   const [chatOpen, setChatOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -267,6 +272,8 @@ export default function ChatWidget() {
     setPasscodeError("");
   };
 
+  if (isStaff) return null;
+
   return (
     <>
       {/* Floating button */}
@@ -286,14 +293,14 @@ export default function ChatWidget() {
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
                 </div>
                 <div>
-                  <p style={{ fontSize: "14px", fontWeight: "700", color: "#000" }}>Neo AI Help</p>
-                  <p style={{ fontSize: "11px", color: "#00C853" }}>{"\u25CF"} Online</p>
+                  <p style={{ fontSize: "14px", fontWeight: "700", color: "#000" }}>{tr("Neo AI Help", "مساعد نيو الذكي")}</p>
+                  <p style={{ fontSize: "11px", color: "#00C853" }}>{"\u25CF"} {tr("Online", "متصل")}</p>
                 </div>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                 <button onClick={handleClearConversation} disabled={chatLoading}
                   style={{ background: "none", border: "none", cursor: chatLoading ? "not-allowed" : "pointer", fontSize: "12px", color: "#666" }}>
-                  Clear conversation
+                  {tr("Clear conversation", "مسح المحادثة")}
                 </button>
                 <button onClick={() => setChatOpen(false)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "20px", color: "#aaa" }}>{"\u2715"}</button>
               </div>
@@ -303,8 +310,8 @@ export default function ChatWidget() {
             <div style={{ flex: 1, overflowY: "auto", padding: "16px", display: "flex", flexDirection: "column", gap: "10px" }}>
               {messages.length === 0 && (
                 <div style={{ textAlign: "center", marginTop: "40px" }}>
-                  <p style={{ fontSize: "14px", fontWeight: "600", color: "#333" }}>How can Neo AI help?</p>
-                  <p style={{ marginTop: "5px", fontSize: "11px", color: "#8B948E" }}>Ask about your accounts, transfers, bills, or app support.</p>
+                  <p style={{ fontSize: "14px", fontWeight: "600", color: "#333" }}>{tr("How can Neo AI help?", "كيف يمكن لمساعد نيو أن يساعدك؟")}</p>
+                  <p style={{ marginTop: "5px", fontSize: "11px", color: "#8B948E" }}>{tr("Ask about your accounts, transfers, bills, or app support.", "اسأل عن حساباتك أو التحويلات أو الفواتير أو دعم التطبيق.")}</p>
                 </div>
               )}
               {messages.map((m, i) => (
@@ -327,7 +334,7 @@ export default function ChatWidget() {
                 <div style={{ backgroundColor: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: "16px", padding: "16px", display: "flex", flexDirection: "column", gap: "10px" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 10h18M5 10v10h14V10M12 4L3 10h18L12 4Z" stroke="#00C853" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                    <p style={{ fontSize: "14px", fontWeight: "700", color: "#000" }}>Confirm Transfer</p>
+                    <p style={{ fontSize: "14px", fontWeight: "700", color: "#000" }}>{tr("Confirm Transfer", "تأكيد التحويل")}</p>
                   </div>
                   {pendingAction.recipient && <p style={{ fontSize: "13px", color: "#555" }}>To: {pendingAction.recipient}</p>}
                   {pendingAction.amount && pendingAction.currency && (
@@ -342,10 +349,10 @@ export default function ChatWidget() {
                   </div>
                   <div style={{ display: "flex", gap: "8px" }}>
                     <button onClick={handleConfirmClick} disabled={chatLoading || passcodeLoading} style={{ flex: 1, backgroundColor: "#00C853", color: "#fff", border: "none", borderRadius: "10px", padding: "10px", fontWeight: "700", cursor: "pointer", fontSize: "13px" }}>
-                      Confirm
+                      {tr("Confirm", "تأكيد")}
                     </button>
                     <button onClick={handleCancel} style={{ flex: 1, backgroundColor: "#F5F5F5", color: "#333", border: "none", borderRadius: "10px", padding: "10px", fontWeight: "600", cursor: "pointer", fontSize: "13px" }}>
-                      Cancel
+                      {tr("Cancel", "إلغاء")}
                     </button>
                   </div>
                 </div>
@@ -358,7 +365,7 @@ export default function ChatWidget() {
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2" stroke="#00C853" strokeWidth="1.8" /><path d="M8 11V8a4 4 0 018 0v3" stroke="#00C853" strokeWidth="1.8" strokeLinecap="round" /></svg>
                     <p style={{ fontSize: "14px", fontWeight: "700", color: "#000" }}>Enter Passcode</p>
                   </div>
-                  <p style={{ fontSize: "12px", color: "#aaa" }}>Verify your identity to complete the transfer</p>
+                  <p style={{ fontSize: "12px", color: "#aaa" }}>{tr("Verify your identity to complete the transfer", "أكد هويتك لإتمام التحويل")}</p>
                   <input type="password" placeholder={"\u2022".repeat(6)} maxLength={6} value={passcode}
                     onChange={(e) => { setPasscode(e.target.value.replace(/\D/g, "")); setPasscodeError(""); }}
                     style={{ width: "100%", border: "1.5px solid #E5E7EB", borderRadius: "12px", padding: "10px 14px", fontSize: "20px", letterSpacing: "8px", outline: "none", boxSizing: "border-box", textAlign: "center" }} />
@@ -380,9 +387,9 @@ export default function ChatWidget() {
             {messages.length === 0 && (
               <div style={{ padding: "0 16px 12px", display: "flex", gap: "8px", flexWrap: "wrap" }}>
                 {[
-                  { label: "My Balance", icon: <WalletIcon />, msg: "What is my current balance?" },
-                  { label: "Last Transactions", icon: <TransactionsIcon />, msg: "Show me my last transactions" },
-                  { label: "Exchange Rate", icon: <ExchangeIcon />, msg: "What is the current USD to LBP exchange rate?" },
+                  { label: tr("My Balance", "رصيدي"), icon: <WalletIcon />, msg: tr("What is my current balance?", "ما هو رصيدي الحالي؟") },
+                  { label: tr("Last Transactions", "آخر المعاملات"), icon: <TransactionsIcon />, msg: tr("Show me my last transactions", "أرني آخر معاملاتي") },
+                  { label: tr("Exchange Rate", "سعر الصرف"), icon: <ExchangeIcon />, msg: tr("What is the current USD to LBP exchange rate?", "ما هو سعر صرف الدولار مقابل الليرة الآن؟") },
                 ].map(({ label, icon, msg }) => (
                   <button key={label} onClick={() => sendMessage(msg)}
                     style={{ padding: "8px 14px", borderRadius: "20px", border: "1.5px solid #00C853", backgroundColor: "#F0FDF4", color: "#00C853", fontSize: "12px", fontWeight: "600", cursor: "pointer", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: "6px" }}>
@@ -396,7 +403,7 @@ export default function ChatWidget() {
             <div style={{ padding: "12px 16px", borderTop: "1px solid #F5F5F5", display: "flex", gap: "10px", alignItems: "center" }}>
               <input value={input} onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && !chatLoading && sendMessage(input)}
-                placeholder="Type a message..."
+                placeholder={tr("Type a message...", "اكتب رسالتك...")}
                 style={{ flex: 1, border: "1.5px solid #E5E7EB", borderRadius: "14px", padding: "10px 14px", fontSize: "14px", outline: "none" }} />
               <button onClick={() => sendMessage(input)} disabled={!input.trim() || chatLoading}
                 style={{ width: "40px", height: "40px", borderRadius: "50%", backgroundColor: input.trim() ? "#00C853" : "#E5E7EB", border: "none", cursor: input.trim() ? "pointer" : "not-allowed", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
