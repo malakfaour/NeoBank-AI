@@ -1,8 +1,5 @@
-import asyncio
 import logging
 import uuid
-
-import httpx
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
@@ -10,7 +7,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_current_user
 from app.core.cache_utils import invalidate_balance_cache
-from app.core.config import settings
 from app.db.session import get_db
 
 from app.models.bill_payment import (
@@ -48,40 +44,6 @@ from app.tasks.transaction_tasks import score_transaction
 
 router = APIRouter(prefix="/bills", tags=["bills"])
 logger = logging.getLogger(__name__)
-async def _call_payment_gateway(
-    card_token: str,
-    amount,
-    currency: str,
-):
-    payload = {
-        "token": card_token,
-        "amount": float(amount),
-        "currency": currency,
-    }
-
-    async with httpx.AsyncClient(timeout=10.0) as client:
-
-        response = await client.post(
-            settings.PAYMENT_GATEWAY_URL,
-            json=payload,
-        )
-
-        if response.status_code >= 500:
-            await asyncio.sleep(2)
-
-            response = await client.post(
-                settings.PAYMENT_GATEWAY_URL,
-                json=payload,
-            )
-
-    if response.status_code != 200:
-        raise HTTPException(
-            status_code=402,
-            detail=response.json(),
-        )
-
-    return response.json()
-
 def _compute_total_pages(total: int, page_size: int) -> int:
     if total == 0:
         return 0
@@ -122,12 +84,14 @@ async def pay_bill(
     if wallet.balance < payload.amount:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Insufficient balance")
 
-    # --- call biller (no lock held during this network call) ---
-    await _call_payment_gateway(
-    payload.card_token,
-    payload.amount,
-)
-    biller_result = await call_mock_biller(payload.bill_type, payload.bill_reference, payload.amount)
+    # The bill is paid directly from the selected NeoBank wallet.
+    # Card details and payment-gateway tokens are only relevant to
+    # adding money, not to spending an existing wallet balance.
+    biller_result = await call_mock_biller(
+        payload.bill_type,
+        payload.bill_reference,
+        payload.amount,
+    )
 
     if not biller_result.success:
         bill_payment = BillPayment(

@@ -109,41 +109,6 @@ async def mock_redis():
         yield fake
 
 
-class _FakeGatewayResponse:
-    """Stand-in for httpx.Response, used by bills.py's payment gateway
-    mock below. NOT used for accounts.py top-up anymore -- that now goes
-    through stripe_gateway.charge_card (DEVATTECH-131), mocked separately
-    below via _fake_charge_card."""
-
-    def __init__(self, status_code=200, json_data=None):
-        self.status_code = status_code
-        self._json_data = json_data or {"status": "approved"}
-
-    def json(self):
-        return self._json_data
-
-
-class _FakeGatewayClient:
-    """
-    Stand-in for httpx.AsyncClient used by bills.py's own (separate,
-    unmodified) fake-gateway stub. Defaults to a 200 "approved" response
-    for every test; individual tests override this per-call by
-    monkeypatching the same target with their own client class (e.g. to
-    simulate a 402 decline or a 5xx).
-    """
-
-    def __init__(self, *args, **kwargs):
-        pass
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *args):
-        return False
-
-    async def post(self, url, json=None):
-        return _FakeGatewayResponse(status_code=200)
-
 async def _fake_charge_card(payment_method_id, amount, currency, idempotency_key):
     """
     Stand-in for stripe_gateway.charge_card, used by accounts.py's
@@ -171,11 +136,9 @@ async def _fake_get_confirmed_charge(payment_intent_id, expected_amount, expecte
 @pytest.fixture(autouse=True)
 def mock_payment_gateway(monkeypatch):
     """
-    NBL-411 / DEVATTECH-131: external payment calls are always mocked in
-    tests (see ENGINEERING_RULES.md #6). Autouse so every existing
-    top-up/bill-pay call in the suite gets a default success without each
-    test needing its own fixture; tests exercising decline/5xx paths
-    monkeypatch the relevant target locally to override the behavior.
+    NBL-411 / DEVATTECH-131: external card top-up calls are always
+    mocked in tests. Individual tests can override these targets to
+    exercise decline, gateway-failure, and 3D Secure paths.
     """
     monkeypatch.setattr(
         "app.api.v1.endpoints.accounts.charge_card",
@@ -187,10 +150,6 @@ def mock_payment_gateway(monkeypatch):
         _fake_get_confirmed_charge,
     )
 
-    monkeypatch.setattr(
-    "app.api.v1.endpoints.bills.httpx.AsyncClient",
-        _FakeGatewayClient,
-    )
 
 @pytest_asyncio.fixture
 async def client():
