@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { Camera, Check, Copy } from "lucide-react";
 import api from "@/lib/axios";
 import { useAuthStore } from "@/store/authStore";
 import { generateKeyPair, savePrivateKey, clearBiometricKey, getDeviceId, isBiometricEnrolled } from "@/lib/biometric";
@@ -28,7 +29,7 @@ interface KYCProfile {
 }
 
 const Wrap = ({ children }: { children: React.ReactNode }) => (
-  <div style={{ minHeight: "100vh", backgroundColor: "#F5F5F5", padding: "20px", paddingBottom: "80px" }}>{children}</div>
+  <div className="bank-feature-page profile-page" style={{ minHeight: "100vh", backgroundColor: "#F5F5F5", padding: "20px", paddingBottom: "80px" }}>{children}</div>
 );
 
 export default function ProfilePage() {
@@ -227,18 +228,19 @@ const handleDownloadStatement = async () => {
       {success && <div style={{ backgroundColor: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: "12px", padding: "12px 16px", color: "#166534", fontSize: "13px", marginBottom: "16px" }}>✓ {success}</div>}
 
       {/* Avatar */}
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: "24px" }}>
+      <div className="profile-identity">
         <button onClick={() => fileRef.current?.click()}
-          style={{ width: "80px", height: "80px", borderRadius: "50%", backgroundColor: "#00C853", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", position: "relative" }}>
+          className="profile-avatar" style={{ width: "80px", height: "80px", borderRadius: "50%", backgroundColor: "#00C853", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", position: "relative" }}>
           {user?.avatar_url
             ? <img src={user.avatar_url} alt="avatar" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
             : <span style={{ fontSize: "24px", fontWeight: "700", color: "#fff" }}>{initials}</span>
           }
+          <span className="profile-avatar__edit"><Camera size={14} /></span>
         </button>
-        <p style={{ fontSize: "12px", color: "#aaa", marginTop: "8px" }}>Tap to change photo</p>
+        <p className="profile-photo-hint" style={{ fontSize: "12px", color: "#aaa", marginTop: "8px" }}>Tap to change photo</p>
         <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }}
           onChange={(e) => { const f = e.target.files?.[0]; if (f) handleAvatarUpload(f); }} />
-        <p style={{ fontSize: "18px", fontWeight: "700", color: "#000", marginTop: "12px" }}>{user?.full_name}</p>
+        <p className="profile-identity__name" style={{ fontSize: "18px", fontWeight: "700", color: "#000", marginTop: "12px" }}>{user?.full_name}</p>
       </div>
 
       {/* KYC banner */}
@@ -307,6 +309,7 @@ const handleDownloadStatement = async () => {
             )
             .map((wallet, index, availableWallets) => (
               <div
+                className="profile-wallet-row"
                 key={wallet.currency}
                 style={{
                   padding: "14px 16px",
@@ -316,138 +319,28 @@ const handleDownloadStatement = async () => {
                       : "none",
                 }}
               >
-                <p
-                  style={{
-                    fontSize: "14px",
-                    fontWeight: "700",
-                    color: "#000",
-                    marginBottom: "12px",
-                  }}
-                >
-                  {walletLabel(wallet.currency)}
-                </p>
-
-                {wallet.account_number && (
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      gap: "16px",
-                      marginBottom: wallet.iban ? "12px" : "0",
-                    }}
-                  >
-                    <div style={{ minWidth: 0 }}>
-                      <p
-                        style={{
-                          fontSize: "11px",
-                          color: "#aaa",
-                          marginBottom: "3px",
-                        }}
-                      >
-                        Account number
-                      </p>
-
-                      <p
-                        title={wallet.account_number}
-                        style={{
-                          fontSize: "13px",
-                          color: "#777",
-                          margin: 0,
-                        }}
-                      >
-                        {maskAccountNumber(wallet.account_number)}
-                      </p>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleCopyAccountNumber(
-                          wallet.account_number!,
-                        )
-                      }
-                      aria-label={`Copy ${walletLabel(
-                        wallet.currency,
-                      )} account number`}
-                      style={{
-                        flexShrink: 0,
-                        color: "#00C853",
-                        backgroundColor: "#F0FDF4",
-                        border: "1px solid #BBF7D0",
-                        borderRadius: "10px",
-                        padding: "8px 12px",
-                        fontSize: "12px",
-                        fontWeight: "700",
-                        cursor: "pointer",
-                      }}
-                    >
-                      {copiedAccountNumber ===
-                      wallet.account_number
-                        ? "Copied!"
-                        : "Copy account"}
+                <div className="profile-wallet-summary">
+                  <span>{wallet.currency}</span>
+                  <strong>{walletLabel(wallet.currency)}</strong>
+                </div>
+                <div className="profile-wallet-identifiers">
+                  {wallet.account_number && <div><small>Account number</small><p title={wallet.account_number}>{maskAccountNumber(wallet.account_number)}</p></div>}
+                  {wallet.iban && <div><small>IBAN</small><p title={wallet.iban}>{maskIban(wallet.iban)}</p></div>}
+                </div>
+                <div className="profile-copy-group">
+                  {wallet.account_number && (
+                    <button type="button" onClick={() => handleCopyAccountNumber(wallet.account_number!)} aria-label={`Copy ${walletLabel(wallet.currency)} account number`}>
+                      {copiedAccountNumber === wallet.account_number ? <Check size={15} /> : <Copy size={15} />}
+                      <span>{copiedAccountNumber === wallet.account_number ? "Copied" : "Account"}</span>
                     </button>
-                  </div>
-                )}
-
-                {wallet.iban && (
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      gap: "16px",
-                    }}
-                  >
-                    <div style={{ minWidth: 0 }}>
-                      <p
-                        style={{
-                          fontSize: "11px",
-                          color: "#aaa",
-                          marginBottom: "3px",
-                        }}
-                      >
-                        IBAN
-                      </p>
-
-                      <p
-                        title={wallet.iban}
-                        style={{
-                          fontSize: "13px",
-                          color: "#777",
-                          margin: 0,
-                        }}
-                      >
-                        {maskIban(wallet.iban)}
-                      </p>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleCopyIban(wallet.iban!)
-                      }
-                      aria-label={`Copy ${walletLabel(
-                        wallet.currency,
-                      )} IBAN`}
-                      style={{
-                        flexShrink: 0,
-                        color: "#00C853",
-                        backgroundColor: "#F0FDF4",
-                        border: "1px solid #BBF7D0",
-                        borderRadius: "10px",
-                        padding: "8px 12px",
-                        fontSize: "12px",
-                        fontWeight: "700",
-                        cursor: "pointer",
-                      }}
-                    >
-                      {copiedIban === wallet.iban
-                        ? "Copied!"
-                        : "Copy IBAN"}
+                  )}
+                  {wallet.iban && (
+                    <button type="button" onClick={() => handleCopyIban(wallet.iban!)} aria-label={`Copy ${walletLabel(wallet.currency)} IBAN`}>
+                      {copiedIban === wallet.iban ? <Check size={15} /> : <Copy size={15} />}
+                      <span>{copiedIban === wallet.iban ? "Copied" : "IBAN"}</span>
                     </button>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
             ))}
         </div>
@@ -512,7 +405,7 @@ const handleDownloadStatement = async () => {
     </div>
     {statementError && <p style={{ color: "#EF4444", fontSize: "12px" }}>{statementError}</p>}
     <button onClick={handleDownloadStatement} disabled={!statementMonth || statementLoading}
-      style={{ width: "100%", backgroundColor: !statementMonth ? "#E5E7EB" : "#00C853", color: !statementMonth ? "#999" : "#fff", fontWeight: "700", fontSize: "14px", border: "none", borderRadius: "12px", padding: "12px", cursor: !statementMonth ? "not-allowed" : "pointer" }}>
+      style={{ width: "100%", backgroundColor: !statementMonth ? "#E5E7EB" : "#111713", color: !statementMonth ? "#999" : "#00D66F", fontWeight: "800", fontSize: "14px", border: !statementMonth ? "none" : "1px solid #26372E", borderRadius: "12px", padding: "14px", cursor: !statementMonth ? "not-allowed" : "pointer", boxShadow: statementMonth ? "0 10px 24px rgba(7,24,14,.14)" : "none" }}>
       {statementLoading ? "Generating..." : "Download Statement"}
     </button>
   </div>
@@ -538,7 +431,7 @@ const handleDownloadStatement = async () => {
                   style={{ width: "100%", border: "1.5px solid #E5E7EB", borderRadius: "14px", padding: "12px 16px", fontSize: "14px", outline: "none", boxSizing: "border-box", marginBottom: "16px" }} />
                 <button onClick={sheet === "email" ? handleEmailChange : handlePhoneChange}
                   disabled={!sheetVal || sheetOtp.length < 6 || sheetLoading}
-                  style={{ width: "100%", backgroundColor: !sheetVal || sheetOtp.length < 6 ? "#E5E7EB" : "#00C853", color: !sheetVal || sheetOtp.length < 6 ? "#999" : "#fff", fontWeight: "700", fontSize: "15px", border: "none", borderRadius: "14px", padding: "14px", cursor: "pointer" }}>
+                  style={{ width: "100%", backgroundColor: !sheetVal || sheetOtp.length < 6 ? "#E5E7EB" : "#111713", color: !sheetVal || sheetOtp.length < 6 ? "#999" : "#00D66F", fontWeight: "800", fontSize: "15px", border: !sheetVal || sheetOtp.length < 6 ? "none" : "1px solid #26372E", borderRadius: "14px", padding: "15px", cursor: "pointer" }}>
                   {sheetLoading ? "Saving..." : "Save"}
                 </button>
               </>
@@ -557,7 +450,7 @@ const handleDownloadStatement = async () => {
                   style={{ width: "100%", border: "1.5px solid #E5E7EB", borderRadius: "14px", padding: "12px 16px", fontSize: "14px", outline: "none", boxSizing: "border-box", marginBottom: "16px" }} />
                 <button onClick={handlePasscodeChange}
                   disabled={sheetCurrent.length < 6 || sheetNew.length < 6 || sheetOtp.length < 6 || sheetLoading}
-                  style={{ width: "100%", backgroundColor: sheetCurrent.length < 6 || sheetNew.length < 6 || sheetOtp.length < 6 ? "#E5E7EB" : "#00C853", color: sheetCurrent.length < 6 || sheetNew.length < 6 || sheetOtp.length < 6 ? "#999" : "#fff", fontWeight: "700", fontSize: "15px", border: "none", borderRadius: "14px", padding: "14px", cursor: "pointer" }}>
+                  style={{ width: "100%", backgroundColor: sheetCurrent.length < 6 || sheetNew.length < 6 || sheetOtp.length < 6 ? "#E5E7EB" : "#111713", color: sheetCurrent.length < 6 || sheetNew.length < 6 || sheetOtp.length < 6 ? "#999" : "#00D66F", fontWeight: "800", fontSize: "15px", border: sheetCurrent.length < 6 || sheetNew.length < 6 || sheetOtp.length < 6 ? "none" : "1px solid #26372E", borderRadius: "14px", padding: "15px", cursor: "pointer" }}>
                   {sheetLoading ? "Saving..." : "Change Passcode"}
                 </button>
               </>

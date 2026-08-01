@@ -197,7 +197,7 @@ describe("DashboardPage", () => {
     render(<DashboardPage />);
 
     expect(await screen.findByText("Fresh USD")).toBeInTheDocument();
-    expect(screen.getByText("$1250.50")).toBeInTheDocument();
+    expect(screen.getAllByText("$1250.50").length).toBeGreaterThanOrEqual(1);
 
     expect(screen.getByText("Cash LBP")).toBeInTheDocument();
     expect(screen.getByText(/2,000,000/)).toBeInTheDocument();
@@ -320,7 +320,9 @@ describe("DashboardPage", () => {
       screen.getByText("Make a transaction to see your breakdown")
     ).toBeInTheDocument();
 
-    expect(screen.queryByText("Fresh USD")).not.toBeInTheDocument();
+    expect(screen.getByText("Fresh USD")).toBeInTheDocument();
+    expect(screen.getByText("Cash LBP")).toBeInTheDocument();
+    expect(screen.getByText("$0.00")).toBeInTheDocument();
     expect(screen.queryByTestId("pie-chart")).not.toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 

@@ -14,12 +14,12 @@ const links = [
 export default function BottomNav() {
   const pathname = usePathname();
   return (
-    <nav className="mobile-bottom-nav" style={{ position: "fixed", bottom: 0, left: 0, right: 0, backgroundColor: "#fff", borderTop: "1px solid #F0F0F0", zIndex: 20 }}>
+    <nav className="mobile-bottom-nav" style={{ position: "fixed", bottom: 0, left: 0, right: 0, backgroundColor: "var(--surface)", borderTop: "1px solid var(--line)", zIndex: 20 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-around", padding: "8px 8px" }}>
         {links.map(({ href, label, svg }) => {
           const active = pathname === href;
           return (
-            <Link key={href} href={href} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "2px", padding: "6px 12px", borderRadius: "14px", textDecoration: "none", color: active ? "#00C853" : "#aaa" }}>
+            <Link key={href} href={href} className={`bottom-nav-link${active ? " is-active" : ""}`} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "2px", padding: "6px 12px", borderRadius: "14px", textDecoration: "none", color: active ? "#00C853" : "#aaa" }}>
               {svg}
               <span style={{ fontSize: "10px", fontWeight: "600" }}>{label}</span>
             </Link>

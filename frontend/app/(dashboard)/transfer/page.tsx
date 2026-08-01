@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { ArrowRight, Building2, Check, CheckCircle2, ChevronRight, Search, Smartphone, UserRound, WalletCards } from "lucide-react";
 import api from "@/lib/axios";
 import KYCActionLock from "@/components/kyc/KYCActionLock";
 import { useAuthStore } from "@/store/authStore";
@@ -38,7 +39,7 @@ function Header({
   router: ReturnType<typeof useRouter>;
 }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "24px" }}>
+    <div className="transfer-page-header" style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "24px" }}>
       <button onClick={() => step === "account" ? router.back() : setStep(
         step === "type" ? "account" :
         step === "recipient" ? "type" :
@@ -46,7 +47,7 @@ function Header({
         step === "passcode" ? "amount" :
         step === "confirm" ? "passcode" : "account"
       )}
-        style={{ width: "36px", height: "36px", borderRadius: "12px", border: "1px solid #E5E7EB", background: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        className="transfer-back-button" style={{ width: "36px", height: "36px", borderRadius: "12px", border: "1px solid #E5E7EB", background: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M19 12H5M12 19l-7-7 7-7" stroke="#333" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
       </button>
       <h2 style={{ fontSize: "18px", fontWeight: "700", color: "#000" }}>{title}</h2>
@@ -55,7 +56,7 @@ function Header({
 }
 
 function Wrap({ children }: { children: React.ReactNode }) {
-  return <div style={{ minHeight: "100vh", backgroundColor: "#F5F5F5", padding: "20px" }}>{children}</div>;
+  return <div className="bank-feature-page transfer-page" style={{ minHeight: "100vh", backgroundColor: "#F5F5F5", padding: "20px" }}>{children}</div>;
 }
 
 export default function TransferPage() {
@@ -279,36 +280,44 @@ export default function TransferPage() {
   if (step === "account") return (
     <Wrap>
       <Header title="Transfer Money" step={step} setStep={setStep} router={router} />
-      <p style={{ color: "#aaa", fontSize: "13px", marginBottom: "12px" }}>From Account</p>
-      <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "24px" }}>
+      <section className="transfer-account-panel">
+        <div className="transfer-account-heading">
+          <span><WalletCards size={22} /></span>
+          <div><h3>Select an account</h3><p>Choose where the money will be sent from.</p></div>
+        </div>
+        <div className="transfer-wallet-grid">
         {wallets.length === 0 && (
-          <div style={{ padding: "32px", textAlign: "center", backgroundColor: "#fff", borderRadius: "16px" }}>
+          <div className="transfer-wallet-empty" style={{ padding: "32px", textAlign: "center", backgroundColor: "#fff", borderRadius: "16px" }}>
             <p style={{ color: "#aaa", fontSize: "14px" }}>No wallets found. Add money first.</p>
           </div>
         )}
         {wallets.map((w) => (
-          <button key={w.currency} onClick={() => {
+          <button className={`transfer-wallet-card${selectedWallet?.currency === w.currency ? " is-selected" : ""}`} key={w.currency} onClick={() => {
               setSelectedWallet(w);
               setSelectedDestinationWallet(null);
               setError("");
             }}
-            style={{ backgroundColor: "#fff", border: `2px solid ${selectedWallet?.currency === w.currency ? "#00C853" : "#F0F0F0"}`, borderRadius: "16px", padding: "16px", textAlign: "left", cursor: "pointer" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div>
-                <span style={{ backgroundColor: "#00C853", color: "#fff", fontSize: "10px", fontWeight: "700", padding: "2px 8px", borderRadius: "6px", marginRight: "8px" }}>{w.currency}</span>
-                <span style={{ fontSize: "14px", fontWeight: "600", color: "#000" }}>{walletLabel(w.currency)}</span>
-              </div>
-              <span style={{ fontSize: "16px", fontWeight: "700", color: "#000" }}>
-                {formatMoney(w.balance, w.currency)}
-              </span>
+            >
+            <div className="transfer-wallet-card__top">
+              <span className="transfer-wallet-currency">{w.currency}</span>
+              {selectedWallet?.currency === w.currency && <CheckCircle2 size={19} />}
             </div>
+            <p>{walletLabel(w.currency)}</p>
+            <strong>{formatMoney(w.balance, w.currency)}</strong>
+            <small>Available balance</small>
           </button>
         ))}
-      </div>
-      <button onClick={() => setStep("type")} disabled={!selectedWallet}
-        style={{ width: "100%", backgroundColor: selectedWallet ? "#00C853" : "#E5E7EB", color: selectedWallet ? "#fff" : "#999", fontWeight: "700", fontSize: "15px", border: "none", borderRadius: "14px", padding: "14px", cursor: selectedWallet ? "pointer" : "not-allowed" }}>
-        Next
-      </button>
+        </div>
+        <div className="transfer-account-footer">
+          <div>
+            <small>Sending from</small>
+            <strong>{selectedWallet ? walletLabel(selectedWallet.currency) : "Select an account"}</strong>
+          </div>
+          <button className="transfer-continue-button" onClick={() => setStep("type")} disabled={!selectedWallet}>
+            Continue <ArrowRight size={18} />
+          </button>
+        </div>
+      </section>
     </Wrap>
   );
 
@@ -482,103 +491,57 @@ export default function TransferPage() {
   if (step === "recipient") return (
     <Wrap>
       <Header title="Transfer to?" step={step} setStep={setStep} router={router} />
-      <div style={{ display: "flex", gap: "8px", marginBottom: "20px" }}>
-        {(["mobile", "iban"] as Tab[]).map((t) => (
-          <button key={t} onClick={() => {
-            setTab(t);
-            setSearch("");
-            setRecipient(null);
-            setError("");
-            setPhone("");
-            setIban("");
-          }}
-            style={{ flex: 1, padding: "10px", borderRadius: "12px", border: "none", backgroundColor: tab === t ? "#00C853" : "#F0F0F0", color: tab === t ? "#fff" : "#666", fontWeight: "600", fontSize: "13px", cursor: "pointer" }}>
-            {t === "mobile" ? "Mobile Number" : "IBAN"}
-          </button>
-        ))}
-      </div>
-      {tab === "mobile" ? (
-        <div style={{ marginBottom: "16px" }}>
-          <div style={{ display: "flex", alignItems: "center", border: "1.5px solid #E5E7EB", borderRadius: "14px", padding: "12px 16px", gap: "10px", backgroundColor: "#fff" }}>
-            <span style={{ fontSize: "13px", color: "#666", whiteSpace: "nowrap" }}>🇱🇧 +961</span>
-            <div style={{ width: "1px", height: "16px", backgroundColor: "#E5E7EB" }} />
-            <input type="tel" placeholder="70 123 456" value={phone} onChange={(e) => { setPhone(e.target.value); setRecipient(null); setError(""); }}
-              style={{ flex: 1, border: "none", outline: "none", fontSize: "14px", color: "#000", backgroundColor: "transparent" }} />
+      <section className="transfer-recipient-panel">
+        <div className="transfer-recipient-heading">
+          <div><h3>Recipient details</h3><p>Enter a mobile number or Lebanese IBAN.</p></div>
+          <div className="transfer-recipient-tabs">
+            {(["mobile", "iban"] as Tab[]).map((t) => (
+              <button className={tab === t ? "is-active" : ""} key={t} onClick={() => {
+                setTab(t); setSearch(""); setRecipient(null); setError(""); setPhone(""); setIban("");
+              }}>
+                {t === "mobile" ? <Smartphone size={17} /> : <Building2 size={17} />}
+                {t === "mobile" ? "Mobile" : "IBAN"}
+              </button>
+            ))}
           </div>
         </div>
-      ) : (
-        <div style={{ marginBottom: "16px" }}>
-          <input type="text" placeholder="LB00 0000 0000 0000 0000 00" value={iban} onChange={(e) => { setIban(e.target.value); setRecipient(null); setError(""); }}
-            style={{ width: "100%", border: "1.5px solid #E5E7EB", borderRadius: "14px", padding: "12px 16px", fontSize: "14px", color: "#000", outline: "none", boxSizing: "border-box" }} />
-        </div>
-      )}
-      {error && <p style={{ color: "#EF4444", fontSize: "13px", marginBottom: "12px" }}>{error}</p>}
-      {recipient?.exists && recipient.kyc_approved && (
-        <div style={{ backgroundColor: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: "12px", padding: "12px 16px", marginBottom: "16px" }}>
-          <p style={{ color: "#166534", fontSize: "13px", fontWeight: "600" }}>✓ Sending to: {recipient.display_name}</p>
-        </div>
-      )}
-      <button onClick={validateRecipient} disabled={validating || (tab === "mobile" ? phone.length < 7 : !/^LB[A-Za-z0-9]{22}$/.test(iban.replace(/\s/g, "")))}
-        style={{ width: "100%", backgroundColor: "#00C853", color: "#fff", fontWeight: "700", fontSize: "15px", border: "none", borderRadius: "14px", padding: "14px", cursor: "pointer", marginBottom: "20px" }}>
-        {validating ? "Checking..." : "Validate"}
-      </button>
-      {recipient?.exists && recipient.kyc_approved && (
-        <button onClick={() => setStep("amount")}
-          style={{ width: "100%", backgroundColor: "#000", color: "#fff", fontWeight: "700", fontSize: "15px", border: "none", borderRadius: "14px", padding: "14px", cursor: "pointer" }}>
-          Next
-        </button>
-      )}
-      {tabBeneficiaries.length > 0 && (
-        <div style={{ marginTop: "20px" }}>
-          <input
-            type="search"
-            placeholder="Search saved beneficiaries..."
-            aria-label="Search saved beneficiaries"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            style={{
-              width: "100%",
-              border: "1.5px solid #E5E7EB",
-              borderRadius: "14px",
-              padding: "12px 16px",
-              fontSize: "14px",
-              color: "#000",
-              outline: "none",
-              boxSizing: "border-box",
-              marginBottom: "12px",
-            }}
-          />
 
-          {filteredBeneficiaries.length === 0 ? (
-            <div
-              style={{
-                backgroundColor: "#fff",
-                border: "1px solid #F0F0F0",
-                borderRadius: "14px",
-                padding: "20px",
-                textAlign: "center",
-              }}
-            >
-              <p
-                style={{
-                  color: "#888",
-                  fontSize: "13px",
-                  margin: 0,
-                }}
-              >
-                No saved beneficiaries match your search.
-              </p>
-            </div>
+        <div className={`transfer-recipient-entry${error ? " has-error" : ""}`}>
+          <span className="transfer-recipient-entry__icon">{tab === "mobile" ? <Smartphone size={20} /> : <Building2 size={20} />}</span>
+          {tab === "mobile" ? (
+            <>
+              <span className="transfer-phone-prefix">+961</span>
+              <input type="tel" aria-label="Mobile number" placeholder="70 123 456" value={phone} onChange={(e) => { setPhone(e.target.value); setRecipient(null); setError(""); }} />
+            </>
           ) : (
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: "8px",
-              }}
-            >
+            <input type="text" aria-label="Lebanese IBAN" placeholder="LB00 0000 0000 0000 0000 00" value={iban} onChange={(e) => { setIban(e.target.value); setRecipient(null); setError(""); }} />
+          )}
+          <button className="transfer-validate-button" onClick={validateRecipient} disabled={validating || (tab === "mobile" ? phone.length < 7 : !/^LB[A-Za-z0-9]{22}$/.test(iban.replace(/\s/g, "")))}>
+            {validating ? "Checking..." : "Validate"}
+          </button>
+        </div>
+        {error && <p className="transfer-recipient-error">{error}</p>}
+
+        {recipient?.exists && recipient.kyc_approved && (
+          <div className="transfer-recipient-confirmed">
+            <span><CheckCircle2 size={20} /></span>
+            <div><small>Verified Neo recipient</small><strong>{recipient.display_name}</strong></div>
+            <button onClick={() => setStep("amount")}>Continue <ArrowRight size={17} /></button>
+          </div>
+        )}
+      </section>
+
+      {tabBeneficiaries.length > 0 && (
+        <section className="transfer-saved-section">
+          <div className="transfer-saved-heading"><div><h3>Saved beneficiaries</h3><p>Select a recipient to fill their details.</p></div><span>{tabBeneficiaries.length} saved</span></div>
+          <label className="transfer-saved-search"><Search size={18} /><input type="search" placeholder="Search beneficiaries" aria-label="Search saved beneficiaries" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
+          {filteredBeneficiaries.length === 0 ? (
+            <div className="transfer-saved-empty">No saved beneficiaries match your search.</div>
+          ) : (
+            <div className="transfer-saved-grid">
               {filteredBeneficiaries.map((beneficiary) => (
                 <button
+                  className="transfer-saved-card"
                   type="button"
                   key={beneficiary.id}
                   onClick={() => {
@@ -594,37 +557,15 @@ export default function TransferPage() {
                     setRecipient(null);
                     setError("");
                   }}
-                  style={{
-                    backgroundColor: "#fff",
-                    border: "1px solid #F0F0F0",
-                    borderRadius: "14px",
-                    padding: "12px 16px",
-                    textAlign: "left",
-                    cursor: "pointer",
-                  }}
                 >
-                  <p
-                    style={{
-                      fontSize: "14px",
-                      fontWeight: "600",
-                      color: "#000",
-                    }}
-                  >
-                    {beneficiary.nickname}
-                  </p>
-                  <p
-                    style={{
-                      fontSize: "12px",
-                      color: "#aaa",
-                    }}
-                  >
-                    {beneficiary.value}
-                  </p>
+                  <span className="transfer-saved-avatar"><UserRound size={19} /></span>
+                  <div><strong>{beneficiary.nickname}</strong><small>{beneficiary.value}</small></div>
+                  <ChevronRight size={18} />
                 </button>
               ))}
             </div>
           )}
-        </div>
+        </section>
       )}
     </Wrap>
   );
@@ -647,7 +588,7 @@ export default function TransferPage() {
       </div>
       {error && <p style={{ color: "#EF4444", fontSize: "13px", marginBottom: "12px" }}>{error}</p>}
       <button onClick={() => setStep("passcode")} disabled={!amount || insufficient || amountNum <= 0}
-        style={{ width: "100%", backgroundColor: !amount || insufficient || amountNum <= 0 ? "#E5E7EB" : "#00C853", color: !amount || insufficient || amountNum <= 0 ? "#999" : "#fff", fontWeight: "700", fontSize: "15px", border: "none", borderRadius: "14px", padding: "14px", cursor: !amount || insufficient || amountNum <= 0 ? "not-allowed" : "pointer" }}>
+        style={{ width: "100%", backgroundColor: !amount || insufficient || amountNum <= 0 ? "#E5E7EB" : "#111713", color: !amount || insufficient || amountNum <= 0 ? "#999" : "#00D66F", fontWeight: "800", fontSize: "15px", border: !amount || insufficient || amountNum <= 0 ? "none" : "1px solid #26372E", borderRadius: "14px", padding: "15px", cursor: !amount || insufficient || amountNum <= 0 ? "not-allowed" : "pointer" }}>
         Next
       </button>
     </Wrap>
@@ -675,7 +616,7 @@ export default function TransferPage() {
       </div>
       {error && <p style={{ color: "#EF4444", fontSize: "13px", marginBottom: "12px" }}>{error}</p>}
       <button onClick={handlePasscode} disabled={passcode.length < 6 || loading}
-        style={{ width: "100%", backgroundColor: passcode.length < 6 ? "#E5E7EB" : "#00C853", color: passcode.length < 6 ? "#999" : "#fff", fontWeight: "700", fontSize: "15px", border: "none", borderRadius: "14px", padding: "14px", cursor: passcode.length < 6 ? "not-allowed" : "pointer" }}>
+        style={{ width: "100%", backgroundColor: passcode.length < 6 ? "#E5E7EB" : "#111713", color: passcode.length < 6 ? "#999" : "#00D66F", fontWeight: "800", fontSize: "15px", border: passcode.length < 6 ? "none" : "1px solid #26372E", borderRadius: "14px", padding: "15px", cursor: passcode.length < 6 ? "not-allowed" : "pointer" }}>
         {loading ? "Verifying..." : "Continue"}
       </button>
     </Wrap>
@@ -708,7 +649,7 @@ export default function TransferPage() {
       </div>
       {error && <p style={{ color: "#EF4444", fontSize: "13px", marginBottom: "12px" }}>{error}</p>}
       <button onClick={handleSubmit} disabled={loading}
-        style={{ width: "100%", backgroundColor: loading ? "#86EFAC" : "#00C853", color: "#fff", fontWeight: "700", fontSize: "15px", border: "none", borderRadius: "14px", padding: "14px", cursor: loading ? "not-allowed" : "pointer" }}>
+        style={{ width: "100%", backgroundColor: loading ? "#86EFAC" : "#111713", color: loading ? "#166534" : "#00D66F", fontWeight: "800", fontSize: "15px", border: loading ? "none" : "1px solid #26372E", borderRadius: "14px", padding: "15px", cursor: loading ? "not-allowed" : "pointer" }}>
         {loading ? "Sending..." : "Confirm Transfer"}
       </button>
     </Wrap>
@@ -717,7 +658,9 @@ export default function TransferPage() {
   return (
     <Wrap>
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "16px", paddingTop: "40px" }}>
-        <div style={{ width: "72px", height: "72px", borderRadius: "50%", backgroundColor: "#F0FDF4", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "32px" }}>✅</div>
+        <div className="transfer-success-icon" aria-label="Transfer successful">
+          <Check size={34} strokeWidth={2.5} />
+        </div>
         <h2 style={{ fontSize: "22px", fontWeight: "700", color: "#000" }}>
           {transferType === "own"
             ? "Transfer Completed!"
@@ -796,7 +739,7 @@ export default function TransferPage() {
                         setLoading(false);
                       }
                     }}
-                    style={{ flex: 1, backgroundColor: loading ? "#86EFAC" : "#00C853", color: "#fff", border: "none", borderRadius: "10px", padding: "10px", fontSize: "13px", fontWeight: "700", cursor: loading ? "not-allowed" : "pointer" }}
+                    style={{ flex: 1, backgroundColor: loading ? "#86EFAC" : "#111713", color: loading ? "#166534" : "#00D66F", border: loading ? "none" : "1px solid #26372E", borderRadius: "10px", padding: "10px", fontSize: "13px", fontWeight: "800", cursor: loading ? "not-allowed" : "pointer" }}
                   >
                     {loading ? "Saving..." : "Save"}
                   </button>
@@ -814,7 +757,7 @@ export default function TransferPage() {
           </div>
         )}
         <button onClick={() => router.push("/dashboard")}
-          style={{ width: "100%", backgroundColor: "#00C853", color: "#fff", fontWeight: "700", fontSize: "15px", border: "none", borderRadius: "14px", padding: "14px", cursor: "pointer" }}>
+          style={{ width: "100%", backgroundColor: "#111713", color: "#00D66F", fontWeight: "800", fontSize: "15px", border: "1px solid #26372E", borderRadius: "14px", padding: "15px", cursor: "pointer", boxShadow: "0 10px 24px rgba(7,24,14,.14)" }}>
           Back to Dashboard
         </button>
       </div>

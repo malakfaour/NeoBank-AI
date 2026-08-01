@@ -13,6 +13,7 @@ import api from "@/lib/axios";
 import { getStripe } from "@/lib/stripe";
 import KYCActionLock from "@/components/kyc/KYCActionLock";
 import { useAuthStore } from "@/store/authStore";
+import { ArrowRight, CheckCircle2, WalletCards } from "lucide-react";
 
 interface Wallet { id?: number; currency: string; balance: number; account_number: string | null; iban: string | null; }
 type Step = "account" | "card" | "confirm" | "receipt";
@@ -21,17 +22,17 @@ const WALLET_LABELS: Record<string, string> = { USD: "Fresh USD", LBP: "Cash LBP
 const walletLabel = (currency?: string) => (currency && WALLET_LABELS[currency]) || currency || "";
 const formatAmount = (currency: string | undefined, value: number) => {
   if (currency === "USD") return `$${value.toFixed(2)}`;
-  if (currency === "LBP") return `${value.toLocaleString()} ل.ل`;
+  if (currency === "LBP") return `${value.toLocaleString()} LBP`;
   return `${value.toLocaleString()} ${currency ?? ""}`;
 };
 
 const Wrap = ({ children }: { children: React.ReactNode }) => (
-  <div style={{ minHeight: "100vh", backgroundColor: "#F5F5F5", padding: "20px" }}>{children}</div>
+  <div className="bank-feature-page add-money-page" style={{ minHeight: "100vh", backgroundColor: "#F5F5F5", padding: "20px" }}>{children}</div>
 );
 
 const Header = ({ title, onBack }: { title: string; onBack: () => void }) => (
-  <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "24px" }}>
-    <button onClick={onBack}
+  <div className="transfer-page-header" style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "24px" }}>
+    <button className="transfer-back-button" onClick={onBack}
       style={{ width: "36px", height: "36px", borderRadius: "12px", border: "1px solid #E5E7EB", background: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M19 12H5M12 19l-7-7 7-7" stroke="#333" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
     </button>
@@ -228,27 +229,29 @@ function AddMoneyForm() {
   if (step === "account") return (
     <Wrap>
       <Header title="Add Money" onBack={goBack} />
-      <p style={{ color: "#aaa", fontSize: "13px", marginBottom: "12px" }}>Top up to</p>
-      <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "24px" }}>
+      <section className="transfer-account-panel">
+        <div className="transfer-account-heading">
+          <span><WalletCards size={22} /></span>
+          <div><h3>Choose a wallet</h3><p>Select where you want to add funds.</p></div>
+        </div>
+        <div className="transfer-wallet-grid">
         {wallets.map((w) => (
-          <button key={w.currency} onClick={() => setSelected(w)}
-            style={{ backgroundColor: "#fff", border: `2px solid ${selected?.currency === w.currency ? "#00C853" : "#F0F0F0"}`, borderRadius: "16px", padding: "16px", textAlign: "left", cursor: "pointer" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div>
-                <span style={{ backgroundColor: "#00C853", color: "#fff", fontSize: "10px", fontWeight: "700", padding: "2px 8px", borderRadius: "6px", marginRight: "8px" }}>{w.currency}</span>
-                <span style={{ fontSize: "14px", fontWeight: "600", color: "#000" }}>{walletLabel(w.currency)}</span>
-              </div>
-              <span style={{ fontSize: "16px", fontWeight: "700", color: "#000" }}>
-                {formatAmount(w.currency, w.balance)}
-              </span>
+          <button className={`transfer-wallet-card${selected?.currency === w.currency ? " is-selected" : ""}`} key={w.currency} onClick={() => setSelected(w)}>
+            <div className="transfer-wallet-card__top">
+              <span className="transfer-wallet-currency">{w.currency}</span>
+              {selected?.currency === w.currency && <CheckCircle2 size={19} />}
             </div>
+            <p>{walletLabel(w.currency)}</p>
+            <strong>{formatAmount(w.currency, w.balance)}</strong>
+            <small>Current balance</small>
           </button>
         ))}
-      </div>
-      <button onClick={() => setStep("card")} disabled={!selected}
-        style={{ width: "100%", backgroundColor: selected ? "#00C853" : "#E5E7EB", color: selected ? "#fff" : "#999", fontWeight: "700", fontSize: "15px", border: "none", borderRadius: "14px", padding: "14px", cursor: selected ? "pointer" : "not-allowed" }}>
-        Next
-      </button>
+        </div>
+        <div className="transfer-account-footer">
+          <div><small>Adding money to</small><strong>{selected ? walletLabel(selected.currency) : "Select a wallet"}</strong></div>
+          <button className="transfer-continue-button" onClick={() => setStep("card")} disabled={!selected}>Continue <ArrowRight size={18} /></button>
+        </div>
+      </section>
     </Wrap>
   );
 
@@ -286,7 +289,7 @@ function AddMoneyForm() {
         {[
           { label: "To", value: `${walletLabel(selected?.currency)} wallet` },
           { label: "Amount", value: formatAmount(selected?.currency, parseFloat(amount)) },
-          { label: "Card", value: cardLast4 ? `•••• ${cardLast4}` : "Card on file" },
+          { label: "Card", value: cardLast4 ? `Card ending in ${cardLast4}` : "Card on file" },
         ].map(({ label, value }) => (
           <div key={label} style={{ display: "flex", justifyContent: "space-between" }}>
             <p style={{ color: "#aaa", fontSize: "14px" }}>{label}</p>
@@ -305,7 +308,7 @@ function AddMoneyForm() {
   return (
     <Wrap>
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "16px", paddingTop: "40px" }}>
-        <div style={{ width: "72px", height: "72px", borderRadius: "50%", backgroundColor: "#F0FDF4", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "32px" }}>✅</div>
+        <div className="transfer-success-icon"><CheckCircle2 size={34} /></div>
         <h2 style={{ fontSize: "22px", fontWeight: "700", color: "#000" }}>Top-Up Successful!</h2>
         <div style={{ backgroundColor: "#fff", borderRadius: "20px", padding: "24px", width: "100%", display: "flex", flexDirection: "column", gap: "12px" }}>
           {[

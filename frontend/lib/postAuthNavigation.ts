@@ -28,7 +28,7 @@ export function resolvePostAuthDestination(state: AuthRoutingState): string {
   // not the customer dashboard (which they have no wallets/transactions for).
   if (state.role === "admin" || state.role === "compliance_officer") return "/admin/kyc";
   // Customers must complete the wizard at least once before touching the dashboard.
-  if (state.kyc_onboarding_state === "not_submitted") return "/kyc";
+  if (state.kyc_onboarding_state === "not_submitted") return "/kyc-instructions";
   // Once submitted (pending/flagged/rejected/approved), the dashboard is reachable -
   // KYCActionLock gates the individual money-moving actions until approval.
   return "/dashboard";

@@ -121,6 +121,12 @@ export default function ChatWidget() {
       : defaultSessionId
   );
   const [chatLoading, setChatLoading] = useState(false);
+
+  useEffect(() => {
+    const openChat = () => setChatOpen(true);
+    window.addEventListener("neo:open-chat", openChat);
+    return () => window.removeEventListener("neo:open-chat", openChat);
+  }, []);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [showPasscode, setShowPasscode] = useState(false);
   const [passcode, setPasscode] = useState("");
@@ -280,7 +286,7 @@ export default function ChatWidget() {
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
                 </div>
                 <div>
-                  <p style={{ fontSize: "14px", fontWeight: "700", color: "#000" }}>Neo Assistant</p>
+                  <p style={{ fontSize: "14px", fontWeight: "700", color: "#000" }}>Neo AI Help</p>
                   <p style={{ fontSize: "11px", color: "#00C853" }}>{"\u25CF"} Online</p>
                 </div>
               </div>
@@ -297,7 +303,8 @@ export default function ChatWidget() {
             <div style={{ flex: 1, overflowY: "auto", padding: "16px", display: "flex", flexDirection: "column", gap: "10px" }}>
               {messages.length === 0 && (
                 <div style={{ textAlign: "center", marginTop: "40px" }}>
-                  <p style={{ fontSize: "14px", color: "#aaa" }}>Hi! How can I help you today?</p>
+                  <p style={{ fontSize: "14px", fontWeight: "600", color: "#333" }}>How can Neo AI help?</p>
+                  <p style={{ marginTop: "5px", fontSize: "11px", color: "#8B948E" }}>Ask about your accounts, transfers, bills, or app support.</p>
                 </div>
               )}
               {messages.map((m, i) => (

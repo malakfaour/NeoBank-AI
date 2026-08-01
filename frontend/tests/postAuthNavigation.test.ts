@@ -19,7 +19,7 @@ describe("post-authentication routing", () => {
   });
 
   it("forces the KYC wizard only before the first submission", () => {
-    expect(resolvePostAuthDestination({ ...complete, kyc_onboarding_state: "not_submitted" })).toBe("/kyc");
+    expect(resolvePostAuthDestination({ ...complete, kyc_onboarding_state: "not_submitted" })).toBe("/kyc-instructions");
   });
 
   it("allows limited dashboard access once KYC has been submitted at least once", () => {

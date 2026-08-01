@@ -2,6 +2,18 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import {
+  Building2,
+  Check,
+  Pencil,
+  Plus,
+  Search,
+  Send,
+  Smartphone,
+  Trash2,
+  Users,
+  X,
+} from "lucide-react";
 import api from "@/lib/axios";
 
 type BeneficiaryType = "mobile" | "iban";
@@ -206,187 +218,132 @@ export default function BeneficiariesPage() {
   };
 
   return (
-    <main style={{ minHeight: "100vh", backgroundColor: "#F5F5F5", padding: "20px" }}>
+    <main className="bank-feature-page beneficiaries-page" style={{ minHeight: "100vh", backgroundColor: "#F5F5F5", padding: "20px" }}>
       <PageHeader onBack={() => router.back()} />
 
-      <div style={{ display: "flex", gap: "8px", marginBottom: "20px" }}>
-        {(["mobile", "iban"] as BeneficiaryType[]).map((type) => (
+      <section className="beneficiaries-hero">
+        <div className="beneficiaries-hero__copy">
+          <h2>Your beneficiaries</h2>
+          <p>Manage saved mobile numbers and bank accounts.</p>
+        </div>
+        <div className="beneficiaries-hero__side">
           <button
+            className="beneficiary-add-button"
             type="button"
-            key={type}
-            onClick={() => switchType(type)}
-            style={{ flex: 1, padding: "10px", borderRadius: "12px", border: "none", backgroundColor: activeType === type ? "#00C853" : "#E5E7EB", color: activeType === type ? "#fff" : "#666", fontWeight: "600", fontSize: "13px", cursor: "pointer" }}
+            onClick={() => {
+              setShowAddForm((current) => !current);
+              setError("");
+            }}
           >
-            {beneficiaryTypeLabel(type)}
+            {showAddForm ? <X size={18} /> : <Plus size={18} />}
+            {showAddForm ? "Close" : "Add beneficiary"}
           </button>
-        ))}
-      </div>
+        </div>
+      </section>
 
-      <input
-        type="search"
-        value={search}
-        onChange={(event) => {
-          setSearch(event.target.value);
-          setLoading(true);
-          setError("");
-        }}
-        placeholder={beneficiarySearchPlaceholder(activeType)}
-        aria-label="Search beneficiaries"
-        style={{
-          ...inputStyle,
-          backgroundColor: "#fff",
-          marginBottom: "14px",
-        }}
-      />
-
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
-        <p style={{ color: "#666", fontSize: "13px", margin: 0 }}>
-          {beneficiarySectionLabel(activeType)}
-        </p>
-        <button
-          type="button"
-          onClick={() => {
-            setShowAddForm((current) => !current);
-            setError("");
-          }}
-          style={{ backgroundColor: "#00C853", color: "#fff", border: "none", borderRadius: "10px", padding: "9px 16px", fontSize: "13px", fontWeight: "700", cursor: "pointer" }}
-        >
-          {showAddForm ? "Cancel" : "Add"}
-        </button>
-      </div>
+      <section className="beneficiary-toolbar">
+        <div className="beneficiary-tabs" role="tablist" aria-label="Beneficiary type">
+          {(["mobile", "iban"] as BeneficiaryType[]).map((type) => (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeType === type}
+              className={activeType === type ? "is-active" : ""}
+              key={type}
+              onClick={() => switchType(type)}
+            >
+              {type === "mobile" ? <Smartphone size={18} /> : <Building2 size={18} />}
+              {beneficiaryTypeLabel(type)}
+            </button>
+          ))}
+        </div>
+        <label className="beneficiary-search">
+          <Search size={19} />
+          <input
+            type="search"
+            value={search}
+            onChange={(event) => {
+              setSearch(event.target.value);
+              setLoading(true);
+              setError("");
+            }}
+            placeholder={beneficiarySearchPlaceholder(activeType)}
+            aria-label="Search beneficiaries"
+          />
+        </label>
+      </section>
 
       {showAddForm && (
-        <form onSubmit={handleAdd} style={{ backgroundColor: "#fff", borderRadius: "16px", padding: "16px", marginBottom: "14px", display: "flex", flexDirection: "column", gap: "10px" }}>
-          <input
-            value={nickname}
-            onChange={(event) => setNickname(event.target.value)}
-            placeholder="Nickname"
-            required
-            style={inputStyle}
-          />
-          <input
-            value={value}
-            onChange={(event) => setValue(event.target.value)}
-            placeholder={beneficiaryValuePlaceholder(activeType)}
-            required
-            style={inputStyle}
-          />
-          <button
-            type="submit"
-            disabled={actionLoading === "add" || !nickname.trim() || !value.trim()}
-            style={{ backgroundColor: actionLoading === "add" ? "#86EFAC" : "#00C853", color: "#fff", border: "none", borderRadius: "12px", padding: "12px", fontSize: "14px", fontWeight: "700", cursor: actionLoading === "add" ? "not-allowed" : "pointer" }}
-          >
-            {actionLoading === "add" ? "Adding..." : "Add Beneficiary"}
+        <form className="beneficiary-form" onSubmit={handleAdd}>
+          <div className="beneficiary-form__heading">
+            <span><Plus size={20} /></span>
+            <div><h3>Add a new beneficiary</h3><p>Save their details for future transfers.</p></div>
+          </div>
+          <div className="beneficiary-form__fields">
+            <label><span>Display name</span><input value={nickname} onChange={(event) => setNickname(event.target.value)} placeholder="e.g. Zahraa" required style={inputStyle} /></label>
+            <label>
+              <span>{activeType === "mobile" ? "Mobile number" : "IBAN"}</span>
+              <input
+                className={error ? "has-error" : ""}
+                value={value}
+                onChange={(event) => { setValue(event.target.value); setError(""); }}
+                placeholder={beneficiaryValuePlaceholder(activeType)}
+                required
+                aria-invalid={Boolean(error)}
+                style={inputStyle}
+              />
+              {error && <small className="beneficiary-field-error">{error}</small>}
+            </label>
+          </div>
+          <button className="beneficiary-form__submit" type="submit" disabled={actionLoading === "add" || !nickname.trim() || !value.trim()}>
+            <Check size={18} /> {actionLoading === "add" ? "Adding..." : "Save beneficiary"}
           </button>
         </form>
       )}
 
-      {error && (
-        <p style={{ color: "#EF4444", fontSize: "13px", marginBottom: "12px" }}>{error}</p>
-      )}
+      <div className="beneficiary-section-heading">
+        <div>
+          <h3>{beneficiarySectionLabel(activeType)}</h3>
+          {search.trim() && <p>{`Results for “${search.trim()}”`}</p>}
+        </div>
+        <span>{beneficiaries.length} saved</span>
+      </div>
 
       {loading ? (
-        <div style={{ backgroundColor: "#fff", borderRadius: "16px", padding: "32px", textAlign: "center" }}>
-          <p style={{ color: "#888", fontSize: "14px" }}>Loading beneficiaries...</p>
-        </div>
+        <div className="beneficiary-state"><span className="beneficiary-state__icon"><Users size={23} /></span><strong>Loading beneficiaries</strong><p>Fetching your saved recipients...</p></div>
       ) : beneficiaries.length === 0 ? (
-        <div style={{ backgroundColor: "#fff", borderRadius: "16px", padding: "32px", textAlign: "center" }}>
-          <p style={{ color: "#888", fontSize: "14px" }}>
-            {search.trim()
-              ? "No beneficiaries match your search."
-              : "No saved beneficiaries yet."}
-          </p>
-        </div>
+        <div className="beneficiary-state"><span className="beneficiary-state__icon"><Users size={23} /></span><strong>No beneficiaries found</strong><p>{search.trim() ? "Try another name or account detail." : "Add your first trusted recipient to get started."}</p></div>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+        <div className="beneficiary-grid">
           {beneficiaries.map((beneficiary) => (
-            <div key={beneficiary.id} style={{ backgroundColor: "#fff", borderRadius: "16px", padding: "16px" }}>
-              {editingId === beneficiary.id ? (
-                <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                  <input
-                    value={editNickname}
-                    onChange={(event) => setEditNickname(event.target.value)}
-                    aria-label={`Rename ${beneficiary.nickname}`}
-                    style={inputStyle}
-                  />
-                  <div style={{ display: "flex", gap: "8px" }}>
-                    <button
-                      type="button"
-                      onClick={() => handleRename(beneficiary.id)}
-                      disabled={actionLoading === `edit-${beneficiary.id}` || !editNickname.trim()}
-                      style={{ flex: 1, backgroundColor: "#00C853", color: "#fff", border: "none", borderRadius: "10px", padding: "10px", fontWeight: "700", cursor: "pointer" }}
-                    >
-                      {actionLoading === `edit-${beneficiary.id}` ? "Saving..." : "Save"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEditingId(null);
-                        setEditNickname("");
-                      }}
-                      style={{ flex: 1, backgroundColor: "#E5E7EB", color: "#555", border: "none", borderRadius: "10px", padding: "10px", fontWeight: "700", cursor: "pointer" }}
-                    >
-                      Cancel
-                    </button>
-                  </div>
+            <article className="beneficiary-card" key={beneficiary.id}>
+              <div className="beneficiary-card__top">
+                <span className="beneficiary-avatar">{beneficiary.nickname.slice(0, 2).toUpperCase()}</span>
+                <div className="beneficiary-card__identity">
+                  <strong>{beneficiary.nickname}</strong>
+                  <span>{beneficiary.value}</span>
                 </div>
-              ) : (
-                <>
-                  <div style={{ marginBottom: "14px" }}>
-                    <p style={{ color: "#000", fontSize: "15px", fontWeight: "700", margin: "0 0 4px" }}>{beneficiary.nickname}</p>
-                    <p style={{ color: "#888", fontSize: "13px", margin: 0, wordBreak: "break-all" }}>{beneficiary.value}</p>
-                  </div>
-                  {confirmDeleteId === beneficiary.id ? (
-                    <div style={{ backgroundColor: "#FEF2F2", borderRadius: "10px", padding: "12px" }}>
-                      <p style={{ color: "#991B1B", fontSize: "13px", fontWeight: "600", margin: "0 0 10px" }}>Are you sure?</p>
-                      <div style={{ display: "flex", gap: "8px" }}>
-                        <button
-                          type="button"
-                          onClick={() => handleDelete(beneficiary.id)}
-                          disabled={actionLoading === `delete-${beneficiary.id}`}
-                          style={{ flex: 1, backgroundColor: "#EF4444", color: "#fff", border: "none", borderRadius: "9px", padding: "9px", fontWeight: "700", cursor: "pointer" }}
-                        >
-                          {actionLoading === `delete-${beneficiary.id}` ? "Deleting..." : "Delete"}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setConfirmDeleteId(null)}
-                          style={{ flex: 1, backgroundColor: "#fff", color: "#555", border: "1px solid #E5E7EB", borderRadius: "9px", padding: "9px", fontWeight: "700", cursor: "pointer" }}
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div style={{ display: "flex", gap: "8px" }}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditingId(beneficiary.id);
-                          setEditNickname(beneficiary.nickname);
-                          setConfirmDeleteId(null);
-                          setError("");
-                        }}
-                        style={{ flex: 1, backgroundColor: "#F0FDF4", color: "#00A844", border: "none", borderRadius: "10px", padding: "9px", fontWeight: "700", cursor: "pointer" }}
-                      >
-                        Rename
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setConfirmDeleteId(beneficiary.id);
-                          setEditingId(null);
-                          setError("");
-                        }}
-                        style={{ flex: 1, backgroundColor: "#FEF2F2", color: "#EF4444", border: "none", borderRadius: "10px", padding: "9px", fontWeight: "700", cursor: "pointer" }}
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  )}
-                </>
+                <div className="beneficiary-card__actions">
+                  <button type="button" className="is-transfer" title="Start transfer" aria-label={`Transfer to ${beneficiary.nickname}`} onClick={() => router.push("/transfer")}><Send size={18} /></button>
+                  <button type="button" title="Rename" aria-label={`Rename ${beneficiary.nickname}`} onClick={() => { setEditingId(beneficiary.id); setEditNickname(beneficiary.nickname); setConfirmDeleteId(null); setError(""); }}><Pencil size={17} /></button>
+                  <button type="button" className="is-danger" title="Delete" aria-label={`Delete ${beneficiary.nickname}`} onClick={() => { setConfirmDeleteId(beneficiary.id); setEditingId(null); setError(""); }}><Trash2 size={17} /></button>
+                </div>
+              </div>
+
+              {editingId === beneficiary.id && (
+                <div className="beneficiary-inline-panel">
+                  <label><span>New display name</span><input value={editNickname} onChange={(event) => setEditNickname(event.target.value)} aria-label={`Rename ${beneficiary.nickname}`} style={inputStyle} /></label>
+                  <div><button type="button" className="is-primary" onClick={() => handleRename(beneficiary.id)} disabled={actionLoading === `edit-${beneficiary.id}` || !editNickname.trim()}><Check size={16} /> {actionLoading === `edit-${beneficiary.id}` ? "Saving..." : "Save"}</button><button type="button" onClick={() => { setEditingId(null); setEditNickname(""); }}><X size={16} /> Cancel</button></div>
+                </div>
               )}
-            </div>
+
+              {confirmDeleteId === beneficiary.id && (
+                <div className="beneficiary-delete-panel">
+                  <div><strong>Remove this beneficiary?</strong><p>You can add them again later.</p></div>
+                  <div><button type="button" className="is-danger" onClick={() => handleDelete(beneficiary.id)} disabled={actionLoading === `delete-${beneficiary.id}`}><Trash2 size={16} /> {actionLoading === `delete-${beneficiary.id}` ? "Deleting..." : "Remove"}</button><button type="button" onClick={() => setConfirmDeleteId(null)}>Cancel</button></div>
+                </div>
+              )}
+            </article>
           ))}
         </div>
       )}

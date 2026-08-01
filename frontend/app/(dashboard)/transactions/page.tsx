@@ -24,13 +24,10 @@ function timeAgo(d: string) {
   return new Date(d).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 }
 
-const categoryColor: Record<string, string> = {
-  Transfer: "#3B82F6", Exchange: "#8B5CF6", Bills: "#F59E0B",
-  TopUp: "#00C853", Reversal: "#EF4444", Default: "#6B7280",
-};
+const transactionIconColor = "#00D66F";
 
 function TxIcon({ category }: { category: string }) {
-  const color = categoryColor[category] ?? categoryColor.Default;
+  const color = transactionIconColor;
   if (category === "Transfer") return <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>;
   if (category === "Exchange") return <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M8 7h12m0 0l-4-4m4 4l-4 4M16 17H4m0 0l4 4m-4-4l4-4" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>;
   if (category === "Bills") return <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>;
@@ -70,7 +67,7 @@ useEffect(() => {
   const totalPages = Math.ceil(total / pageSize);
 
   return (
-    <div style={{ minHeight: "100vh", backgroundColor: "#F5F5F5", padding: "20px", paddingBottom: "80px" }}>
+    <div className="bank-feature-page transactions-page" style={{ minHeight: "100vh", backgroundColor: "#F5F5F5", padding: "20px", paddingBottom: "80px" }}>
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "24px" }}>
         <button onClick={() => router.back()}
@@ -82,17 +79,17 @@ useEffect(() => {
       </div>
 
       {/* Filters */}
-      <div style={{ display: "flex", gap: "8px", marginBottom: "16px", overflowX: "auto", paddingBottom: "4px" }}>
+      <div className="transaction-filters" style={{ display: "flex", gap: "8px", marginBottom: "16px", overflowX: "auto", paddingBottom: "4px" }}>
         {filters.map((f) => (
           <button key={f} onClick={() => { setFilter(f); setPage(1); }}
-            style={{ padding: "6px 14px", borderRadius: "20px", border: "none", backgroundColor: filter === f ? "#00C853" : "#fff", color: filter === f ? "#fff" : "#333", fontSize: "13px", fontWeight: "600", cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0 }}>
+            style={{ padding: "9px 18px", borderRadius: "20px", border: filter === f ? "1px solid #26372E" : "1px solid transparent", backgroundColor: filter === f ? "#111713" : "#fff", color: filter === f ? "#00D66F" : "#333", fontSize: "13px", fontWeight: "700", cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0 }}>
             {f === "all" ? "All" : f}
           </button>
         ))}
       </div>
 
       {/* List */}
-      <div style={{ backgroundColor: "#fff", borderRadius: "20px", overflow: "hidden", marginBottom: "16px" }}>
+      <div className="feature-list-card" style={{ backgroundColor: "#fff", borderRadius: "20px", overflow: "hidden", marginBottom: "16px" }}>
         {loading ? (
           <div style={{ padding: "32px", textAlign: "center" }}><p style={{ color: "#aaa" }}>Loading...</p></div>
         ) : transactions.length === 0 ? (
@@ -100,8 +97,8 @@ useEffect(() => {
             <p style={{ color: "#aaa", fontSize: "14px" }}>No transactions found</p>
           </div>
         ) : transactions.map((tx, i) => (
-          <div key={tx.id} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "14px 16px", borderBottom: i < transactions.length - 1 ? "1px solid #F5F5F5" : "none" }}>
-            <div style={{ width: "36px", height: "36px", borderRadius: "12px", backgroundColor: "#F5F5F5", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <div className="feature-transaction-row" key={tx.id} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "14px 16px", borderBottom: i < transactions.length - 1 ? "1px solid #F5F5F5" : "none" }}>
+            <div className="feature-transaction-icon" style={{ width: "36px", height: "36px", borderRadius: "12px", backgroundColor: "#F5F5F5", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
               <TxIcon category={tx.category} />
             </div>
             <div style={{ flex: 1 }}>
