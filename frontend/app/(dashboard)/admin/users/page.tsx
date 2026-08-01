@@ -1,8 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import { Search, UsersRound } from "lucide-react";
 import api from "@/lib/axios";
 import { useAuthStore } from "@/store/authStore";
+import AdminPageHeader from "@/components/admin/AdminPageHeader";
+import { usePreferences } from "@/components/providers/AppPreferences";
 
 interface UserSearchItem {
   id: number;
@@ -31,9 +34,9 @@ const KYC_BADGE_COLORS: Record<string, { bg: string; fg: string }> = {
 };
 
 const ROLE_BADGE_COLORS: Record<string, { bg: string; fg: string }> = {
-  admin: { bg: "#EEF2FF", fg: "#3730A3" },
-  compliance_officer: { bg: "#ECFEFF", fg: "#0E7490" },
-  customer: { bg: "#F3F4F6", fg: "#4B5563" },
+  admin: { bg: "#10251B", fg: "#78EDB3" },
+  compliance_officer: { bg: "#E8F8EF", fg: "#007D44" },
+  customer: { bg: "#EEF2EF", fg: "#536159" },
 };
 
 function initials(name: string): string {
@@ -42,14 +45,11 @@ function initials(name: string): string {
   return (parts[0][0] + (parts[1]?.[0] ?? "")).toUpperCase();
 }
 
-const card: React.CSSProperties = {
-  backgroundColor: "#fff",
-  border: "1px solid #EEF1F4",
-  borderRadius: "16px",
-};
-
 export default function AdminUsersPage() {
-  const adminName = useAuthStore((s) => s.user?.full_name);
+  const { locale } = usePreferences();
+  const tr = (en: string, ar: string) => locale === "ar" ? ar : en;
+  const roleLabel = (value: string) => locale === "ar" ? ({ admin: "مدير النظام", compliance_officer: "مسؤول امتثال", customer: "عميل" } as Record<string, string>)[value] ?? value : value.replaceAll("_", " ");
+  const kycLabel = (value: string) => locale === "ar" ? ({ pending: "قيد الانتظار", flagged: "معلّم", approved: "مكتمل", rejected: "مرفوض", not_submitted: "غير مقدّم" } as Record<string, string>)[value] ?? value : value.replaceAll("_", " ");
   const role = useAuthStore((s) => s.user?.role);
   const canAdjust = role === "admin";
 
@@ -79,7 +79,7 @@ export default function AdminUsersPage() {
     } catch (err: unknown) {
       const status = (err as { response?: { status?: number } })?.response?.status;
       if (status === 403) setForbidden(true);
-      else setError("Search failed.");
+      else setError(tr("Search failed.", "تعذّر البحث عن الحسابات."));
     } finally {
       setSearching(false);
     }
@@ -95,20 +95,20 @@ export default function AdminUsersPage() {
       const res = await api.get(`/admin/users/${user.id}/wallets`);
       setWallets(res.data.items ?? []);
     } catch {
-      setError("Failed to load wallets.");
+      setError(tr("Failed to load wallets.", "تعذّر تحميل المحافظ."));
     } finally {
       setLoadingWallets(false);
     }
   };
 
   const adjustWallet = async (wallet: WalletItem) => {
-    const direction = window.prompt("Direction? Type \"credit\" or \"debit\"");
+    const direction = window.prompt(tr("Direction? Type \"credit\" or \"debit\"", "نوع العملية؟ اكتب credit للإضافة أو debit للخصم"));
     if (direction !== "credit" && direction !== "debit") return;
-    const amountStr = window.prompt(`Amount (${wallet.currency}):`);
+    const amountStr = window.prompt(tr(`Amount (${wallet.currency}):`, `المبلغ (${wallet.currency}):`));
     if (!amountStr) return;
     const amount = Number(amountStr);
-    if (!amount || amount <= 0) { setError("Invalid amount."); return; }
-    const reason = window.prompt("Reason for adjustment:");
+    if (!amount || amount <= 0) { setError(tr("Invalid amount.", "المبلغ غير صالح.")); return; }
+    const reason = window.prompt(tr("Reason for adjustment:", "سبب تعديل الرصيد:"));
     if (!reason) return;
 
     setAdjustingId(wallet.id);
@@ -124,7 +124,7 @@ export default function AdminUsersPage() {
       );
     } catch (err: unknown) {
       const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
-      setError(typeof detail === "string" ? detail : "Adjustment failed.");
+      setError(typeof detail === "string" ? detail : tr("Adjustment failed.", "تعذّر تعديل الرصيد."));
     } finally {
       setAdjustingId(null);
     }
@@ -132,7 +132,9 @@ export default function AdminUsersPage() {
 
   const toggleUserStatus = async (user: UserSearchItem) => {
     const suspending = user.is_active;
-    if (!window.confirm(suspending ? `Suspend ${user.full_name}? They won't be able to log in until reactivated.` : `Reactivate ${user.full_name}?`)) {
+    if (!window.confirm(suspending
+      ? tr(`Suspend ${user.full_name}? They won't be able to log in until reactivated.`, `هل تريد إيقاف حساب ${user.full_name}؟ لن يتمكن من تسجيل الدخول حتى إعادة تفعيله.`)
+      : tr(`Reactivate ${user.full_name}?`, `هل تريد إعادة تفعيل حساب ${user.full_name}؟`))) {
       return;
     }
     setStatusUpdatingId(user.id);
@@ -142,7 +144,7 @@ export default function AdminUsersPage() {
       setResults((prev) => prev.map((u) => (u.id === user.id ? { ...u, is_active: res.data.is_active } : u)));
     } catch (err: unknown) {
       const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
-      setError(typeof detail === "string" ? detail : "Could not update account status.");
+      setError(typeof detail === "string" ? detail : tr("Could not update account status.", "تعذّر تحديث حالة الحساب."));
     } finally {
       setStatusUpdatingId(null);
     }
@@ -150,79 +152,70 @@ export default function AdminUsersPage() {
 
   if (forbidden) {
     return (
-      <div style={{ minHeight: "100vh", backgroundColor: "#F7F8FA", padding: "20px" }}>
-        <div style={{ ...card, padding: "32px", textAlign: "center", maxWidth: "420px", margin: "80px auto" }}>
-          <p style={{ fontWeight: "700", color: "#000", marginBottom: "8px" }}>Compliance access required</p>
-          <p style={{ color: "#999", fontSize: "13px" }}>Your account needs the compliance_officer or admin role to look up users.</p>
+      <div className="admin-page">
+        <div className="admin-access-card">
+          <strong>{tr("Compliance access required", "صلاحية الامتثال مطلوبة")}</strong>
+          <p>{tr("Your account needs the compliance officer or administrator role to look up users.", "يجب أن يملك حسابك صلاحية مسؤول امتثال أو مدير للبحث عن المستخدمين.")}</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div style={{ minHeight: "100vh", backgroundColor: "#F7F8FA", padding: "24px 28px 80px" }}>
-      {/* Console header */}
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: "24px", flexWrap: "wrap", gap: "12px" }}>
-        <div>
-          <p style={{ color: "#9CA3AF", fontSize: "12px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: "4px" }}>Compliance console</p>
-          <h1 style={{ fontSize: "22px", fontWeight: "800", color: "#0F172A", margin: 0 }}>Users</h1>
-          <p style={{ color: "#6B7280", fontSize: "13px", marginTop: "4px" }}>Look up accounts, inspect wallets, and manage account status.</p>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: "8px", backgroundColor: "#fff", border: "1px solid #EEF1F4", borderRadius: "999px", padding: "6px 14px 6px 6px" }}>
-          <div style={{ width: "28px", height: "28px", borderRadius: "50%", backgroundColor: "#0F172A", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "11px", fontWeight: "700" }}>
-            {initials(adminName ?? "Admin")}
-          </div>
-          <span style={{ fontSize: "12px", fontWeight: "700", color: "#0F172A" }}>{adminName ?? "Admin"}</span>
-          <span style={{ fontSize: "10px", fontWeight: "700", color: "#00A844", backgroundColor: "#F0FDF4", borderRadius: "999px", padding: "2px 8px" }}>STAFF</span>
-        </div>
-      </div>
+    <div className="admin-page">
+      <AdminPageHeader
+        eyebrow={tr("Customer operations", "عمليات العملاء")}
+        title={tr("User accounts", "حسابات المستخدمين")}
+        description={tr("Find customers, inspect their wallets, and manage account access from one secure workspace.", "ابحث عن العملاء وراجع محافظهم وأدر صلاحية الوصول إلى حساباتهم من مساحة آمنة واحدة.")}
+      />
 
       {/* Search */}
-      <form onSubmit={search} style={{ display: "flex", gap: "8px", marginBottom: "20px" }}>
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search by name, phone, or account number"
-          style={{ flex: 1, padding: "12px 16px", borderRadius: "14px", border: "1.5px solid #E5E7EB", fontSize: "14px", backgroundColor: "#fff" }}
-        />
-        <button type="submit" disabled={searching}
-          style={{ padding: "12px 24px", borderRadius: "14px", border: "none", backgroundColor: "#0F172A", color: "#fff", fontSize: "14px", fontWeight: "700", cursor: searching ? "not-allowed" : "pointer" }}>
-          {searching ? "Searching…" : "Search"}
-        </button>
-      </form>
+      <div className="admin-toolbar admin-user-toolbar">
+        <div><strong>{tr("Account directory", "دليل الحسابات")}</strong><small>{tr("Search using customer or account details.", "ابحث باستخدام بيانات العميل أو الحساب.")}</small></div>
+        <form className="admin-search" onSubmit={search}>
+          <Search size={17} />
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={tr("Name, phone, or account number", "الاسم أو الهاتف أو رقم الحساب")} />
+          <button className="admin-primary-button" type="submit" disabled={searching}>{searching ? tr("Searching...", "جارٍ البحث...") : tr("Search", "بحث")}</button>
+        </form>
+      </div>
 
       {error && (
-        <div style={{ backgroundColor: "#FEF2F2", border: "1px solid #FECACA", borderRadius: "12px", padding: "12px", color: "#DC2626", fontSize: "13px", marginBottom: "16px" }}>
+        <div className="admin-error-banner">
           {error}
+        </div>
+      )}
+
+      {!searched && (
+        <div className="admin-data-card">
+          <div className="admin-empty"><div><span className="admin-empty__icon"><UsersRound size={24} /></span><strong>{tr("Search the account directory", "ابحث في دليل الحسابات")}</strong><p>{tr("Enter a customer name, phone number, or account number to begin.", "أدخل اسم العميل أو رقم الهاتف أو رقم الحساب للبدء.")}</p></div></div>
         </div>
       )}
 
       {/* Results table */}
       {searched && (
-        <div style={{ ...card, overflow: "hidden" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "2.4fr 1fr 1fr 1fr 1.8fr", gap: "12px", padding: "12px 20px", borderBottom: "1px solid #EEF1F4", backgroundColor: "#FAFBFC" }}>
-            {["Account", "Role", "KYC", "Status", ""].map((h) => (
+        <div className="admin-data-card">
+          <div className="admin-table-head admin-users-grid">
+            {(locale === "ar" ? ["الحساب", "الصلاحية", "التحقق من الهوية", "الحالة", ""] : ["Account", "Role", "KYC", "Status", ""]).map((h) => (
               <p key={h} style={{ fontSize: "11px", fontWeight: "700", color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.4px" }}>{h}</p>
             ))}
           </div>
 
           {results.length === 0 ? (
-            <div style={{ padding: "48px", textAlign: "center" }}>
-              <p style={{ color: "#aaa", fontSize: "14px" }}>No accounts match &quot;{query}&quot;.</p>
-            </div>
+            <div className="admin-empty"><div><span className="admin-empty__icon"><UsersRound size={24} /></span><strong>{tr("No matching accounts", "لا توجد حسابات مطابقة")}</strong><p>{tr(`No accounts match “${query}”.`, `لا توجد حسابات تطابق «${query}».`)}</p></div></div>
           ) : (
             results.map((u) => {
               const isExpanded = expandedId === u.id;
               const roleColors = ROLE_BADGE_COLORS[u.role] ?? ROLE_BADGE_COLORS.customer;
               const kycColors = KYC_BADGE_COLORS[u.kyc_status] ?? KYC_BADGE_COLORS.not_submitted;
               return (
-                <div key={u.id} style={{ borderBottom: "1px solid #F3F4F6" }}>
+                <div className="admin-user-record" key={u.id}>
                   <div
+                    className="admin-table-row admin-users-grid"
                     onClick={() => toggleRow(u)}
-                    style={{ display: "grid", gridTemplateColumns: "2.4fr 1fr 1fr 1fr 1.8fr", gap: "12px", padding: "14px 20px", alignItems: "center", cursor: "pointer" }}
+                    style={{ cursor: "pointer" }}
                   >
-                    <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0 }}>
-                      <div style={{ width: "34px", height: "34px", borderRadius: "50%", backgroundColor: "#EEF2FF", color: "#3730A3", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "12px", fontWeight: "700", flexShrink: 0 }}>
+                    <div className="admin-person">
+                      <div className="admin-person__avatar">
                         {initials(u.full_name)}
                       </div>
                       <div style={{ minWidth: 0 }}>
@@ -231,13 +224,13 @@ export default function AdminUsersPage() {
                       </div>
                     </div>
                     <span style={{ fontSize: "11px", fontWeight: "700", padding: "4px 10px", borderRadius: "999px", backgroundColor: roleColors.bg, color: roleColors.fg, width: "fit-content", textTransform: "capitalize" }}>
-                      {u.role.replaceAll("_", " ")}
+                      {roleLabel(u.role)}
                     </span>
                     <span style={{ fontSize: "11px", fontWeight: "700", padding: "4px 10px", borderRadius: "999px", backgroundColor: kycColors.bg, color: kycColors.fg, width: "fit-content", textTransform: "capitalize" }}>
-                      {u.kyc_status.replaceAll("_", " ")}
+                      {kycLabel(u.kyc_status)}
                     </span>
                     <span style={{ fontSize: "11px", fontWeight: "700", padding: "4px 10px", borderRadius: "999px", backgroundColor: u.is_active ? "#F0FDF4" : "#FEF2F2", color: u.is_active ? "#00A844" : "#DC2626", width: "fit-content" }}>
-                      {u.is_active ? "Active" : "Suspended"}
+                      {u.is_active ? tr("Active", "نشط") : tr("Suspended", "موقوف")}
                     </span>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "10px" }}>
                       {canAdjust && (
@@ -255,7 +248,7 @@ export default function AdminUsersPage() {
                             cursor: statusUpdatingId === u.id ? "not-allowed" : "pointer",
                           }}
                         >
-                          {statusUpdatingId === u.id ? "Working…" : u.is_active ? "Suspend" : "Reactivate"}
+                          {statusUpdatingId === u.id ? tr("Working...", "جارٍ التنفيذ...") : u.is_active ? tr("Suspend", "إيقاف") : tr("Reactivate", "إعادة التفعيل")}
                         </button>
                       )}
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ transform: isExpanded ? "rotate(180deg)" : "none", transition: "transform 0.15s", flexShrink: 0 }}>
@@ -266,11 +259,11 @@ export default function AdminUsersPage() {
 
                   {isExpanded && (
                     <div style={{ padding: "0 20px 20px", backgroundColor: "#FAFBFC" }}>
-                      <p style={{ fontSize: "11px", fontWeight: "700", color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: "10px", paddingTop: "4px" }}>Wallets</p>
+                      <p style={{ fontSize: "11px", fontWeight: "700", color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: "10px", paddingTop: "4px" }}>{tr("Wallets", "المحافظ")}</p>
                       {loadingWallets ? (
-                        <p style={{ color: "#aaa", fontSize: "13px" }}>Loading wallets…</p>
+                        <p style={{ color: "#aaa", fontSize: "13px" }}>{tr("Loading wallets...", "جارٍ تحميل المحافظ...")}</p>
                       ) : wallets.length === 0 ? (
-                        <p style={{ color: "#aaa", fontSize: "13px" }}>No wallets found.</p>
+                        <p style={{ color: "#aaa", fontSize: "13px" }}>{tr("No wallets found.", "لا توجد محافظ.")}</p>
                       ) : (
                         <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                           {wallets.map((w) => (
@@ -278,7 +271,7 @@ export default function AdminUsersPage() {
                               <div>
                                 <p style={{ fontWeight: "700", color: "#0F172A", fontSize: "13px" }}>{w.currency}</p>
                                 <p style={{ fontSize: "11px", color: "#9CA3AF" }}>
-                                  {w.account_number ?? w.iban ?? `Wallet #${w.id}`}
+                                  {w.account_number ?? w.iban ?? tr(`Wallet #${w.id}`, `محفظة رقم ${w.id}`)}
                                 </p>
                               </div>
                               <div style={{ textAlign: "right", display: "flex", alignItems: "center", gap: "12px" }}>
@@ -289,7 +282,7 @@ export default function AdminUsersPage() {
                                     disabled={adjustingId === w.id}
                                     style={{ padding: "7px 12px", borderRadius: "10px", border: "1.5px solid #0F172A", backgroundColor: "#fff", color: "#0F172A", fontSize: "11px", fontWeight: "700", cursor: adjustingId === w.id ? "not-allowed" : "pointer" }}
                                   >
-                                    {adjustingId === w.id ? "Working…" : "Adjust"}
+                                    {adjustingId === w.id ? tr("Working...", "جارٍ التنفيذ...") : tr("Adjust", "تعديل الرصيد")}
                                   </button>
                                 )}
                               </div>

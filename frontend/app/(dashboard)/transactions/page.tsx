@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import api from "@/lib/axios";
+import { usePreferences } from "@/components/providers/AppPreferences";
 
 interface Transaction {
   id: number;
@@ -16,12 +17,12 @@ interface Transaction {
   receiver_id: number;
 }
 
-function timeAgo(d: string) {
+function timeAgo(d: string, locale: "en" | "ar") {
   const diff = Math.floor((Date.now() - new Date(d).getTime()) / 1000);
-  if (diff < 60) return `${diff}s ago`;
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  return new Date(d).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+  if (diff < 60) return locale === "ar" ? `منذ ${diff} ث` : `${diff}s ago`;
+  if (diff < 3600) return locale === "ar" ? `منذ ${Math.floor(diff / 60)} د` : `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return locale === "ar" ? `منذ ${Math.floor(diff / 3600)} س` : `${Math.floor(diff / 3600)}h ago`;
+  return new Date(d).toLocaleDateString(locale === "ar" ? "ar-LB" : "en-GB", { day: "numeric", month: "short" });
 }
 
 const transactionIconColor = "#00D66F";
@@ -37,6 +38,8 @@ function TxIcon({ category }: { category: string }) {
 
 export default function TransactionsPage() {
   const router = useRouter();
+  const { locale } = usePreferences();
+  const tr = (en: string, ar: string) => locale === "ar" ? ar : en;
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
@@ -74,8 +77,8 @@ useEffect(() => {
           style={{ width: "36px", height: "36px", borderRadius: "12px", border: "1px solid #E5E7EB", background: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M19 12H5M12 19l-7-7 7-7" stroke="#333" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
         </button>
-        <h2 style={{ fontSize: "18px", fontWeight: "700", color: "#000" }}>Transactions</h2>
-        {total > 0 && <span style={{ fontSize: "12px", color: "#aaa" }}>{total} total</span>}
+        <h2 style={{ fontSize: "18px", fontWeight: "700", color: "#000" }}>{tr("Transactions", "المعاملات")}</h2>
+        {total > 0 && <span style={{ fontSize: "12px", color: "#aaa" }}>{total} {tr("total", "معاملة")}</span>}
       </div>
 
       {/* Filters */}
@@ -83,7 +86,7 @@ useEffect(() => {
         {filters.map((f) => (
           <button key={f} onClick={() => { setFilter(f); setPage(1); }}
             style={{ padding: "9px 18px", borderRadius: "20px", border: filter === f ? "1px solid #26372E" : "1px solid transparent", backgroundColor: filter === f ? "#111713" : "#fff", color: filter === f ? "#00D66F" : "#333", fontSize: "13px", fontWeight: "700", cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0 }}>
-            {f === "all" ? "All" : f}
+            {f === "all" ? tr("All", "الكل") : f === "Transfer" ? tr("Transfer", "تحويل") : f === "Exchange" ? tr("Exchange", "تحويل عملات") : f === "Bills" ? tr("Bills", "فواتير") : tr("Top Up", "إضافة أموال")}
           </button>
         ))}
       </div>
@@ -91,10 +94,10 @@ useEffect(() => {
       {/* List */}
       <div className="feature-list-card" style={{ backgroundColor: "#fff", borderRadius: "20px", overflow: "hidden", marginBottom: "16px" }}>
         {loading ? (
-          <div style={{ padding: "32px", textAlign: "center" }}><p style={{ color: "#aaa" }}>Loading...</p></div>
+          <div style={{ padding: "32px", textAlign: "center" }}><p style={{ color: "#aaa" }}>{tr("Loading...", "جارٍ التحميل...")}</p></div>
         ) : transactions.length === 0 ? (
           <div style={{ padding: "32px", textAlign: "center" }}>
-            <p style={{ color: "#aaa", fontSize: "14px" }}>No transactions found</p>
+            <p style={{ color: "#aaa", fontSize: "14px" }}>{tr("No transactions found", "لا توجد معاملات")}</p>
           </div>
         ) : transactions.map((tx, i) => (
           <div className="feature-transaction-row" key={tx.id} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "14px 16px", borderBottom: i < transactions.length - 1 ? "1px solid #F5F5F5" : "none" }}>
@@ -102,15 +105,15 @@ useEffect(() => {
               <TxIcon category={tx.category} />
             </div>
             <div style={{ flex: 1 }}>
-              <p style={{ fontSize: "14px", fontWeight: "600", color: "#000" }}>{tx.category}</p>
-              <p style={{ fontSize: "12px", color: "#aaa" }}>{timeAgo(tx.created_at)}</p>
+              <p style={{ fontSize: "14px", fontWeight: "600", color: "#000" }}>{tx.category === "Transfer" ? tr("Transfer", "تحويل") : tx.category === "Exchange" ? tr("Exchange", "تحويل عملات") : tx.category === "Bills" ? tr("Bills", "فواتير") : tx.category === "TopUp" ? tr("Top Up", "إضافة أموال") : tr("Other", "أخرى")}</p>
+              <p style={{ fontSize: "12px", color: "#aaa" }}>{timeAgo(tx.created_at, locale)}</p>
             </div>
             <div style={{ textAlign: "right" }}>
               <p style={{ fontSize: "14px", fontWeight: "700", color: tx.category === "TopUp" ? "#00C853" : "#000" }}>
                 {tx.category === "TopUp" ? "+" : "-"}{Number(tx.amount).toLocaleString()} {tx.currency}
               </p>
               <span style={{ fontSize: "11px", color: tx.status === "completed" ? "#00C853" : tx.status === "pending" ? "#F59E0B" : "#EF4444", fontWeight: "600" }}>
-                {tx.status}
+                {tx.status === "completed" ? tr("Completed", "مكتملة") : tx.status === "pending" ? tr("Pending", "قيد المعالجة") : tr("Failed", "فشلت")}
               </span>
             </div>
           </div>
@@ -122,12 +125,12 @@ useEffect(() => {
         <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "12px" }}>
           <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
             style={{ padding: "8px 16px", borderRadius: "10px", border: "1px solid #E5E7EB", backgroundColor: page === 1 ? "#F5F5F5" : "#fff", color: page === 1 ? "#aaa" : "#000", cursor: page === 1 ? "not-allowed" : "pointer", fontSize: "13px", fontWeight: "600" }}>
-            Previous
+            {tr("Previous", "السابق")}
           </button>
           <p style={{ fontSize: "13px", color: "#aaa" }}>{page} / {totalPages}</p>
           <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}
             style={{ padding: "8px 16px", borderRadius: "10px", border: "1px solid #E5E7EB", backgroundColor: page === totalPages ? "#F5F5F5" : "#fff", color: page === totalPages ? "#aaa" : "#000", cursor: page === totalPages ? "not-allowed" : "pointer", fontSize: "13px", fontWeight: "600" }}>
-            Next
+            {tr("Next", "التالي")}
           </button>
         </div>
       )}

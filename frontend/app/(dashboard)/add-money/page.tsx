@@ -14,6 +14,7 @@ import { getStripe } from "@/lib/stripe";
 import KYCActionLock from "@/components/kyc/KYCActionLock";
 import { useAuthStore } from "@/store/authStore";
 import { ArrowRight, CheckCircle2, WalletCards } from "lucide-react";
+import { usePreferences } from "@/components/providers/AppPreferences";
 
 interface Wallet { id?: number; currency: string; balance: number; account_number: string | null; iban: string | null; }
 type Step = "account" | "card" | "confirm" | "receipt";
@@ -56,6 +57,8 @@ const cardElementOptions = {
 // work inside the <Elements> provider tree -- see the default export below.
 function AddMoneyForm() {
   const user = useAuthStore((state) => state.user);
+  const { locale } = usePreferences();
+  const tr = (en: string, ar: string) => locale === "ar" ? ar : en;
   const router = useRouter();
   const stripe = useStripe();
   const elements = useElements();
@@ -228,11 +231,11 @@ function AddMoneyForm() {
 
   if (step === "account") return (
     <Wrap>
-      <Header title="Add Money" onBack={goBack} />
+      <Header title={tr("Add Money", "إضافة أموال")} onBack={goBack} />
       <section className="transfer-account-panel">
         <div className="transfer-account-heading">
           <span><WalletCards size={22} /></span>
-          <div><h3>Choose a wallet</h3><p>Select where you want to add funds.</p></div>
+          <div><h3>{tr("Choose a wallet", "اختر المحفظة")}</h3><p>{tr("Select where you want to add funds.", "اختر المحفظة التي تريد إضافة الأموال إليها.")}</p></div>
         </div>
         <div className="transfer-wallet-grid">
         {wallets.map((w) => (
@@ -243,13 +246,13 @@ function AddMoneyForm() {
             </div>
             <p>{walletLabel(w.currency)}</p>
             <strong>{formatAmount(w.currency, w.balance)}</strong>
-            <small>Current balance</small>
+            <small>{tr("Current balance", "الرصيد الحالي")}</small>
           </button>
         ))}
         </div>
         <div className="transfer-account-footer">
-          <div><small>Adding money to</small><strong>{selected ? walletLabel(selected.currency) : "Select a wallet"}</strong></div>
-          <button className="transfer-continue-button" onClick={() => setStep("card")} disabled={!selected}>Continue <ArrowRight size={18} /></button>
+          <div><small>{tr("Adding money to", "إضافة الأموال إلى")}</small><strong>{selected ? walletLabel(selected.currency) : tr("Select a wallet", "اختر محفظة")}</strong></div>
+          <button className="transfer-continue-button" onClick={() => setStep("card")} disabled={!selected}>{tr("Continue", "متابعة")} <ArrowRight size={18} /></button>
         </div>
       </section>
     </Wrap>
@@ -257,19 +260,19 @@ function AddMoneyForm() {
 
   if (step === "card") return (
     <Wrap>
-      <Header title="Card Details" onBack={goBack} />
+      <Header title={tr("Card Details", "بيانات البطاقة")} onBack={goBack} />
       <div style={{ backgroundColor: "#fff", borderRadius: "20px", padding: "20px", marginBottom: "16px", display: "flex", flexDirection: "column", gap: "16px" }}>
         <div>
-          <label style={{ fontSize: "13px", fontWeight: "600", color: "#333", display: "block", marginBottom: "8px" }}>Card details</label>
+          <label style={{ fontSize: "13px", fontWeight: "600", color: "#333", display: "block", marginBottom: "8px" }}>{tr("Card details", "بيانات البطاقة")}</label>
           <div style={{ border: `1.5px solid ${error ? "#EF4444" : "#E5E7EB"}`, borderRadius: "14px", padding: "14px 16px" }}>
             <CardElement options={cardElementOptions} onChange={handleCardElementChange} />
           </div>
           <p style={{ color: "#aaa", fontSize: "11px", marginTop: "6px" }}>
-            In test mode, use 4242 4242 4242 4242, any future expiry, any CVC.
+            {tr("In test mode, use 4242 4242 4242 4242, any future expiry, any CVC.", "في وضع الاختبار، استخدم 4242 4242 4242 4242 مع أي تاريخ صلاحية ورمز CVC.")}
           </p>
         </div>
         <div>
-          <label style={{ fontSize: "13px", fontWeight: "600", color: "#333", display: "block", marginBottom: "8px" }}>Amount ({selected?.currency})</label>
+          <label style={{ fontSize: "13px", fontWeight: "600", color: "#333", display: "block", marginBottom: "8px" }}>{tr("Amount", "المبلغ")} ({selected?.currency})</label>
           <input value={amount} onChange={(e) => setAmount(e.target.value)} type="number" placeholder="0.00"
             style={{ width: "100%", border: "1.5px solid #E5E7EB", borderRadius: "14px", padding: "12px 16px", fontSize: "14px", outline: "none", boxSizing: "border-box" }} />
         </div>
@@ -277,14 +280,14 @@ function AddMoneyForm() {
       {error && <p style={{ color: "#EF4444", fontSize: "13px", marginBottom: "12px" }}>{error}</p>}
       <button onClick={handleTokenizeCard} disabled={!cardComplete || !amount || tokenizing || !stripe}
         style={{ width: "100%", backgroundColor: !cardComplete || !amount || tokenizing ? "#E5E7EB" : "#00C853", color: !cardComplete || !amount || tokenizing ? "#999" : "#fff", fontWeight: "700", fontSize: "15px", border: "none", borderRadius: "14px", padding: "14px", cursor: !cardComplete || !amount || tokenizing ? "not-allowed" : "pointer" }}>
-        {tokenizing ? "Validating card..." : "Next"}
+        {tokenizing ? tr("Validating card...", "جارٍ التحقق من البطاقة...") : tr("Next", "التالي")}
       </button>
     </Wrap>
   );
 
   if (step === "confirm") return (
     <Wrap>
-      <Header title="Confirm Top-Up" onBack={goBack} />
+      <Header title={tr("Confirm Top-Up", "تأكيد إضافة الأموال")} onBack={goBack} />
       <div style={{ backgroundColor: "#fff", borderRadius: "20px", padding: "24px", marginBottom: "16px", display: "flex", flexDirection: "column", gap: "16px" }}>
         {[
           { label: "To", value: `${walletLabel(selected?.currency)} wallet` },
@@ -300,7 +303,7 @@ function AddMoneyForm() {
       {error && <p style={{ color: "#EF4444", fontSize: "13px", marginBottom: "12px" }}>{error}</p>}
       <button onClick={handleTopUp} disabled={loading}
         style={{ width: "100%", backgroundColor: loading ? "#86EFAC" : "#00C853", color: "#fff", fontWeight: "700", fontSize: "15px", border: "none", borderRadius: "14px", padding: "14px", cursor: loading ? "not-allowed" : "pointer" }}>
-        {loading ? "Processing..." : "Confirm Top-Up"}
+        {loading ? tr("Processing...", "جارٍ تنفيذ العملية...") : tr("Confirm Top-Up", "تأكيد إضافة الأموال")}
       </button>
     </Wrap>
   );
@@ -309,7 +312,7 @@ function AddMoneyForm() {
     <Wrap>
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "16px", paddingTop: "40px" }}>
         <div className="transfer-success-icon"><CheckCircle2 size={34} /></div>
-        <h2 style={{ fontSize: "22px", fontWeight: "700", color: "#000" }}>Top-Up Successful!</h2>
+        <h2 style={{ fontSize: "22px", fontWeight: "700", color: "#000" }}>{tr("Top-Up Successful!", "تمت إضافة الأموال بنجاح")}</h2>
         <div style={{ backgroundColor: "#fff", borderRadius: "20px", padding: "24px", width: "100%", display: "flex", flexDirection: "column", gap: "12px" }}>
           {[
             { label: "Wallet", value: walletLabel(selected?.currency) },
@@ -324,7 +327,7 @@ function AddMoneyForm() {
         </div>
         <button onClick={() => router.push("/dashboard")}
           style={{ width: "100%", backgroundColor: "#00C853", color: "#fff", fontWeight: "700", fontSize: "15px", border: "none", borderRadius: "14px", padding: "14px", cursor: "pointer" }}>
-          Back to Dashboard
+          {tr("Back to Dashboard", "العودة إلى الرئيسية")}
         </button>
       </div>
     </Wrap>

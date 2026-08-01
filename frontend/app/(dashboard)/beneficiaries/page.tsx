@@ -15,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import api from "@/lib/axios";
+import { usePreferences } from "@/components/providers/AppPreferences";
 
 type BeneficiaryType = "mobile" | "iban";
 
@@ -23,22 +24,6 @@ interface Beneficiary {
   nickname: string;
   type: BeneficiaryType;
   value: string;
-}
-
-function beneficiaryTypeLabel(type: BeneficiaryType) {
-  return type === "mobile" ? "Mobile" : "IBAN";
-}
-
-function beneficiarySectionLabel(type: BeneficiaryType) {
-  return type === "mobile"
-    ? "Mobile beneficiaries"
-    : "IBAN beneficiaries";
-}
-
-function beneficiarySearchPlaceholder(type: BeneficiaryType) {
-  return type === "mobile"
-    ? "Search by nickname or mobile number"
-    : "Search by nickname or IBAN";
 }
 
 function beneficiaryValuePlaceholder(type: BeneficiaryType) {
@@ -65,6 +50,7 @@ function getErrorMessage(error: unknown, fallback: string) {
 }
 
 function PageHeader({ onBack }: { onBack: () => void }) {
+  const { locale } = usePreferences();
   return (
     <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "24px" }}>
       <button
@@ -78,7 +64,7 @@ function PageHeader({ onBack }: { onBack: () => void }) {
         </svg>
       </button>
       <h1 style={{ fontSize: "18px", fontWeight: "700", color: "#000", margin: 0 }}>
-        Saved Beneficiaries
+        {locale === "ar" ? "المستفيدون المحفوظون" : "Saved Beneficiaries"}
       </h1>
     </div>
   );
@@ -86,6 +72,8 @@ function PageHeader({ onBack }: { onBack: () => void }) {
 
 export default function BeneficiariesPage() {
   const router = useRouter();
+  const { locale } = usePreferences();
+  const tr = (en: string, ar: string) => locale === "ar" ? ar : en;
   const [activeType, setActiveType] = useState<BeneficiaryType>("mobile");
   const [search, setSearch] = useState("");
   const [beneficiaries, setBeneficiaries] = useState<Beneficiary[]>([]);
@@ -223,8 +211,8 @@ export default function BeneficiariesPage() {
 
       <section className="beneficiaries-hero">
         <div className="beneficiaries-hero__copy">
-          <h2>Your beneficiaries</h2>
-          <p>Manage saved mobile numbers and bank accounts.</p>
+          <h2>{tr("Your beneficiaries", "المستفيدون")}</h2>
+          <p>{tr("Manage saved mobile numbers and bank accounts.", "إدارة أرقام الهاتف والحسابات المصرفية المحفوظة.")}</p>
         </div>
         <div className="beneficiaries-hero__side">
           <button
@@ -236,7 +224,7 @@ export default function BeneficiariesPage() {
             }}
           >
             {showAddForm ? <X size={18} /> : <Plus size={18} />}
-            {showAddForm ? "Close" : "Add beneficiary"}
+            {showAddForm ? tr("Close", "إغلاق") : tr("Add beneficiary", "إضافة مستفيد")}
           </button>
         </div>
       </section>
@@ -253,7 +241,7 @@ export default function BeneficiariesPage() {
               onClick={() => switchType(type)}
             >
               {type === "mobile" ? <Smartphone size={18} /> : <Building2 size={18} />}
-              {beneficiaryTypeLabel(type)}
+              {type === "mobile" ? tr("Mobile", "رقم الهاتف") : tr("IBAN", "الآيبان")}
             </button>
           ))}
         </div>
@@ -267,7 +255,7 @@ export default function BeneficiariesPage() {
               setLoading(true);
               setError("");
             }}
-            placeholder={beneficiarySearchPlaceholder(activeType)}
+            placeholder={activeType === "mobile" ? tr("Search by nickname or mobile number", "البحث بالاسم أو رقم الهاتف") : tr("Search by nickname or IBAN", "البحث بالاسم أو رقم الآيبان")}
             aria-label="Search beneficiaries"
           />
         </label>
@@ -277,12 +265,12 @@ export default function BeneficiariesPage() {
         <form className="beneficiary-form" onSubmit={handleAdd}>
           <div className="beneficiary-form__heading">
             <span><Plus size={20} /></span>
-            <div><h3>Add a new beneficiary</h3><p>Save their details for future transfers.</p></div>
+            <div><h3>{tr("Add a new beneficiary", "إضافة مستفيد جديد")}</h3><p>{tr("Save their details for future transfers.", "احفظ بياناته لاستخدامها في التحويلات المقبلة.")}</p></div>
           </div>
           <div className="beneficiary-form__fields">
-            <label><span>Display name</span><input value={nickname} onChange={(event) => setNickname(event.target.value)} placeholder="e.g. Zahraa" required style={inputStyle} /></label>
+            <label><span>{tr("Display name", "اسم المستفيد")}</span><input value={nickname} onChange={(event) => setNickname(event.target.value)} placeholder={tr("e.g. Zahraa", "مثال: زهراء")} required style={inputStyle} /></label>
             <label>
-              <span>{activeType === "mobile" ? "Mobile number" : "IBAN"}</span>
+              <span>{activeType === "mobile" ? tr("Mobile number", "رقم الهاتف") : tr("IBAN", "رقم الآيبان")}</span>
               <input
                 className={error ? "has-error" : ""}
                 value={value}
@@ -296,23 +284,23 @@ export default function BeneficiariesPage() {
             </label>
           </div>
           <button className="beneficiary-form__submit" type="submit" disabled={actionLoading === "add" || !nickname.trim() || !value.trim()}>
-            <Check size={18} /> {actionLoading === "add" ? "Adding..." : "Save beneficiary"}
+            <Check size={18} /> {actionLoading === "add" ? tr("Adding...", "جارٍ الإضافة...") : tr("Save beneficiary", "حفظ المستفيد")}
           </button>
         </form>
       )}
 
       <div className="beneficiary-section-heading">
         <div>
-          <h3>{beneficiarySectionLabel(activeType)}</h3>
-          {search.trim() && <p>{`Results for “${search.trim()}”`}</p>}
+          <h3>{activeType === "mobile" ? tr("Mobile beneficiaries", "مستفيدو الهاتف") : tr("IBAN beneficiaries", "مستفيدو الآيبان")}</h3>
+          {search.trim() && <p>{tr(`Results for “${search.trim()}”`, `نتائج البحث عن «${search.trim()}»`)}</p>}
         </div>
-        <span>{beneficiaries.length} saved</span>
+        <span>{beneficiaries.length} {tr("saved", "محفوظ")}</span>
       </div>
 
       {loading ? (
-        <div className="beneficiary-state"><span className="beneficiary-state__icon"><Users size={23} /></span><strong>Loading beneficiaries</strong><p>Fetching your saved recipients...</p></div>
+        <div className="beneficiary-state"><span className="beneficiary-state__icon"><Users size={23} /></span><strong>{tr("Loading beneficiaries", "جارٍ تحميل المستفيدين")}</strong><p>{tr("Fetching your saved recipients...", "جارٍ تحميل المستفيدين المحفوظين...")}</p></div>
       ) : beneficiaries.length === 0 ? (
-        <div className="beneficiary-state"><span className="beneficiary-state__icon"><Users size={23} /></span><strong>No beneficiaries found</strong><p>{search.trim() ? "Try another name or account detail." : "Add your first trusted recipient to get started."}</p></div>
+        <div className="beneficiary-state"><span className="beneficiary-state__icon"><Users size={23} /></span><strong>{tr("No beneficiaries found", "لا يوجد مستفيدون")}</strong><p>{search.trim() ? tr("Try another name or account detail.", "جرّب اسماً أو بيانات حساب أخرى.") : tr("Add your first trusted recipient to get started.", "أضف أول مستفيد موثوق للبدء.")}</p></div>
       ) : (
         <div className="beneficiary-grid">
           {beneficiaries.map((beneficiary) => (
@@ -332,15 +320,15 @@ export default function BeneficiariesPage() {
 
               {editingId === beneficiary.id && (
                 <div className="beneficiary-inline-panel">
-                  <label><span>New display name</span><input value={editNickname} onChange={(event) => setEditNickname(event.target.value)} aria-label={`Rename ${beneficiary.nickname}`} style={inputStyle} /></label>
-                  <div><button type="button" className="is-primary" onClick={() => handleRename(beneficiary.id)} disabled={actionLoading === `edit-${beneficiary.id}` || !editNickname.trim()}><Check size={16} /> {actionLoading === `edit-${beneficiary.id}` ? "Saving..." : "Save"}</button><button type="button" onClick={() => { setEditingId(null); setEditNickname(""); }}><X size={16} /> Cancel</button></div>
+                  <label><span>{tr("New display name", "الاسم الجديد")}</span><input value={editNickname} onChange={(event) => setEditNickname(event.target.value)} aria-label={`Rename ${beneficiary.nickname}`} style={inputStyle} /></label>
+                  <div><button type="button" className="is-primary" onClick={() => handleRename(beneficiary.id)} disabled={actionLoading === `edit-${beneficiary.id}` || !editNickname.trim()}><Check size={16} /> {actionLoading === `edit-${beneficiary.id}` ? tr("Saving...", "جارٍ الحفظ...") : tr("Save", "حفظ")}</button><button type="button" onClick={() => { setEditingId(null); setEditNickname(""); }}><X size={16} /> {tr("Cancel", "إلغاء")}</button></div>
                 </div>
               )}
 
               {confirmDeleteId === beneficiary.id && (
                 <div className="beneficiary-delete-panel">
-                  <div><strong>Remove this beneficiary?</strong><p>You can add them again later.</p></div>
-                  <div><button type="button" className="is-danger" onClick={() => handleDelete(beneficiary.id)} disabled={actionLoading === `delete-${beneficiary.id}`}><Trash2 size={16} /> {actionLoading === `delete-${beneficiary.id}` ? "Deleting..." : "Remove"}</button><button type="button" onClick={() => setConfirmDeleteId(null)}>Cancel</button></div>
+                  <div><strong>{tr("Remove this beneficiary?", "هل تريد حذف هذا المستفيد؟")}</strong><p>{tr("You can add them again later.", "يمكنك إضافته مجدداً لاحقاً.")}</p></div>
+                  <div><button type="button" className="is-danger" onClick={() => handleDelete(beneficiary.id)} disabled={actionLoading === `delete-${beneficiary.id}`}><Trash2 size={16} /> {actionLoading === `delete-${beneficiary.id}` ? tr("Deleting...", "جارٍ الحذف...") : tr("Remove", "حذف")}</button><button type="button" onClick={() => setConfirmDeleteId(null)}>{tr("Cancel", "إلغاء")}</button></div>
                 </div>
               )}
             </article>

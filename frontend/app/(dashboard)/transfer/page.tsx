@@ -6,6 +6,7 @@ import { ArrowRight, Building2, Check, CheckCircle2, ChevronRight, Search, Smart
 import api from "@/lib/axios";
 import KYCActionLock from "@/components/kyc/KYCActionLock";
 import { useAuthStore } from "@/store/authStore";
+import { usePreferences } from "@/components/providers/AppPreferences";
 
 interface Wallet { currency: string; balance: number; account_number: string | null; iban: string | null; }
 interface Beneficiary { id: number; nickname: string; type: string; value: string; }
@@ -13,9 +14,9 @@ interface RecipientInfo { exists: boolean; display_name: string | null; kyc_appr
 
 const OWN_ACCOUNT_CURRENCIES = new Set(["USD", "LBP"]);
 
-function walletLabel(currency: string) {
-  if (currency === "USD") return "Fresh USD";
-  if (currency === "LBP") return "Cash LBP";
+function walletLabel(currency: string, locale = "en") {
+  if (currency === "USD") return locale === "ar" ? "الدولار الأميركي" : "Fresh USD";
+  if (currency === "LBP") return locale === "ar" ? "الليرة اللبنانية" : "Cash LBP";
   return currency;
 }
 
@@ -61,6 +62,8 @@ function Wrap({ children }: { children: React.ReactNode }) {
 
 export default function TransferPage() {
   const router = useRouter();
+  const { locale } = usePreferences();
+  const tr = (en: string, ar: string) => locale === "ar" ? ar : en;
   const user = useAuthStore((state) => state.user);
   const [step, setStep] = useState<Step>("account");
   const [wallets, setWallets] = useState<Wallet[]>([]);
@@ -253,8 +256,8 @@ export default function TransferPage() {
   const destinationLabel =
     transferType === "own"
       ? selectedDestinationWallet
-        ? `${walletLabel(selectedDestinationWallet.currency)} account`
-        : "Destination account"
+        ? tr(`${walletLabel(selectedDestinationWallet.currency, locale)} account`, `حساب ${walletLabel(selectedDestinationWallet.currency, locale)}`)
+        : tr("Destination account", "الحساب المستلم")
       : recipient?.display_name ?? recipientValue;
 
   const tabBeneficiaries = beneficiaries.filter((beneficiary) =>
@@ -275,20 +278,20 @@ export default function TransferPage() {
         .includes(normalizedSearch),
   );
 
-  if (user?.kyc_status !== "approved") return <KYCActionLock action="Transfers" />;
+  if (user?.kyc_status !== "approved") return <KYCActionLock action={tr("Transfers", "التحويلات")} />;
 
   if (step === "account") return (
     <Wrap>
-      <Header title="Transfer Money" step={step} setStep={setStep} router={router} />
+      <Header title={tr("Transfer Money", "تحويل الأموال")} step={step} setStep={setStep} router={router} />
       <section className="transfer-account-panel">
         <div className="transfer-account-heading">
           <span><WalletCards size={22} /></span>
-          <div><h3>Select an account</h3><p>Choose where the money will be sent from.</p></div>
+          <div><h3>{tr("Select an account", "اختر حساباً")}</h3><p>{tr("Choose where the money will be sent from.", "اختر الحساب الذي سيتم التحويل منه.")}</p></div>
         </div>
         <div className="transfer-wallet-grid">
         {wallets.length === 0 && (
           <div className="transfer-wallet-empty" style={{ padding: "32px", textAlign: "center", backgroundColor: "#fff", borderRadius: "16px" }}>
-            <p style={{ color: "#aaa", fontSize: "14px" }}>No wallets found. Add money first.</p>
+            <p style={{ color: "#aaa", fontSize: "14px" }}>{tr("No wallets found. Add money first.", "لا توجد محافظ. أضف أموالاً أولاً.")}</p>
           </div>
         )}
         {wallets.map((w) => (
@@ -302,19 +305,19 @@ export default function TransferPage() {
               <span className="transfer-wallet-currency">{w.currency}</span>
               {selectedWallet?.currency === w.currency && <CheckCircle2 size={19} />}
             </div>
-            <p>{walletLabel(w.currency)}</p>
+            <p>{walletLabel(w.currency, locale)}</p>
             <strong>{formatMoney(w.balance, w.currency)}</strong>
-            <small>Available balance</small>
+            <small>{tr("Available balance", "الرصيد المتاح")}</small>
           </button>
         ))}
         </div>
         <div className="transfer-account-footer">
           <div>
-            <small>Sending from</small>
-            <strong>{selectedWallet ? walletLabel(selectedWallet.currency) : "Select an account"}</strong>
+            <small>{tr("Sending from", "التحويل من")}</small>
+            <strong>{selectedWallet ? walletLabel(selectedWallet.currency, locale) : tr("Select an account", "اختر حساباً")}</strong>
           </div>
           <button className="transfer-continue-button" onClick={() => setStep("type")} disabled={!selectedWallet}>
-            Continue <ArrowRight size={18} />
+            {tr("Continue", "متابعة")} <ArrowRight size={18} />
           </button>
         </div>
       </section>
@@ -323,13 +326,13 @@ export default function TransferPage() {
 
   if (step === "type") return (
     <Wrap>
-      <Header title="Transfer Type" step={step} setStep={setStep} router={router} />
-      <p style={{ color: "#aaa", fontSize: "13px", marginBottom: "12px" }}>Select which transfer you&apos;d like to do</p>
+      <Header title={tr("Transfer Type", "نوع التحويل")} step={step} setStep={setStep} router={router} />
+      <p style={{ color: "#aaa", fontSize: "13px", marginBottom: "12px" }}>{tr("Select which transfer you'd like to do", "اختر نوع التحويل الذي تريد إجراءه")}</p>
       <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
         {[
-          { type: "mobile" as TransferType, label: "Within Neo", sub: "Via Mobile Number or IBAN", icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" stroke="#333" strokeWidth="2" strokeLinecap="round"/></svg> },
-          { type: "own" as TransferType, label: "To my other accounts", sub: "Between your accounts", icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" stroke="#333" strokeWidth="2" strokeLinecap="round"/></svg> },
-          { type: "bank" as TransferType, label: "To Bank", sub: "Coming soon", icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M3 21h18M3 10h18M5 6l7-3 7 3M4 10v11M8 10v11M12 10v11M16 10v11M20 10v11" stroke="#ccc" strokeWidth="2" strokeLinecap="round"/></svg> },
+          { type: "mobile" as TransferType, label: tr("Within Neo", "داخل نيو"), sub: tr("Via Mobile Number or IBAN", "عبر رقم الهاتف أو الآيبان"), icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" stroke="#333" strokeWidth="2" strokeLinecap="round"/></svg> },
+          { type: "own" as TransferType, label: tr("To my other accounts", "إلى حساباتي الأخرى"), sub: tr("Between your accounts", "بين حساباتك"), icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" stroke="#333" strokeWidth="2" strokeLinecap="round"/></svg> },
+          { type: "bank" as TransferType, label: tr("To Bank", "إلى حساب مصرفي"), sub: tr("Coming soon", "قريباً"), icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M3 21h18M3 10h18M5 6l7-3 7 3M4 10v11M8 10v11M12 10v11M16 10v11M20 10v11" stroke="#ccc" strokeWidth="2" strokeLinecap="round"/></svg> },
         ].map(({ type, label, sub, icon }) => (
           <button key={type} onClick={() => {
               if (type === "bank") return;
@@ -357,7 +360,7 @@ export default function TransferPage() {
   if (step === "recipient" && transferType === "own") return (
     <Wrap>
       <Header
-        title="Select Destination Account"
+        title={tr("Select Destination Account", "اختر الحساب المستلم")}
         step={step}
         setStep={setStep}
         router={router}
@@ -368,7 +371,7 @@ export default function TransferPage() {
         fontSize: "13px",
         marginBottom: "12px",
       }}>
-        Choose one of your other accounts
+        {tr("Choose one of your other accounts", "اختر أحد حساباتك الأخرى")}
       </p>
 
       {ownAccountOptions.length === 0 ? (
@@ -379,7 +382,7 @@ export default function TransferPage() {
           marginBottom: "16px",
         }}>
           <p style={{ color: "#666", fontSize: "14px" }}>
-            No supported destination account is available.
+            {tr("No supported destination account is available.", "لا يتوفر حساب آخر مناسب للتحويل.")}
           </p>
         </div>
       ) : (
@@ -408,7 +411,7 @@ export default function TransferPage() {
             }}
           >
             <option value="" disabled>
-              Select an account
+              {tr("Select an account", "اختر حساباً")}
             </option>
 
             {ownAccountOptions.map((wallet) => (
@@ -416,7 +419,7 @@ export default function TransferPage() {
                 key={wallet.currency}
                 value={wallet.currency}
               >
-                {walletLabel(wallet.currency)} -{" "}
+                {walletLabel(wallet.currency, locale)} -{" "}
                 {formatMoney(wallet.balance, wallet.currency)}
               </option>
             ))}
@@ -435,7 +438,7 @@ export default function TransferPage() {
                 fontSize: "13px",
                 fontWeight: "600",
               }}>
-                To: {walletLabel(selectedDestinationWallet.currency)}
+                {tr("To", "إلى")}: {walletLabel(selectedDestinationWallet.currency, locale)}
               </p>
 
               <p style={{
@@ -443,7 +446,7 @@ export default function TransferPage() {
                 fontSize: "12px",
                 marginTop: "4px",
               }}>
-                Current balance:{" "}
+                {tr("Current balance", "الرصيد الحالي")}: {" "}
                 {formatMoney(
                   selectedDestinationWallet.balance,
                   selectedDestinationWallet.currency
@@ -483,24 +486,24 @@ export default function TransferPage() {
             : "not-allowed",
         }}
       >
-        Next
+        {tr("Next", "التالي")}
       </button>
     </Wrap>
   );
 
   if (step === "recipient") return (
     <Wrap>
-      <Header title="Transfer to?" step={step} setStep={setStep} router={router} />
+      <Header title={tr("Transfer to?", "التحويل إلى") } step={step} setStep={setStep} router={router} />
       <section className="transfer-recipient-panel">
         <div className="transfer-recipient-heading">
-          <div><h3>Recipient details</h3><p>Enter a mobile number or Lebanese IBAN.</p></div>
+          <div><h3>{tr("Recipient details", "بيانات المستلم")}</h3><p>{tr("Enter a mobile number or Lebanese IBAN.", "أدخل رقم هاتف أو رقم آيبان لبناني.")}</p></div>
           <div className="transfer-recipient-tabs">
             {(["mobile", "iban"] as Tab[]).map((t) => (
               <button className={tab === t ? "is-active" : ""} key={t} onClick={() => {
                 setTab(t); setSearch(""); setRecipient(null); setError(""); setPhone(""); setIban("");
               }}>
                 {t === "mobile" ? <Smartphone size={17} /> : <Building2 size={17} />}
-                {t === "mobile" ? "Mobile" : "IBAN"}
+                {t === "mobile" ? tr("Mobile", "رقم الهاتف") : tr("IBAN", "الآيبان")}
               </button>
             ))}
           </div>
@@ -517,7 +520,7 @@ export default function TransferPage() {
             <input type="text" aria-label="Lebanese IBAN" placeholder="LB00 0000 0000 0000 0000 00" value={iban} onChange={(e) => { setIban(e.target.value); setRecipient(null); setError(""); }} />
           )}
           <button className="transfer-validate-button" onClick={validateRecipient} disabled={validating || (tab === "mobile" ? phone.length < 7 : !/^LB[A-Za-z0-9]{22}$/.test(iban.replace(/\s/g, "")))}>
-            {validating ? "Checking..." : "Validate"}
+            {validating ? tr("Checking...", "جارٍ التحقق...") : tr("Validate", "تحقق")}
           </button>
         </div>
         {error && <p className="transfer-recipient-error">{error}</p>}
@@ -525,18 +528,18 @@ export default function TransferPage() {
         {recipient?.exists && recipient.kyc_approved && (
           <div className="transfer-recipient-confirmed">
             <span><CheckCircle2 size={20} /></span>
-            <div><small>Verified Neo recipient</small><strong>{recipient.display_name}</strong></div>
-            <button onClick={() => setStep("amount")}>Continue <ArrowRight size={17} /></button>
+            <div><small>{tr("Verified Neo recipient", "مستلم موثّق في نيو")}</small><strong>{recipient.display_name}</strong></div>
+            <button onClick={() => setStep("amount")}>{tr("Continue", "متابعة")} <ArrowRight size={17} /></button>
           </div>
         )}
       </section>
 
       {tabBeneficiaries.length > 0 && (
         <section className="transfer-saved-section">
-          <div className="transfer-saved-heading"><div><h3>Saved beneficiaries</h3><p>Select a recipient to fill their details.</p></div><span>{tabBeneficiaries.length} saved</span></div>
-          <label className="transfer-saved-search"><Search size={18} /><input type="search" placeholder="Search beneficiaries" aria-label="Search saved beneficiaries" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
+          <div className="transfer-saved-heading"><div><h3>{tr("Saved beneficiaries", "المستفيدون المحفوظون")}</h3><p>{tr("Select a recipient to fill their details.", "اختر مستفيداً لتعبئة بياناته.")}</p></div><span>{tabBeneficiaries.length} {tr("saved", "محفوظ")}</span></div>
+          <label className="transfer-saved-search"><Search size={18} /><input type="search" placeholder={tr("Search beneficiaries", "ابحث عن مستفيد")} aria-label={tr("Search saved beneficiaries", "البحث في المستفيدين المحفوظين")} value={search} onChange={(event) => setSearch(event.target.value)} /></label>
           {filteredBeneficiaries.length === 0 ? (
-            <div className="transfer-saved-empty">No saved beneficiaries match your search.</div>
+            <div className="transfer-saved-empty">{tr("No saved beneficiaries match your search.", "لا يوجد مستفيدون مطابقون لبحثك.")}</div>
           ) : (
             <div className="transfer-saved-grid">
               {filteredBeneficiaries.map((beneficiary) => (
@@ -572,35 +575,35 @@ export default function TransferPage() {
 
   if (step === "amount") return (
     <Wrap>
-      <Header title="Enter Amount" step={step} setStep={setStep} router={router} />
+      <Header title={tr("Enter Amount", "أدخل المبلغ")} step={step} setStep={setStep} router={router} />
       <div style={{ backgroundColor: "#fff", borderRadius: "20px", padding: "20px", marginBottom: "16px" }}>
-        <p style={{ color: "#aaa", fontSize: "12px", marginBottom: "4px" }}>Sending to</p>
+        <p style={{ color: "#aaa", fontSize: "12px", marginBottom: "4px" }}>{tr("Sending to", "التحويل إلى")}</p>
         <p style={{ fontSize: "15px", fontWeight: "600", color: "#000" }}>{destinationLabel}</p>
       </div>
       <div style={{ backgroundColor: "#fff", borderRadius: "20px", padding: "20px", marginBottom: "16px" }}>
-        <p style={{ color: "#aaa", fontSize: "12px", marginBottom: "8px" }}>Amount ({selectedWallet?.currency})</p>
+        <p style={{ color: "#aaa", fontSize: "12px", marginBottom: "8px" }}>{tr("Amount", "المبلغ")} ({selectedWallet?.currency})</p>
         <input type="number" placeholder="0.00" value={amount} onChange={(e) => { setAmount(e.target.value); setError(""); }}
           style={{ width: "100%", border: "none", outline: "none", fontSize: "32px", fontWeight: "800", color: insufficient ? "#EF4444" : "#000", backgroundColor: "transparent", boxSizing: "border-box" }} />
         <p style={{ color: insufficient ? "#EF4444" : "#aaa", fontSize: "13px", marginTop: "8px" }}>
-          Available: {formatMoney(balance, selectedWallet?.currency ?? "")}
+          {tr("Available", "المتاح")}: {formatMoney(balance, selectedWallet?.currency ?? "")}
         </p>
-        {insufficient && <p style={{ color: "#EF4444", fontSize: "13px", marginTop: "4px", fontWeight: "600" }}>⚠️ Amount exceeds available balance</p>}
+        {insufficient && <p style={{ color: "#EF4444", fontSize: "13px", marginTop: "4px", fontWeight: "600" }}>{tr("Amount exceeds available balance", "المبلغ يتجاوز الرصيد المتاح")}</p>}
       </div>
       {error && <p style={{ color: "#EF4444", fontSize: "13px", marginBottom: "12px" }}>{error}</p>}
       <button onClick={() => setStep("passcode")} disabled={!amount || insufficient || amountNum <= 0}
         style={{ width: "100%", backgroundColor: !amount || insufficient || amountNum <= 0 ? "#E5E7EB" : "#111713", color: !amount || insufficient || amountNum <= 0 ? "#999" : "#00D66F", fontWeight: "800", fontSize: "15px", border: !amount || insufficient || amountNum <= 0 ? "none" : "1px solid #26372E", borderRadius: "14px", padding: "15px", cursor: !amount || insufficient || amountNum <= 0 ? "not-allowed" : "pointer" }}>
-        Next
+        {tr("Next", "التالي")}
       </button>
     </Wrap>
   );
 
   if (step === "passcode") return (
     <Wrap>
-      <Header title="Confirm Identity" step={step} setStep={setStep} router={router} />
+      <Header title={tr("Confirm Identity", "تأكيد الهوية")} step={step} setStep={setStep} router={router} />
       <div style={{ backgroundColor: "#fff", borderRadius: "20px", padding: "24px", marginBottom: "16px", display: "flex", flexDirection: "column", gap: "12px" }}>
         {[
-          { label: "To", value: destinationLabel },
-          { label: "Amount", value: formatMoney(amountNum, selectedWallet?.currency ?? "") },
+          { label: tr("To", "إلى"), value: destinationLabel },
+          { label: tr("Amount", "المبلغ"), value: formatMoney(amountNum, selectedWallet?.currency ?? "") },
         ].map(({ label, value }) => (
           <div key={label} style={{ display: "flex", justifyContent: "space-between" }}>
             <p style={{ color: "#aaa", fontSize: "14px" }}>{label}</p>
@@ -609,7 +612,7 @@ export default function TransferPage() {
         ))}
       </div>
       <div style={{ backgroundColor: "#fff", borderRadius: "20px", padding: "20px", marginBottom: "16px" }}>
-        <label style={{ fontSize: "13px", fontWeight: "600", color: "#333", display: "block", marginBottom: "8px" }}>Enter your passcode to continue</label>
+        <label style={{ fontSize: "13px", fontWeight: "600", color: "#333", display: "block", marginBottom: "8px" }}>{tr("Enter your passcode to continue", "أدخل رمز المرور للمتابعة")}</label>
         <input type="password" placeholder="••••••" maxLength={6} value={passcode}
           onChange={(e) => { setPasscode(e.target.value.replace(/\D/g, "")); setError(""); }}
           style={{ width: "100%", border: "1.5px solid #E5E7EB", borderRadius: "14px", padding: "12px 16px", fontSize: "20px", letterSpacing: "8px", outline: "none", boxSizing: "border-box" }} />
@@ -617,28 +620,28 @@ export default function TransferPage() {
       {error && <p style={{ color: "#EF4444", fontSize: "13px", marginBottom: "12px" }}>{error}</p>}
       <button onClick={handlePasscode} disabled={passcode.length < 6 || loading}
         style={{ width: "100%", backgroundColor: passcode.length < 6 ? "#E5E7EB" : "#111713", color: passcode.length < 6 ? "#999" : "#00D66F", fontWeight: "800", fontSize: "15px", border: passcode.length < 6 ? "none" : "1px solid #26372E", borderRadius: "14px", padding: "15px", cursor: passcode.length < 6 ? "not-allowed" : "pointer" }}>
-        {loading ? "Verifying..." : "Continue"}
+        {loading ? tr("Verifying...", "جارٍ التحقق...") : tr("Continue", "متابعة")}
       </button>
     </Wrap>
   );
 
   if (step === "confirm") return (
     <Wrap>
-      <Header title="Confirm Transfer" step={step} setStep={setStep} router={router} />
+      <Header title={tr("Confirm Transfer", "تأكيد التحويل")} step={step} setStep={setStep} router={router} />
       <div style={{ backgroundColor: "#fff", borderRadius: "20px", padding: "24px", marginBottom: "16px", display: "flex", flexDirection: "column", gap: "16px" }}>
         {[
-          { label: "From account", value: walletLabel(selectedWallet?.currency ?? "") },
-          { label: "Available balance", value: formatMoney(balance, selectedWallet?.currency ?? "") },
-          { label: "To", value: destinationLabel },
-          { label: "Amount", value: formatMoney(amountNum, selectedWallet?.currency ?? "") },
+          { label: tr("From account", "من حساب"), value: walletLabel(selectedWallet?.currency ?? "", locale) },
+          { label: tr("Available balance", "الرصيد المتاح"), value: formatMoney(balance, selectedWallet?.currency ?? "") },
+          { label: tr("To", "إلى"), value: destinationLabel },
+          { label: tr("Amount", "المبلغ"), value: formatMoney(amountNum, selectedWallet?.currency ?? "") },
           {
-             label: "Transfer type",
+             label: tr("Transfer type", "نوع التحويل"),
              value:
                transferType === "own"
-                 ? "Between my accounts"
+                 ? tr("Between my accounts", "بين حساباتي")
                  : tab === "mobile"
-                   ? "Via Mobile Number"
-                   : "Via IBAN",
+                   ? tr("Via Mobile Number", "عبر رقم الهاتف")
+                   : tr("Via IBAN", "عبر الآيبان"),
            },
         ].map(({ label, value }) => (
           <div key={label} style={{ display: "flex", justifyContent: "space-between" }}>
@@ -650,7 +653,7 @@ export default function TransferPage() {
       {error && <p style={{ color: "#EF4444", fontSize: "13px", marginBottom: "12px" }}>{error}</p>}
       <button onClick={handleSubmit} disabled={loading}
         style={{ width: "100%", backgroundColor: loading ? "#86EFAC" : "#111713", color: loading ? "#166534" : "#00D66F", fontWeight: "800", fontSize: "15px", border: loading ? "none" : "1px solid #26372E", borderRadius: "14px", padding: "15px", cursor: loading ? "not-allowed" : "pointer" }}>
-        {loading ? "Sending..." : "Confirm Transfer"}
+        {loading ? tr("Sending...", "جارٍ الإرسال...") : tr("Confirm Transfer", "تأكيد التحويل")}
       </button>
     </Wrap>
   );
@@ -658,23 +661,23 @@ export default function TransferPage() {
   return (
     <Wrap>
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "16px", paddingTop: "40px" }}>
-        <div className="transfer-success-icon" aria-label="Transfer successful">
+        <div className="transfer-success-icon" aria-label={tr("Transfer successful", "تم التحويل بنجاح")}>
           <Check size={34} strokeWidth={2.5} />
         </div>
         <h2 style={{ fontSize: "22px", fontWeight: "700", color: "#000" }}>
           {transferType === "own"
-            ? "Transfer Completed!"
-            : "Transfer Sent!"}
+            ? tr("Transfer Completed!", "اكتمل التحويل")
+            : tr("Transfer Sent!", "تم إرسال التحويل")}
         </h2>
         <div style={{ backgroundColor: "#fff", borderRadius: "20px", padding: "24px", width: "100%", display: "flex", flexDirection: "column", gap: "12px" }}>
           {[
-            { label: "To", value: destinationLabel },
-            { label: "Amount", value: formatMoney(amountNum, selectedWallet?.currency ?? "") },
+            { label: tr("To", "إلى"), value: destinationLabel },
+            { label: tr("Amount", "المبلغ"), value: formatMoney(amountNum, selectedWallet?.currency ?? "") },
             {
               label:
                 transferType === "own"
-                  ? "Exchange ID"
-                  : "Transaction ID",
+                  ? tr("Exchange ID", "رقم عملية الصرف")
+                  : tr("Transaction ID", "رقم العملية"),
               value: String(
                 (receipt as { transaction_id?: unknown })
                   ?.transaction_id ??
@@ -694,12 +697,12 @@ export default function TransferPage() {
           <div style={{ backgroundColor: "#fff", borderRadius: "16px", padding: "16px", width: "100%", boxSizing: "border-box" }}>
             {savedRecipient ? (
               <p style={{ color: "#166534", fontSize: "14px", fontWeight: "600", margin: 0 }}>
-                Recipient saved successfully.
+                {tr("Recipient saved successfully.", "تم حفظ المستلم بنجاح.")}
               </p>
             ) : (
               <>
                 <p style={{ color: "#000", fontSize: "14px", fontWeight: "600", margin: "0 0 12px" }}>
-                  Save {recipient?.display_name ?? recipientValue} as a beneficiary?
+                  {tr("Save", "حفظ")} {recipient?.display_name ?? recipientValue} {tr("as a beneficiary?", "كمستفيد؟")}
                 </p>
                 {saveNickname && (
                   <input
@@ -708,7 +711,7 @@ export default function TransferPage() {
                       setSaveNickname(event.target.value);
                       setError("");
                     }}
-                    placeholder="Nickname"
+                    placeholder={tr("Nickname", "الاسم المختصر")}
                     style={{ width: "100%", border: "1.5px solid #E5E7EB", borderRadius: "12px", padding: "11px 14px", fontSize: "14px", color: "#000", outline: "none", boxSizing: "border-box", marginBottom: "10px" }}
                   />
                 )}
@@ -741,7 +744,7 @@ export default function TransferPage() {
                     }}
                     style={{ flex: 1, backgroundColor: loading ? "#86EFAC" : "#111713", color: loading ? "#166534" : "#00D66F", border: loading ? "none" : "1px solid #26372E", borderRadius: "10px", padding: "10px", fontSize: "13px", fontWeight: "800", cursor: loading ? "not-allowed" : "pointer" }}
                   >
-                    {loading ? "Saving..." : "Save"}
+                    {loading ? tr("Saving...", "جارٍ الحفظ...") : tr("Save", "حفظ")}
                   </button>
                   <button
                     type="button"
@@ -749,7 +752,7 @@ export default function TransferPage() {
                     onClick={() => setSkipSave(true)}
                     style={{ flex: 1, backgroundColor: "#E5E7EB", color: "#555", border: "none", borderRadius: "10px", padding: "10px", fontSize: "13px", fontWeight: "700", cursor: loading ? "not-allowed" : "pointer" }}
                   >
-                    Skip
+                    {tr("Skip", "تخطي")}
                   </button>
                 </div>
               </>
@@ -758,7 +761,7 @@ export default function TransferPage() {
         )}
         <button onClick={() => router.push("/dashboard")}
           style={{ width: "100%", backgroundColor: "#111713", color: "#00D66F", fontWeight: "800", fontSize: "15px", border: "1px solid #26372E", borderRadius: "14px", padding: "15px", cursor: "pointer", boxShadow: "0 10px 24px rgba(7,24,14,.14)" }}>
-          Back to Dashboard
+          {tr("Back to Dashboard", "العودة إلى لوحة التحكم")}
         </button>
       </div>
     </Wrap>

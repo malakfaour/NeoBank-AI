@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Camera, Check, Copy } from "lucide-react";
 import api from "@/lib/axios";
 import { useAuthStore } from "@/store/authStore";
+import { usePreferences } from "@/components/providers/AppPreferences";
 import { generateKeyPair, savePrivateKey, clearBiometricKey, getDeviceId, isBiometricEnrolled } from "@/lib/biometric";
 interface UserMe {
   id: string;
@@ -34,6 +35,8 @@ const Wrap = ({ children }: { children: React.ReactNode }) => (
 
 export default function ProfilePage() {
   const router = useRouter();
+  const { locale } = usePreferences();
+  const tr = (en: string, ar: string) => locale === "ar" ? ar : en;
   const setUser = useAuthStore((s) => s.setUser);
   const [user, setLocalUser] = useState<UserMe | null>(null);
   const [wallets, setWallets] = useState<Wallet[]>([]);
@@ -304,7 +307,7 @@ const handleDownloadStatement = async () => {
   if (loading) return (
     <Wrap>
       <div style={{ display: "flex", justifyContent: "center", paddingTop: "80px" }}>
-        <p style={{ color: "#aaa" }}>Loading...</p>
+        <p style={{ color: "#aaa" }}>{tr("Loading...", "جارٍ التحميل...")}</p>
       </div>
     </Wrap>
   );
@@ -317,7 +320,7 @@ const handleDownloadStatement = async () => {
           style={{ width: "36px", height: "36px", borderRadius: "12px", border: "1px solid #E5E7EB", background: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M19 12H5M12 19l-7-7 7-7" stroke="#333" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
         </button>
-        <h2 style={{ fontSize: "18px", fontWeight: "700", color: "#000" }}>My Profile</h2>
+        <h2 style={{ fontSize: "18px", fontWeight: "700", color: "#000" }}>{tr("My Profile", "ملفي الشخصي")}</h2>
       </div>
 
       {error && <div style={{ backgroundColor: "#FEF2F2", border: "1px solid #FECACA", borderRadius: "12px", padding: "12px 16px", color: "#DC2626", fontSize: "13px", marginBottom: "16px" }}>{error}</div>}
@@ -333,7 +336,7 @@ const handleDownloadStatement = async () => {
           }
           <span className="profile-avatar__edit"><Camera size={14} /></span>
         </button>
-        <p className="profile-photo-hint" style={{ fontSize: "12px", color: "#aaa", marginTop: "8px" }}>Tap to change photo</p>
+        <p className="profile-photo-hint" style={{ fontSize: "12px", color: "#aaa", marginTop: "8px" }}>{tr("Tap to change photo", "اضغط لتغيير الصورة")}</p>
         <input ref={fileRef} type="file" accept="image/jpeg,image/png" style={{ display: "none" }}
           onChange={(e) => { const f = e.target.files?.[0]; if (f) handleAvatarUpload(f); e.currentTarget.value = ""; }} />
         <p className="profile-identity__name" style={{ fontSize: "18px", fontWeight: "700", color: "#000", marginTop: "12px" }}>{user?.full_name}</p>
@@ -356,11 +359,11 @@ const handleDownloadStatement = async () => {
 
       {/* Personal Details */}
       <div style={{ backgroundColor: "#fff", borderRadius: "20px", marginBottom: "16px", overflow: "hidden" }}>
-        <p style={{ color: "#aaa", fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px", padding: "16px 16px 8px" }}>Personal Details</p>
+        <p style={{ color: "#aaa", fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px", padding: "16px 16px 8px" }}>{tr("Personal Details", "المعلومات الشخصية")}</p>
         {[
-          { label: "Full name", value: user?.full_name ?? "—", action: () => openSheet("name") },
-          { label: "Email", value: user?.email ?? "—", action: () => openSheet("email") },
-          { label: "Phone", value: user?.phone ?? "—", action: () => openSheet("phone") },
+          { label: tr("Full name", "الاسم الكامل"), value: user?.full_name ?? "—", action: () => openSheet("name") },
+          { label: tr("Email", "البريد الإلكتروني"), value: user?.email ?? "—", action: () => openSheet("email") },
+          { label: tr("Phone", "رقم الهاتف"), value: user?.phone ?? "—", action: () => openSheet("phone") },
         ].map(({ label, value, action }, i, arr) => (
           <div key={label} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", borderBottom: i < arr.length - 1 ? "1px solid #F5F5F5" : "none" }}>
             <div>
@@ -368,7 +371,7 @@ const handleDownloadStatement = async () => {
               <p style={{ fontSize: "14px", fontWeight: "500", color: "#000" }}>{value}</p>
             </div>
             {action && (
-              <button onClick={action} style={{ fontSize: "13px", color: "#00C853", fontWeight: "600", background: "none", border: "none", cursor: "pointer" }}>Change</button>
+              <button onClick={action} style={{ fontSize: "13px", color: "#00C853", fontWeight: "600", background: "none", border: "none", cursor: "pointer" }}>{tr("Change", "تعديل")}</button>
             )}
           </div>
         ))}
@@ -396,7 +399,7 @@ const handleDownloadStatement = async () => {
               padding: "16px 16px 8px",
             }}
           >
-            Account details
+            {tr("Account details", "تفاصيل الحسابات")}
           </p>
 
           {wallets
@@ -420,20 +423,20 @@ const handleDownloadStatement = async () => {
                   <strong>{walletLabel(wallet.currency)}</strong>
                 </div>
                 <div className="profile-wallet-identifiers">
-                  {wallet.account_number && <div><small>Account number</small><p title={wallet.account_number}>{maskAccountNumber(wallet.account_number)}</p></div>}
-                  {wallet.iban && <div><small>IBAN</small><p title={wallet.iban}>{maskIban(wallet.iban)}</p></div>}
+                  {wallet.account_number && <div><small>{tr("Account number", "رقم الحساب")}</small><p title={wallet.account_number}>{maskAccountNumber(wallet.account_number)}</p></div>}
+                  {wallet.iban && <div><small>{tr("IBAN", "الآيبان")}</small><p title={wallet.iban}>{maskIban(wallet.iban)}</p></div>}
                 </div>
                 <div className="profile-copy-group">
                   {wallet.account_number && (
                     <button type="button" onClick={() => handleCopyAccountNumber(wallet.account_number!)} aria-label={`Copy ${walletLabel(wallet.currency)} account number`}>
                       {copiedAccountNumber === wallet.account_number ? <Check size={15} /> : <Copy size={15} />}
-                      <span>{copiedAccountNumber === wallet.account_number ? "Copied" : "Account"}</span>
+                      <span>{copiedAccountNumber === wallet.account_number ? tr("Copied", "تم النسخ") : tr("Account", "الحساب")}</span>
                     </button>
                   )}
                   {wallet.iban && (
                     <button type="button" onClick={() => handleCopyIban(wallet.iban!)} aria-label={`Copy ${walletLabel(wallet.currency)} IBAN`}>
                       {copiedIban === wallet.iban ? <Check size={15} /> : <Copy size={15} />}
-                      <span>{copiedIban === wallet.iban ? "Copied" : "IBAN"}</span>
+                      <span>{copiedIban === wallet.iban ? tr("Copied", "تم النسخ") : tr("IBAN", "الآيبان")}</span>
                     </button>
                   )}
                 </div>
@@ -446,12 +449,12 @@ const handleDownloadStatement = async () => {
         <div style={{ backgroundColor: "#fff", borderRadius: "20px", marginBottom: "16px", padding: "16px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
             <div>
-              <p style={{ color: "#aaa", fontSize: "11px", fontWeight: "700", textTransform: "uppercase" }}>Identity & compliance</p>
+              <p style={{ color: "#aaa", fontSize: "11px", fontWeight: "700", textTransform: "uppercase" }}>{tr("Identity & compliance", "الهوية والامتثال")}</p>
               <p style={{ fontWeight: "700", textTransform: "capitalize" }}>{kycProfile.workflow_status.replaceAll("_", " ")}</p>
             </div>
             {kycProfile.workflow_status !== "approved" && (
               <button onClick={() => router.push("/kyc")} style={{ border: "1px solid #BBF7D0", background: "#F0FDF4", color: "#15803D", borderRadius: "10px", padding: "7px 11px", fontWeight: "700", cursor: "pointer" }}>
-                Edit
+                {tr("Edit", "تعديل")}
               </button>
             )}
           </div>
@@ -472,13 +475,13 @@ const handleDownloadStatement = async () => {
 
       {/* Security */}
       <div style={{ backgroundColor: "#fff", borderRadius: "20px", marginBottom: "16px", overflow: "hidden" }}>
-        <p style={{ color: "#aaa", fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px", padding: "16px 16px 8px" }}>Security</p>
+        <p style={{ color: "#aaa", fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px", padding: "16px 16px 8px" }}>{tr("Security", "الأمان")}</p>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", borderBottom: "1px solid #F5F5F5" }}>
-          <p style={{ fontSize: "14px", fontWeight: "500", color: "#000" }}>Change Passcode</p>
-          <button onClick={() => openSheet("passcode")} style={{ fontSize: "13px", color: "#00C853", fontWeight: "600", background: "none", border: "none", cursor: "pointer" }}>Change</button>
+          <p style={{ fontSize: "14px", fontWeight: "500", color: "#000" }}>{tr("Change Passcode", "تغيير رمز المرور")}</p>
+          <button onClick={() => openSheet("passcode")} style={{ fontSize: "13px", color: "#00C853", fontWeight: "600", background: "none", border: "none", cursor: "pointer" }}>{tr("Change", "تغيير")}</button>
         </div>
        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px" }}>
-  <p style={{ fontSize: "14px", fontWeight: "500", color: "#000" }}>Device-Bound Login</p>
+  <p style={{ fontSize: "14px", fontWeight: "500", color: "#000" }}>{tr("Device-Bound Login", "تسجيل الدخول المرتبط بالجهاز")}</p>
   <button onClick={handleBiometricToggle} disabled={biometricLoading}
     style={{ width: "44px", height: "24px", borderRadius: "12px", border: "none", backgroundColor: biometric ? "#00C853" : "#E5E7EB", cursor: "pointer", position: "relative", transition: "background-color 0.2s" }}>
     <span style={{ position: "absolute", top: "2px", left: biometric ? "22px" : "2px", width: "20px", height: "20px", borderRadius: "50%", backgroundColor: "#fff", transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)" }} />
@@ -488,7 +491,7 @@ const handleDownloadStatement = async () => {
       </div>
 {/* Account Statement */}
 <div style={{ backgroundColor: "#fff", borderRadius: "20px", marginBottom: "16px", overflow: "hidden" }}>
-  <p style={{ color: "#aaa", fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px", padding: "16px 16px 8px" }}>Account Statement</p>
+  <p style={{ color: "#aaa", fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px", padding: "16px 16px 8px" }}>{tr("Account Statement", "كشف الحساب")}</p>
   <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: "12px" }}>
     <div style={{ display: "flex", gap: "8px" }}>
       <input type="month" value={statementMonth} onChange={(e) => setStatementMonth(e.target.value)}
@@ -502,7 +505,7 @@ const handleDownloadStatement = async () => {
     {statementError && <p style={{ color: "#EF4444", fontSize: "12px" }}>{statementError}</p>}
     <button onClick={handleDownloadStatement} disabled={!statementMonth || statementLoading}
       style={{ width: "100%", backgroundColor: !statementMonth ? "#E5E7EB" : "#111713", color: !statementMonth ? "#999" : "#00D66F", fontWeight: "800", fontSize: "14px", border: !statementMonth ? "none" : "1px solid #26372E", borderRadius: "12px", padding: "14px", cursor: !statementMonth ? "not-allowed" : "pointer", boxShadow: statementMonth ? "0 10px 24px rgba(7,24,14,.14)" : "none" }}>
-      {statementLoading ? "Generating..." : "Download Statement"}
+      {statementLoading ? tr("Generating...", "جارٍ التجهيز...") : tr("Download Statement", "تنزيل كشف الحساب")}
     </button>
   </div>
 </div>
@@ -512,7 +515,7 @@ const handleDownloadStatement = async () => {
           onClick={(e) => { if (e.target === e.currentTarget) setSheet("none"); }}>
           <div style={{ backgroundColor: "#fff", borderRadius: "24px 24px 0 0", padding: "24px", width: "100%", boxSizing: "border-box" }}>
             <h3 style={{ fontSize: "16px", fontWeight: "700", color: "#000", marginBottom: "20px" }}>
-              {sheet === "name" ? "Change Name" : sheet === "email" ? "Change Email" : sheet === "phone" ? "Change Mobile" : "Change Passcode"}
+              {sheet === "name" ? tr("Change Name", "تعديل الاسم") : sheet === "email" ? tr("Change Email", "تعديل البريد الإلكتروني") : sheet === "phone" ? tr("Change Mobile", "تعديل رقم الهاتف") : tr("Change Passcode", "تغيير رمز المرور")}
             </h3>
 
             {sheetError && <p style={{ color: "#EF4444", fontSize: "13px", marginBottom: "12px" }}>{sheetError}</p>}
@@ -521,12 +524,12 @@ const handleDownloadStatement = async () => {
             {sheet === "name" && (
               <>
                 <input value={sheetVal} onChange={(e) => setSheetVal(e.target.value)}
-                  placeholder="Full name"
+                  placeholder={tr("Full name", "الاسم الكامل")}
                   style={{ width: "100%", border: "1.5px solid #E5E7EB", borderRadius: "14px", padding: "12px 16px", fontSize: "14px", outline: "none", boxSizing: "border-box", marginBottom: "16px" }} />
                 <button onClick={handleNameChange}
                   disabled={!sheetVal.trim() || sheetLoading}
                   style={{ width: "100%", backgroundColor: !sheetVal.trim() ? "#E5E7EB" : "#00C853", color: !sheetVal.trim() ? "#999" : "#fff", fontWeight: "700", fontSize: "15px", border: "none", borderRadius: "14px", padding: "14px", cursor: "pointer" }}>
-                  {sheetLoading ? "Saving..." : "Save Name"}
+                  {sheetLoading ? tr("Saving...", "جارٍ الحفظ...") : tr("Save Name", "حفظ الاسم")}
                 </button>
               </>
             )}
@@ -534,27 +537,27 @@ const handleDownloadStatement = async () => {
             {(sheet === "email" || sheet === "phone") && (
               <>
                 <input value={sheetVal} onChange={(e) => setSheetVal(e.target.value)}
-                  placeholder={sheet === "email" ? "New email address" : "New phone number"}
+                  placeholder={sheet === "email" ? tr("New email address", "البريد الإلكتروني الجديد") : tr("New phone number", "رقم الهاتف الجديد")}
                   style={{ width: "100%", border: "1.5px solid #E5E7EB", borderRadius: "14px", padding: "12px 16px", fontSize: "14px", outline: "none", boxSizing: "border-box", marginBottom: "12px" }} />
 
                 <button onClick={handleSendProfileOtp}
                   disabled={!sheetVal || sheetLoading || otpCooldown > 0}
                   style={{ width: "100%", backgroundColor: otpCooldown > 0 ? "#E5E7EB" : "#fff", color: otpCooldown > 0 ? "#999" : "#00C853", border: "1.5px solid #00C853", fontWeight: "700", fontSize: "14px", borderRadius: "14px", padding: "12px", cursor: !sheetVal || otpCooldown > 0 ? "not-allowed" : "pointer", marginBottom: "12px" }}>
                   {otpCooldown > 0
-                    ? `Resend code in ${otpCooldown}s`
+                    ? tr(`Resend code in ${otpCooldown}s`, `إعادة إرسال الرمز خلال ${otpCooldown} ث`)
                     : sheetOtpSent
-                      ? "Resend verification code"
-                      : "Send verification code"}
+                      ? tr("Resend verification code", "إعادة إرسال رمز التحقق")
+                      : tr("Send verification code", "إرسال رمز التحقق")}
                 </button>
 
                 <input value={sheetOtp} onChange={(e) => setSheetOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                  placeholder="6-digit OTP code" maxLength={6} disabled={!sheetOtpSent}
+                  placeholder={tr("6-digit OTP code", "رمز التحقق المكوّن من 6 أرقام")} maxLength={6} disabled={!sheetOtpSent}
                   style={{ width: "100%", border: "1.5px solid #E5E7EB", borderRadius: "14px", padding: "12px 16px", fontSize: "14px", outline: "none", boxSizing: "border-box", marginBottom: "16px", backgroundColor: sheetOtpSent ? "#fff" : "#F9FAFB" }} />
 
                 <button onClick={sheet === "email" ? handleEmailChange : handlePhoneChange}
                   disabled={!sheetVal || !sheetOtpSent || sheetOtp.length < 6 || sheetLoading}
                   style={{ width: "100%", backgroundColor: !sheetVal || !sheetOtpSent || sheetOtp.length < 6 ? "#E5E7EB" : "#111713", color: !sheetVal || !sheetOtpSent || sheetOtp.length < 6 ? "#999" : "#00D66F", fontWeight: "800", fontSize: "15px", border: !sheetVal || !sheetOtpSent || sheetOtp.length < 6 ? "none" : "1px solid #26372E", borderRadius: "14px", padding: "15px", cursor: !sheetVal || !sheetOtpSent || sheetOtp.length < 6 || sheetLoading ? "not-allowed" : "pointer" }}>
-                  {sheetLoading ? "Saving..." : "Save"}
+                  {sheetLoading ? tr("Saving...", "جارٍ الحفظ...") : tr("Save", "حفظ")}
                 </button>
               </>
             )}
@@ -567,7 +570,7 @@ const handleDownloadStatement = async () => {
       onChange={(e) =>
         setSheetCurrent(e.target.value.replace(/\D/g, "").slice(0, 6))
       }
-      placeholder="Current passcode"
+      placeholder={tr("Current passcode", "رمز المرور الحالي")}
       maxLength={6}
       style={{
         width: "100%",
@@ -587,7 +590,7 @@ const handleDownloadStatement = async () => {
       onChange={(e) =>
         setSheetNew(e.target.value.replace(/\D/g, "").slice(0, 6))
       }
-      placeholder="New passcode"
+      placeholder={tr("New passcode", "رمز المرور الجديد")}
       maxLength={6}
       style={{
         width: "100%",
@@ -618,10 +621,10 @@ const handleDownloadStatement = async () => {
       }}
     >
       {otpCooldown > 0
-        ? `Resend OTP in ${otpCooldown}s`
+        ? tr(`Resend OTP in ${otpCooldown}s`, `إعادة إرسال الرمز خلال ${otpCooldown} ث`)
         : sheetOtpSent
-        ? "Resend OTP"
-        : "Send OTP"}
+        ? tr("Resend OTP", "إعادة إرسال الرمز")
+        : tr("Send OTP", "إرسال الرمز")}
     </button>
 
     <input
@@ -629,7 +632,7 @@ const handleDownloadStatement = async () => {
       onChange={(e) =>
         setSheetOtp(e.target.value.replace(/\D/g, "").slice(0, 6))
       }
-      placeholder="6-digit OTP code"
+      placeholder={tr("6-digit OTP code", "رمز التحقق المكوّن من 6 أرقام")}
       maxLength={6}
       disabled={!sheetOtpSent}
       style={{
@@ -673,7 +676,7 @@ const handleDownloadStatement = async () => {
         padding: "14px",
       }}
     >
-      {sheetLoading ? "Saving..." : "Change Passcode"}
+      {sheetLoading ? tr("Saving...", "جارٍ الحفظ...") : tr("Change Passcode", "تغيير رمز المرور")}
     </button>
   </>
 )}
