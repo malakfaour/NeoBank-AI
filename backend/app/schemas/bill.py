@@ -28,8 +28,6 @@ class BillPayRequest(BaseModel):
 
     from_wallet_id: int
 
-    card_token: str
-
 
 class BillPayResponse(BaseModel):
     bill_payment_id: int
