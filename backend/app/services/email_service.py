@@ -45,6 +45,15 @@ def send_email(
         )
         return
 
+    if provider == "resend":
+        _send_email_resend(
+            to_email=to_email,
+            subject=subject,
+            body=body,
+            html_body=html_body,
+        )
+        return
+
     raise ValueError(f"Unsupported EMAIL_PROVIDER: {settings.EMAIL_PROVIDER}")
 
 
@@ -127,6 +136,51 @@ def _send_email_sendgrid(
         json=payload,
         timeout=10,
     )
+    response.raise_for_status()
+
+
+def _send_email_resend(
+    to_email: str,
+    subject: str,
+    body: str,
+    html_body: str | None = None,
+) -> None:
+    if not settings.RESEND_API_KEY:
+        raise ValueError(
+            "RESEND_API_KEY is required when EMAIL_PROVIDER=resend"
+        )
+
+    from_name, from_email = parseaddr(settings.EMAIL_FROM)
+
+    if not from_email:
+        raise ValueError("EMAIL_FROM must contain a valid email address")
+
+    sender = (
+        f"{from_name} <{from_email}>"
+        if from_name
+        else from_email
+    )
+
+    payload = {
+        "from": sender,
+        "to": [to_email],
+        "subject": subject,
+        "text": body,
+    }
+
+    if html_body:
+        payload["html"] = html_body
+
+    response = httpx.post(
+        "https://api.resend.com/emails",
+        headers={
+            "Authorization": f"Bearer {settings.RESEND_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+        timeout=10,
+    )
+
     response.raise_for_status()
 
 
