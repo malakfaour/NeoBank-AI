@@ -54,6 +54,15 @@ def send_email(
         )
         return
 
+    if provider == "brevo":
+        _send_email_brevo(
+            to_email=to_email,
+            subject=subject,
+            body=body,
+            html_body=html_body,
+        )
+        return
+
     raise ValueError(f"Unsupported EMAIL_PROVIDER: {settings.EMAIL_PROVIDER}")
 
 
@@ -176,6 +185,53 @@ def _send_email_resend(
         headers={
             "Authorization": f"Bearer {settings.RESEND_API_KEY}",
             "Content-Type": "application/json",
+        },
+        json=payload,
+        timeout=10,
+    )
+
+    response.raise_for_status()
+
+
+def _send_email_brevo(
+    to_email: str,
+    subject: str,
+    body: str,
+    html_body: str | None = None,
+) -> None:
+    if not settings.BREVO_API_KEY:
+        raise ValueError(
+            "BREVO_API_KEY is required when EMAIL_PROVIDER=brevo"
+        )
+
+    from_name, from_email = parseaddr(settings.EMAIL_FROM)
+
+    if not from_email:
+        raise ValueError("EMAIL_FROM must contain a valid email address")
+
+    payload = {
+        "sender": {
+            "name": from_name or "NeoBank Lebanon",
+            "email": from_email,
+        },
+        "to": [
+            {
+                "email": to_email,
+            }
+        ],
+        "subject": subject,
+        "textContent": body,
+    }
+
+    if html_body:
+        payload["htmlContent"] = html_body
+
+    response = httpx.post(
+        "https://api.brevo.com/v3/smtp/email",
+        headers={
+            "api-key": settings.BREVO_API_KEY,
+            "Content-Type": "application/json",
+            "Accept": "application/json",
         },
         json=payload,
         timeout=10,

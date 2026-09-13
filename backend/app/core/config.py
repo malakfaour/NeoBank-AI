@@ -73,7 +73,7 @@ class Settings(BaseSettings):
     FCM_TIMEOUT_SECONDS: float = 5.0
 
     # Email
-    EMAIL_PROVIDER: str = "console"  # console, smtp, sendgrid, resend
+    EMAIL_PROVIDER: str = "console"  # console, smtp, sendgrid, resend, brevo
     EMAIL_FROM: str = "NeoBank Lebanon <no-reply@neobank.local>"
     SMTP_HOST: str | None = None
     SMTP_PORT: int = 587
@@ -82,6 +82,7 @@ class Settings(BaseSettings):
     SMTP_USE_TLS: bool = True
     SENDGRID_API_KEY: str | None = None
     RESEND_API_KEY: str | None = None
+    BREVO_API_KEY: str | None = None
 
     # Twilio (SMS OTP delivery)
     TWILIO_ACCOUNT_SID: str = ""
